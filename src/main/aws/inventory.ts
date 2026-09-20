@@ -1,7 +1,8 @@
 import { EC2Client, paginateDescribeInstances, DescribeRegionsCommand, StartInstancesCommand, StopInstancesCommand } from '@aws-sdk/client-ec2'
 import type { Instance as Ec2Instance } from '@aws-sdk/client-ec2'
 import { SSMClient, paginateDescribeInstanceInformation } from '@aws-sdk/client-ssm'
-import type { Instance, InstanceState, Platform, ScanProgress, ScanResult } from '@shared/types'
+import type { Instance, InstanceState, Platform, ScanProgress, ScanResult, ScanTarget } from '@shared/types'
+import { mergeInventoryScan } from '@shared/inventoryMerge'
 import { listProfiles } from './profiles'
 import { credentialsFor } from './credentials'
 import { getSettings, setCachedInventory, getCachedInventory } from '../store'
@@ -75,8 +76,8 @@ async function scanOne(profile: string, region: string, accountId: string | unde
           }
         }
       }
-    } catch {
-      /* SSM not available in this account/region */
+    } catch (err) {
+      for (const inst of out) inst.ssmError = (err as Error).message
     }
     return out
   } finally {
@@ -95,20 +96,22 @@ export async function enabledRegions(profile: string, region: string): Promise<s
   }
 }
 
-export async function scanAll(onProgress: ProgressFn, onlyProfiles?: string[]): Promise<ScanResult> {
+export async function scanAll(onProgress: ProgressFn, onlyProfiles?: string[], retryTargets?: ScanTarget[]): Promise<ScanResult> {
   const settings = getSettings()
-  const profiles = (await listProfiles()).filter((p) => p.enabled && (!onlyProfiles || onlyProfiles.includes(p.name)))
+  const profiles = (await listProfiles()).filter((p) => p.enabled && (!onlyProfiles || onlyProfiles.includes(p.name)) && (!retryTargets || retryTargets.some((t) => t.profile === p.name)))
+  const targets = profiles.map((p) => retryTargets?.find((t) => t.profile === p.name) ?? { profile: p.name })
   const errors: ScanResult['errors'] = []
   const instances: Instance[] = []
 
   await Promise.all(
     profiles.map(async (p) => {
-      let regions = Array.from(new Set([p.region, ...settings.extraRegions]))
-      if (settings.scanAllRegions) {
+      const requested = retryTargets?.find((t) => t.profile === p.name)?.regions
+      let regions = requested ?? Array.from(new Set([p.region, ...settings.extraRegions]))
+      if (settings.scanAllRegions && !requested) {
         try {
           regions = await enabledRegions(p.name, p.region)
         } catch (err) {
-          errors.push({ profile: p.name, region: p.region, message: (err as Error).message })
+          errors.push({ profile: p.name, region: p.region, message: (err as Error).message, allRegions: true })
           onProgress({ profile: p.name, region: p.region, status: 'error', message: (err as Error).message })
           return
         }
@@ -130,13 +133,7 @@ export async function scanAll(onProgress: ProgressFn, onlyProfiles?: string[]): 
     })
   )
 
-  // Merge with cache for profiles not re-scanned so a partial refresh does not drop hosts.
-  const cached = getCachedInventory()
-  if (onlyProfiles && cached) {
-    for (const i of cached.instances) if (!onlyProfiles.includes(i.profile)) instances.push(i)
-  }
-  instances.sort((a, b) => a.profile.localeCompare(b.profile) || a.name.localeCompare(b.name))
-  const result: ScanResult = { instances, errors, scannedAt: Date.now() }
+  const result = mergeInventoryScan(instances, getCachedInventory(), targets, errors, !!onlyProfiles || !!retryTargets, Date.now())
   setCachedInventory(result)
   return result
 }

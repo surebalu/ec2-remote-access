@@ -10,6 +10,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const ref = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const reconnectRef = useRef<() => void>(() => undefined)
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
 
@@ -28,6 +29,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon())
     term.open(el)
+    term.attachCustomKeyEventHandler((e) => !((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k'))
     fit.fit()
     termRef.current = term
     fitRef.current = fit
@@ -35,6 +37,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     const id = tab.id
     let opened = false
     let disposed = false
+    let opening = false
+    let closingForRetry = false
     const off = window.api.on('ssh:event', (ev) => {
       if (ev.sessionId !== id) return
       if (ev.type === 'data' && ev.data) term.write(ev.data)
@@ -43,18 +47,15 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         term.writeln(`\r\n\x1b[31m[error] ${ev.message}\x1b[0m`)
         updateTab(id, { status: 'error', message: ev.message })
       } else if (ev.type === 'closed') {
-        term.writeln(`\r\n\x1b[90m[${ev.message ?? 'closed'}]  — press any key to close tab\x1b[0m`)
-        updateTab(id, { status: 'closed', message: ev.message })
+        if (closingForRetry) return
+        term.writeln(`\r\n\x1b[90m[${ev.message ?? 'closed'}] — Reconnect to continue. Output is preserved.\x1b[0m`)
+        if (useStore.getState().tabs.find((t) => t.id === id)?.status !== 'error') updateTab(id, { status: 'closed', message: ev.message })
       }
     })
 
     const onData = term.onData((d) => {
       const st = useStore.getState().tabs.find((t) => t.id === id)?.status
-      if (st === 'closed' || st === 'error') {
-        void useStore.getState().closeTab(id)
-        return
-      }
-      void window.api.invoke('ssh:write', id, d)
+      if (st === 'connected') void window.api.invoke('ssh:write', id, d)
     })
     const onResize = term.onResize(({ cols, rows }) => {
       if (opened) void window.api.invoke('ssh:resize', id, cols, rows)
@@ -64,21 +65,35 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     })
     ro.observe(el)
 
-    window.api
-      .invoke('ssh:open', { ...tab.request!, sessionId: id, cols: term.cols, rows: term.rows })
-      .then((info) => {
+    const connect = async (retry = false): Promise<void> => {
+      if (opening || disposed) return
+      opening = true
+      opened = false
+      updateTab(id, { status: 'connecting', message: retry ? 'Reconnecting…' : 'Connecting…' })
+      try {
+        if (retry) {
+          closingForRetry = true
+          await window.api.invoke('ssh:close', id)
+          closingForRetry = false
+          if (disposed) return
+          term.writeln('\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
+        }
+        const info = await window.api.invoke('ssh:open', { ...tab.request!, sessionId: id, cols: term.cols, rows: term.rows })
         if (disposed) return
         opened = true
         updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}` })
         term.focus()
-      })
-      .catch((e: Error) => {
+      } catch (error) {
+        const e = error as Error
         if (disposed || /cancelled/.test(e.message)) return
         useStore.getState().noteOperationError(e.message)
         updateTab(id, { status: 'error', message: e.message })
         term.writeln(`\r\n\x1b[31m[connect failed] ${e.message}\x1b[0m`)
         toast('error', e.message)
-      })
+      } finally { opening = false; closingForRetry = false }
+    }
+    reconnectRef.current = () => void connect(true)
+    void connect()
 
     return () => {
       disposed = true
@@ -102,12 +117,17 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
 
   return (
     <div className="flex h-full flex-col">
-      <div className="panel flex items-center gap-2 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
+      <div className="panel flex flex-wrap items-center gap-2 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
         <span className="muted truncate">{tab.message ?? 'Connecting…'}</span>
         <span className="flex-1" />
         <HostActions instanceKey={tab.instanceKey} current="ssh" />
+        {(tab.status === 'closed' || tab.status === 'error') && <>
+          <button className="btn btn-primary" onClick={() => reconnectRef.current()}>Reconnect</button>
+          <button className="btn" title="Open a new session with different connection settings" onClick={() => useStore.getState().set({ connectFor: { kind: 'ssh', key: tab.instanceKey } })}>Edit connection</button>
+          <button className="btn" onClick={() => void window.api.invoke('clipboard:write', tab.message ?? 'Disconnected').then(() => toast('success', 'Connection message copied'))}>Copy message</button>
+        </>}
         <button className="btn !py-0.5" onClick={() => void useStore.getState().closeTab(tab.id)}>
-          Disconnect
+          {tab.status === 'closed' || tab.status === 'error' ? 'Close tab' : 'Disconnect'}
         </button>
       </div>
       <div ref={ref} className="min-h-0 w-full flex-1" style={{ background: isDarkMode() ? '#0f1115' : '#ffffff' }} />

@@ -1,21 +1,9 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import { routeOf, useStore, visibleInstances, type OsFilter, type ReachFilter, type StateFilter } from '../store'
+import { routeOf, useStore, visibleInstances } from '../store'
 import { MANUAL_PROFILE, manualKey } from '@shared/manual'
 import { openDefaultFor } from '../quickConnect'
 import { metaFor } from '../colors'
 import { Icon } from './icons'
-
-function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }): ReactElement {
-  return (
-    <div className="seg">
-      {options.map(([v, label]) => (
-        <button key={v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>
-          {label}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 const authColor: Record<string, string> = {
   ok: 'var(--ok)',
@@ -55,7 +43,7 @@ export default function Sidebar(): ReactElement {
   }, [])
 
   /** Filter clicks always land on the Hosts view, even while a session tab is in front. */
-  const nav = (patch: Parameters<typeof s.set>[0]): void => s.set({ ...patch, activeTab: 'hosts' })
+  const nav = (patch: Parameters<typeof s.set>[0]): void => s.set({ selectedKey: null, detailsFor: null, ...patch, activeTab: 'hosts' })
 
   // Folders in "Other servers" can expand to list their servers; remembered per machine.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -90,7 +78,7 @@ export default function Sidebar(): ReactElement {
             <button
               className={`nav-row w-full py-1 text-left text-[11px] ${s.selectedKey === i.key && s.favoritesOnly ? 'on' : ''} ${i.state === 'running' ? '' : 'opacity-60'}`}
               title={`${i.manual ? i.instanceId : `${i.instanceId} · ${i.profile}`} · ${i.state}\nDouble-click to open ${i.platform === 'windows' ? 'RDP' : 'SSH'}`}
-              onClick={() => nav({ favoritesOnly: true, profileFilter: null, selectedKey: i.key })}
+              onClick={() => s.revealHost(i.key)}
               onDoubleClick={() => i.state === 'running' && openDefaultFor(i.key)}
             >
               <span className="dot" style={{ background: i.state === 'running' ? 'var(--ok)' : 'var(--muted)' }} />
@@ -116,7 +104,7 @@ export default function Sidebar(): ReactElement {
             <button
               className={`nav-row w-full py-1 text-left text-[11px] ${s.selectedKey === i.key && s.profileFilter === profile ? 'on' : ''} ${i.state === 'running' ? '' : 'opacity-60'}`}
               title={`${i.instanceId} · ${i.state}${i.privateIp ? ` · ${i.privateIp}` : ''}${i.publicIp ? ` · ${i.publicIp}` : ''}\nDouble-click to open ${i.platform === 'windows' ? 'RDP' : 'SSH'}`}
-              onClick={() => nav({ profileFilter: profile, favoritesOnly: false, selectedKey: i.key })}
+              onClick={() => s.revealHost(i.key)}
               onDoubleClick={() => i.state === 'running' && openDefaultFor(i.key)}
             >
               <span className="dot" style={{ background: i.state === 'running' ? 'var(--ok)' : 'var(--muted)' }} />
@@ -142,7 +130,7 @@ export default function Sidebar(): ReactElement {
               <button
                 className={`nav-row w-full py-1 text-left text-[11px] ${s.selectedKey === key && s.profileFilter === filterKey ? 'on' : ''}`}
                 title={`${h.host}\nDouble-click to open ${h.platform === 'windows' ? 'RDP' : 'SSH'}`}
-                onClick={() => nav({ profileFilter: filterKey, favoritesOnly: false, selectedKey: key })}
+                onClick={() => s.revealHost(key)}
                 onDoubleClick={() => openDefaultFor(key)}
               >
                 {h.platform === 'windows' ? <Icon.windows className="muted" /> : <Icon.linux className="muted" />}
@@ -245,7 +233,7 @@ export default function Sidebar(): ReactElement {
           [
             ['Hosts', instances.length, 'violet'],
             ['Running', running, 'emerald'],
-            ['Reachable', reachable, 'sky']
+            ['Routes', reachable, 'sky']
           ] as [string, number, string][]
         ).map(([label, n, color]) => (
           <div key={label} className="stat" data-accent={color}>
@@ -320,7 +308,7 @@ export default function Sidebar(): ReactElement {
                     await s.refreshProfiles()
                   }}
                 />
-                <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => nav({ profileFilter: p.name })} onDoubleClick={() => toggleFolder(`profile:${p.name}`)} data-accent={metaFor(p.name, s.settings).color}>
+                <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => nav({ profileFilter: p.name, favoritesOnly: false })} onDoubleClick={() => toggleFolder(`profile:${p.name}`)} data-accent={metaFor(p.name, s.settings).color}>
                   <span className="relative">
                     <span className="avatar">{metaFor(p.name, s.settings).label.slice(0, 2).toUpperCase()}</span>
                     <span
@@ -437,14 +425,6 @@ export default function Sidebar(): ReactElement {
           </li>
         )}
       </ul>
-
-      {/* Filters */}
-      <div className="mt-4 space-y-2 px-3">
-        <span className="section-title">Filters</span>
-        <Seg<OsFilter> value={s.osFilter} onChange={(v) => s.set({ osFilter: v })} options={[['all', 'All OS'], ['linux', 'Linux'], ['windows', 'Windows']]} />
-        <Seg<StateFilter> value={s.stateFilter} onChange={(v) => s.set({ stateFilter: v })} options={[['running', 'Running'], ['all', 'Any state']]} />
-        <Seg<ReachFilter> value={s.reachFilter} onChange={(v) => s.set({ reachFilter: v })} options={[['all', 'All'], ['reachable', 'Reachable'], ['unreachable', 'Unreachable']]} />
-      </div>
 
       {/* Footer */}
       <div className="mt-auto space-y-2 border-t p-3" style={{ borderColor: 'var(--border)' }}>

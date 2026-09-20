@@ -37,7 +37,7 @@ function sshParams(key: string): SshParams | null {
   }
   const pd = s.settings?.profileDefaults?.[i.profile]
   const ov = s.settings?.overrides[key]
-  const ready = i.manual ? !!ov?.sshUser : !!pd && (!!pd.sshUser || !!pd.identityFile)
+  const ready = !!ov?.sshUser || !!ov?.identityFile || !!pd?.sshUser || !!pd?.identityFile
   if (!ready) return null
   // The main process fills user/identity from overrides and account defaults when these are undefined.
   return { user: ov?.sshUser, port: ov?.sshPort, identityFile: ov?.identityFile, useAgent: ov?.useAgent, forceRoute: ov?.forceRoute }

@@ -3,7 +3,7 @@ import type {
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
-  SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent
+  SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -22,7 +22,7 @@ export interface IpcApi {
   'sso:loginSession': (sessionName: string) => Promise<SsoDeviceFlow>
   'shell:open': (url: string) => Promise<void>
   'inventory:cached': () => Promise<ScanResult | null>
-  'inventory:scan': (profiles?: string[]) => Promise<ScanResult>
+  'inventory:scan': (profiles?: string[], retryTargets?: ScanTarget[]) => Promise<ScanResult>
   'settings:get': () => Promise<Settings>
   'settings:set': (patch: Partial<Settings>) => Promise<Settings>
   'route:decide': (instanceKey: string, kind: 'ssh' | 'rdp', force?: 'direct' | 'ssm') => Promise<RouteDecision>

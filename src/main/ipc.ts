@@ -67,7 +67,7 @@ export function registerIpc(): void {
     if (/^https?:\/\//.test(url)) await shell.openExternal(url)
   })
   handle('inventory:cached', async () => getCachedInventory())
-  handle('inventory:scan', (profiles) => scanAll((p) => send('scan:progress', p), profiles))
+  handle('inventory:scan', (profiles, targets) => scanAll((p) => send('scan:progress', p), profiles, targets))
   handle('settings:get', async () => getSettings())
   handle('settings:set', async (patch) => setSettings(patch))
   handle('route:decide', async (key, _kind, force) => decideRoute(findInstance(key), force))

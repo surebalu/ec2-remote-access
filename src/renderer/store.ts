@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow } from '@shared/types'
+import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
+import { clearHostFilters } from '@shared/hostSearch'
 
 export interface RdpTabRequest {
   user: string
@@ -56,6 +57,11 @@ interface State {
   profileFilter: string | null
   favoritesOnly: boolean
   selectedKey: string | null
+  detailsFor: string | null
+  quickSwitcherOpen: boolean
+  recentHosts: string[]
+  clearFilters: () => void
+  revealHost: (key: string) => void
   connectFor: { kind: 'ssh' | 'rdp' | 'sftp'; key: string } | null
   passwordFor: string | null
   settingsOpen: boolean
@@ -86,7 +92,8 @@ interface State {
   /** Runs `aws sso login` for the shared SSO session (same as the user's `aws-login` alias), then re-checks and rescans. */
   refreshToken: () => Promise<void>
   loggingIn: boolean
-  scan: (profiles?: string[]) => Promise<void>
+  scan: (profiles?: string[], retryTargets?: ScanTarget[]) => Promise<void>
+  retryFailedScans: () => Promise<void>
   saveSettings: (patch: Partial<Settings>) => Promise<void>
   saveManualHost: (host: ManualHost, override: HostOverride) => Promise<void>
   /** Create or rename a folder and set its color. `oldName` null = create. */
@@ -132,6 +139,22 @@ export const useStore = create<State>((set, get) => ({
   profileFilter: null,
   favoritesOnly: false,
   selectedKey: null,
+  detailsFor: null,
+  quickSwitcherOpen: false,
+  recentHosts: readRecentHosts(),
+  clearFilters: () => set({ ...clearHostFilters }),
+  revealHost: (key) => {
+    const st = get()
+    const inst = allInstances(st).find((i) => i.key === key)
+    if (!inst) return
+    const group = inst.manual ? `group:${inst.region}` : inst.profile
+    const collapsedGroups = st.settings?.collapsedGroups.filter((g) => !['fav', group, `os:${inst.platform}`].includes(g)) ?? []
+    set({ ...clearHostFilters, activeTab: 'hosts', selectedKey: key, detailsFor: key,
+      settings: st.settings ? { ...st.settings, collapsedGroups } : undefined })
+    if (collapsedGroups.length !== st.settings?.collapsedGroups.length) {
+      void get().saveSettings({ collapsedGroups }).catch((e: Error) => get().toast('error', e.message))
+    }
+  },
   connectFor: null,
   passwordFor: null,
   settingsOpen: false,
@@ -308,11 +331,11 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  scan: async (profiles) => {
+  scan: async (profiles, retryTargets) => {
     if (get().scanning) return
     set({ scanning: true, progress: {} })
     try {
-      const r = await window.api.invoke('inventory:scan', profiles)
+      const r = await window.api.invoke('inventory:scan', profiles, retryTargets)
       set({ instances: r.instances, scanErrors: r.errors, scannedAt: r.scannedAt })
       if (r.errors.length) {
         get().toast('error', `${r.errors.length} account/region scan(s) failed. See sidebar.`)
@@ -324,6 +347,17 @@ export const useStore = create<State>((set, get) => ({
     } finally {
       set({ scanning: false })
     }
+  },
+
+  retryFailedScans: async () => {
+    const targets = new Map<string, ScanTarget>()
+    for (const e of get().scanErrors) {
+      const target = targets.get(e.profile)
+      if (e.allRegions) targets.set(e.profile, { profile: e.profile })
+      else if (!target) targets.set(e.profile, { profile: e.profile, regions: [e.region] })
+      else if (target.regions && !target.regions.includes(e.region)) target.regions.push(e.region)
+    }
+    if (targets.size) await get().scan(undefined, [...targets.values()])
   },
 
   saveManualHost: async (host, override) => {
@@ -419,7 +453,15 @@ export const useStore = create<State>((set, get) => ({
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id })),
-  updateTab: (id, patch) => set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
+  updateTab: (id, patch) => set((s) => {
+    const tab = s.tabs.find((t) => t.id === id)
+    const recentHosts = tab && patch.status === 'connected'
+      ? [tab.instanceKey, ...s.recentHosts.filter((key) => key !== tab.instanceKey)].slice(0, 20) : s.recentHosts
+    if (recentHosts !== s.recentHosts) {
+      try { localStorage.setItem('ui.recentHosts', JSON.stringify(recentHosts)) } catch { /* storage unavailable */ }
+    }
+    return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)), recentHosts }
+  }),
   closeTab: async (id) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
@@ -435,6 +477,13 @@ export const useStore = create<State>((set, get) => ({
 }))
 
 const SIDEBAR_KEY = 'ui.sidebarCollapsed'
+
+function readRecentHosts(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem('ui.recentHosts') ?? '[]')
+    return Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string').slice(0, 20) : []
+  } catch { return [] }
+}
 
 function readSidebarPref(): boolean {
   try {
@@ -485,6 +534,7 @@ export function routeOf(i: Instance, settings?: Settings): { route: Route; reaso
   if (settings?.preferDirect && i.publicIp) return { route: 'direct', reason: 'Public IP' }
   if (i.ssmOnline) return { route: 'ssm', reason: 'SSM Session Manager' }
   if (i.publicIp) return { route: 'direct', reason: 'Public IP (no SSM)' }
+  if (i.ssmError) return { route: 'unreachable', reason: `SSM status unknown: ${i.ssmError}. Open connection options to try a private IP over VPN.` }
   return { route: 'unreachable', reason: i.ssmPingStatus ? `SSM ${i.ssmPingStatus}` : 'Private, no SSM' }
 }
 

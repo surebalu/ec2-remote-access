@@ -12,13 +12,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm install                 # pnpm 11 workspace; native builds gated by pnpm-workspace.yaml allowBuilds
 pnpm dev                     # electron-vite dev with HMR (main/preload rebuild + renderer hot reload)
 pnpm typecheck               # tsc -p tsconfig.node.json && tsc -p tsconfig.web.json (two separate projects)
+pnpm test                    # node --test over tests/*.test.ts (runs .ts directly via --experimental-strip-types)
+node --experimental-strip-types --test tests/transfers.test.ts   # a single test file
 pnpm build                   # electron-vite build -> out/
+pnpm test:ui                 # Electron smoke test of the built renderer with synthetic hosts; run after pnpm build
 pnpm dist                    # build + electron-builder DMG/zip for arm64 and x64 -> dist/
 pnpm dist:arm64              # arm64 only (faster local packaging)
 scripts/release.sh --bump patch [--publish]   # bump, typecheck, build; --publish uploads to S3 (needs UPDATE_URL, S3_URI)
 ```
 
-There is no test suite and no linter configured; `pnpm typecheck` is the only gate and `scripts/release.sh` runs it before building. Always run it after touching `src/shared/` since both tsconfig projects include that directory.
+No linter is configured. `pnpm typecheck` is the gate `scripts/release.sh` runs before building; run it after touching `src/shared/` since both tsconfig projects include that directory.
+
+Tests live in `tests/` and use Node's built-in runner with no transpile step, so test files import source as `../src/.../file.ts` (explicit `.ts` extension) and can only cover code with no Electron or DOM imports: currently `src/shared/inventoryMerge.ts` and the SFTP `safeTransfer`/`destinations` modules. `tests/ui-smoke.cjs` launches Electron against `out/renderer` with a stub preload (`tests/ui-preload.cjs`), blocks network requests, uses a temp app-data dir, and writes screenshots to a temp directory it prints. It never reads `~/.aws` or opens real sessions.
 
 Dev-only env vars read in `src/main/index.ts`: `RDP_DEBUG_PORT` enables Chromium remote debugging when running under `pnpm dev`.
 
@@ -46,12 +51,12 @@ The preload (`src/preload/index.ts`) exposes exactly two typed functions on `win
 
 ### Main process (`src/main`)
 
-- `aws/`: `profiles.ts` parses `~/.aws/config` + `credentials`; `awsfiles.ts` does INI section read/write for those files; `credentials.ts` caches a per-profile SDK credential provider (SSO profiles resolve via `fromSSO`, static via `fromIni`, deliberately matching AWS CLI precedence, not the JS SDK default) and classifies auth errors into `login-required` vs `error`; `sso.ts` implements the IAM Identity Center device-code flow without the AWS CLI and writes a CLI-compatible token cache; `inventory.ts` scans EC2 + SSM `DescribeInstanceInformation` per profile/region and keeps the in-memory instance list (`findInstance(key)`); `passwords.ts` decrypts `GetPasswordData` with a local `.pem`.
+- `aws/`: `profiles.ts` parses `~/.aws/config` + `credentials`; `awsfiles.ts` does INI section read/write for those files; `credentials.ts` caches a per-profile SDK credential provider (SSO profiles resolve via `fromSSO`, static via `fromIni`, deliberately matching AWS CLI precedence, not the JS SDK default) and classifies auth errors into `login-required` vs `error`; `sso.ts` implements the IAM Identity Center device-code flow without the AWS CLI and writes a CLI-compatible token cache; `inventory.ts` scans EC2 + SSM `DescribeInstanceInformation` per profile/region and keeps the in-memory instance list (`findInstance(key)`); results are folded in through `src/shared/inventoryMerge.ts`, which keeps the last known hosts for a profile/region whose scan failed (marked `staleReason`/`lastSeenAt`, shown as a Cached badge) while a successful empty scan still removes vanished hosts; `inventory:scan` accepts `retryTargets` to rescan just the failed profile/regions; `passwords.ts` decrypts `GetPasswordData` with a local `.pem`.
 - `store.ts`: `electron-store` with `settings` and `inventory` keys. `defaultSettings` is merged over stored settings on every `getSettings()`, so adding a setting means adding a default there and a field in `Settings`.
 - `connect/route.ts`: `decideRoute(inst, force)` picks `ssm | direct | unreachable | not-running` from per-host overrides, the `preferDirect` setting, `ssmOnline`, and IPs. Also resolves default SSH/RDP user and identity file with precedence explicit > host override > account (`profileDefaults`) > global. All connect paths (SSH, SFTP, RDP, external terminal) funnel through this.
 - `ssm/session.ts`: starts an SSM session with the SDK, then spawns `session-manager-plugin` with the same argv the AWS CLI uses and wraps its stdio in a `Duplex`. `startSshStream` (document `AWS-StartSSHSession`) feeds ssh2's `sock` option; `startPortForward` (`AWS-StartPortForwardingSession`) backs RDP tunnels.
 - `ssh/session.ts` + `ssh/clients.ts`: ssh2 shell sessions keyed by session id, streaming to the renderer via `ssh:event`. `clients.ts` is a registry of live ssh2 clients so an SFTP tab can reuse an already-authenticated SSH connection to the same host/user (and vice versa) instead of logging in again.
-- `sftp/session.ts` + `localfs.ts`: SFTP browsing and a transfer queue (progress pushed via `sftp:transfer`), plus the local-filesystem half of the dual-pane Files tab.
+- `sftp/session.ts` + `localfs.ts`: SFTP browsing and a transfer queue (progress pushed via `sftp:transfer`), plus the local-filesystem half of the dual-pane Files tab. `sftp/safeTransfer.ts` writes every transfer to a temporary sibling and publishes it only on completion, refusing an existing destination unless the user chose Replace (Keep both / Skip / Replace conflict flow); `sftp/destinations.ts` provides the local and remote `TransferDestination` implementations. Remote Replace needs the OpenSSH `posix-rename` extension and fails without unlinking otherwise.
 - `rdp/`: `cleanpath.ts` is a localhost WebSocket gateway implementing IronRDP's **RDCleanPath** handshake (X.224 forward, TLS to the target, hand the cert chain back, then relay bytes). `sessions.ts` (`prepareRdp`) resolves the route, opens an SSM port-forward if needed, registers a one-time token with the proxy, and returns a `ws://` URL the renderer's IronRDP component connects to. `launcher.ts` is the alternative hand-off to Microsoft Windows App via a generated `.rdp` file. `der.ts` is minimal ASN.1 DER helpers for the handshake.
 - `tunnels.ts`: registry of SSM port-forward tunnels shown in the renderer's `TunnelBar`; broadcasts `tunnels:changed`.
 - `creds.ts`: per-instance RDP credentials encrypted with Electron `safeStorage` (Keychain-backed).
@@ -61,7 +66,8 @@ The preload (`src/preload/index.ts`) exposes exactly two typed functions on `win
 
 - One zustand store, `store.ts` (`useStore`), holds all app state: profiles/statuses, instances, scan progress, tunnels, open `tabs` (kind `ssh | rdp | sftp`), filters, and which dialog is open. Actions that touch main live on the store and call `window.api.invoke`. `allInstances(state)` merges AWS instances with manual hosts.
 - The store's `init()` subscribes to `IpcEvents` (`window.api.on`) and maps them into state; `quickConnect.ts` holds the one-click openers (double-click → RDP for Windows, SSH otherwise) that skip the connect dialog when overrides/saved creds make the parameters known.
-- Session tabs: `TerminalTab` (xterm.js over `ssh:*`), `SftpTab`, `RdpTab` (the `@devolutions/iron-remote-desktop` web component + wasm backend; wasm is initialized once, with auto-reconnect back-off and a fatal-error table for IronRDP error kinds).
+- `QuickSwitcher` (⌘K) searches hosts with `src/shared/hostSearch.ts` (`matchesHost` covers name, IPs, account, region, tags), lists recent successful connections and favorites first, and either opens a session via `quickConnect.ts` or switches to an already-open tab. `HostFilters` and `HostDetails` are the filter bar and the per-host inspector; `clearHostFilters` in `hostSearch.ts` is the patch applied when selecting a host that current filters would hide.
+- Session tabs: `TerminalTab` (xterm.js over `ssh:*`; on disconnect it keeps the buffer and offers Reconnect, which re-runs the same connect parameters, plus Edit connection), `SftpTab`, `RdpTab` (the `@devolutions/iron-remote-desktop` web component + wasm backend; wasm is initialized once, with auto-reconnect back-off and a fatal-error table for IronRDP error kinds).
 - Manual (non-AWS) hosts are modelled as `Instance` objects via `src/shared/manual.ts` (`manualToInstance`, key `manual/<id>`, profile `servers`) so tables, routing and connect dialogs treat them uniformly; their connection settings live in `Settings.overrides[key]`.
 
 ### Identity keys

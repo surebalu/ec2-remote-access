@@ -161,6 +161,7 @@ export async function openSsh(req: SshOpenRequest): Promise<SshSessionInfo> {
       )
     })
     client.on('error', (err) => {
+      if (cancelled()) { if (!done) reject(new Error('cancelled')); return }
       emit({ sessionId, type: 'error', message: err.message })
       if (!done) {
         void closeSsh(sessionId)
@@ -168,10 +169,12 @@ export async function openSsh(req: SshOpenRequest): Promise<SshSessionInfo> {
       }
     })
     client.on('close', () => {
+      // A previous client may finish closing after this ID has been reconnected.
+      if (cancelled()) { if (!done) reject(new Error('cancelled')); return }
       if (done) {
         emit({ sessionId, type: 'closed', message: 'Disconnected' })
-        void closeSsh(sessionId)
-      }
+      } else reject(new Error('SSH connection closed before the session was ready.'))
+      void closeSsh(sessionId)
     })
     client.connect(base)
   })
@@ -184,10 +187,11 @@ function openShell(live: Live, req: SshOpenRequest): Promise<void> {
   return new Promise((resolve, reject) => {
     live.client.shell({ term: 'xterm-256color', cols: req.cols, rows: req.rows }, (err, channel) => {
       if (err) return reject(err)
+      if (sessions.get(sessionId) !== live) { channel.close(); reject(new Error('cancelled')); return }
       live.channel = channel
       const dec = new StringDecoder('utf8')
-      channel.on('data', (d: Buffer) => emit({ sessionId, type: 'data', data: dec.write(d) }))
-      channel.stderr.on('data', (d: Buffer) => emit({ sessionId, type: 'data', data: d.toString() }))
+      channel.on('data', (d: Buffer) => { if (sessions.get(sessionId) === live) emit({ sessionId, type: 'data', data: dec.write(d) }) })
+      channel.stderr.on('data', (d: Buffer) => { if (sessions.get(sessionId) === live) emit({ sessionId, type: 'data', data: d.toString() }) })
       channel.on('close', () => {
         if (sessions.get(sessionId) === live) {
           emit({ sessionId, type: 'closed', message: 'Connection closed' })

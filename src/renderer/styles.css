@@ -321,3 +321,17 @@ html[data-sidebar="collapsed"] .titlebar .brand > * { display: none; }
 .progress > span { display: block; height: 100%; border-radius: 3px; transition: width .15s linear; }
 /* Drop target highlight for the Files panes */
 .drop-active { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }
+
+/* Host navigation and details share the existing palette in either appearance. */
+.filter-chip { display: inline-flex; align-items: center; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--accent-soft); color: var(--text-2); }
+.filter-chip:hover { border-color: var(--accent); }
+.scan-notice { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.host-details { width: 330px; flex-shrink: 0; border-color: var(--border); }
+.detail-value:hover { color: var(--accent); }
+.switcher-result { display: flex; width: 100%; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; }
+.switcher-result.on { background: var(--accent-soft); border-color: var(--accent); }
+.switcher-result svg { flex-shrink: 0; color: var(--accent); }
+button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1250px) {
+  .host-details { position: absolute; z-index: 10; right: 0; top: 0; bottom: 0; box-shadow: var(--shadow-lg); }
+}

@@ -15,6 +15,9 @@ import EditAccountDialog from './components/EditAccountDialog'
 import Welcome from './components/Welcome'
 import AuthBanner from './components/AuthBanner'
 import SsoWaitDialog from './components/SsoWaitDialog'
+import HostDetails from './components/HostDetails'
+import QuickSwitcher from './components/QuickSwitcher'
+import { Icon } from './components/icons'
 
 export default function App(): ReactElement {
   const init = useStore((s) => s.init)
@@ -26,6 +29,7 @@ export default function App(): ReactElement {
   const folderEditor = useStore((s) => s.folderEditor)
   const addAccountOpen = useStore((s) => s.addAccountOpen)
   const editAccount = useStore((s) => s.editAccount)
+  const quickSwitcherOpen = useStore((s) => s.quickSwitcherOpen)
   const profiles = useStore((s) => s.profiles)
   const manualCount = useStore((s) => s.settings?.manualHosts.length ?? 0)
   const settingsLoaded = useStore((s) => !!s.settings)
@@ -34,6 +38,21 @@ export default function App(): ReactElement {
   useEffect(() => {
     void init()
   }, [init])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.repeat) return
+        const state = useStore.getState()
+        if (!state.quickSwitcherOpen && document.querySelector('.modal-backdrop')) return
+        state.set({ quickSwitcherOpen: !state.quickSwitcherOpen })
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   // The embedded RDP client registers window-level keydown/keyup handlers that swallow keys while it thinks it is
   // capturing input. Registered here first (bubble phase, same target), this guard runs ahead of it and stops the
@@ -63,12 +82,13 @@ export default function App(): ReactElement {
           <span>EC2 Remote Access</span>
         </div>
         <TerminalTabs />
+        <button className="btn btn-ghost no-drag mr-3 shrink-0" title="Find a host or session (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().set({ quickSwitcherOpen: true })}><Icon.search /><kbd>⌘K</kbd></button>
       </header>
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />
-          <div className={`min-h-0 flex-1 ${activeTab === 'hosts' ? '' : 'hidden'}`}>{showWelcome ? <Welcome /> : <InstanceTable />}</div>
+          <div className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
           <SessionPanes />
           <TunnelBar />
         </main>
@@ -81,6 +101,7 @@ export default function App(): ReactElement {
       {addAccountOpen && <AddAccountDialog />}
       {editAccount && <EditAccountDialog key={editAccount} />}
       <SsoWaitDialog />
+      {quickSwitcherOpen && <QuickSwitcher />}
       <Toasts />
     </div>
   )

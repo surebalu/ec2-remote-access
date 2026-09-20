@@ -47,6 +47,10 @@ export interface Instance {
   ssmOnline: boolean
   ssmPingStatus?: string
   ssmAgentVersion?: string
+  ssmError?: string
+  /** Last successful EC2 scan, retained when a refresh fails. */
+  lastSeenAt?: number
+  staleReason?: string
   tags: Record<string, string>
   /** true for servers added by hand (not from AWS) */
   manual?: boolean
@@ -139,8 +143,14 @@ export interface ScanProgress {
 
 export interface ScanResult {
   instances: Instance[]
-  errors: { profile: string; region: string; message: string }[]
+  errors: { profile: string; region: string; message: string; allRegions?: boolean }[]
   scannedAt: number
+}
+
+export interface ScanTarget {
+  profile: string
+  /** Omitted to refresh the profile's configured regions. */
+  regions?: string[]
 }
 
 export interface SshOpenRequest {
@@ -319,7 +329,7 @@ export interface SftpTransfer {
   remotePath: string
   total: number
   done: number
-  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'skipped'
   message?: string
 }
 

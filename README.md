@@ -12,6 +12,12 @@ A macOS (Apple Silicon) desktop app that scans all of your AWS accounts for EC2 
 - **Refresh token** button runs `aws sso login --sso-session <name>` (same as an `aws-login` alias), then re-checks every account and rescans.
 - **Windows password**: fetches `GetPasswordData` and decrypts it locally with your key pair `.pem`.
 - Start / stop instances, copy IPs and SSM CLI commands, per-host overrides (user, port, forced route, key).
+- **Quick switcher (`⌘K`)**: search hosts and open sessions by name, IP, account, region or tag. Recent successful connections and favorites appear first. Use arrow keys and Enter to connect/switch, or Shift+Enter for host details.
+- **Host details**: click a host name to inspect tags, network identifiers, AMI, SSM status, connection options, and the last successful scan. Click a value to copy it.
+- Filters stay above the host table when the sidebar is collapsed. Selecting a host in the sidebar clears conflicting filters and reveals its group.
+- Failed account/region scans preserve the last known hosts with a **Cached** badge and a retry action. Successful empty scans still remove hosts that are no longer present.
+- Disconnected SSH tabs retain their output and offer **Reconnect**, **Edit connection**, and **Copy message**.
+- SFTP transfers offer **Keep both / Skip / Replace** when the destination exists. Files are transferred to temporary siblings and published only after completion; cancellation leaves existing destination files intact. Replacing remote files requires the server's OpenSSH atomic-rename extension. If unavailable, use Keep both. A lost connection can leave a hidden `.part` file for later cleanup.
 
 ## Adding AWS accounts (for teammates)
 
@@ -40,7 +46,12 @@ The login stores a refresh token, so the SDK silently renews the access token fo
 pnpm install
 pnpm dev          # hot-reloading Electron app
 pnpm typecheck
+pnpm test         # inventory/transfer regression tests; Node with TypeScript stripping support
+pnpm build
+pnpm test:ui      # isolated Electron renderer checks and screenshots; run after build
 ```
+
+The UI smoke test uses synthetic hosts, temporary app data, and blocked network requests. It does not load your AWS configuration or open real remote sessions. Screenshots are saved to a temporary directory printed by the test.
 
 ## Install (teammates)
 

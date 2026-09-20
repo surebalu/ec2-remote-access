@@ -1,11 +1,13 @@
 import type { ReactElement } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { matchesHost } from '@shared/hostSearch'
 import type { Instance } from '@shared/types'
 import { allInstances, routeOf, useStore, visibleInstances } from '../store'
 import { openDefaultFor, openFilesFor, openRdpFor, openSshFor } from '../quickConnect'
 import { Icon } from './icons'
 import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
+import HostFilters, { ScanNotice } from './HostFilters'
 
 type SortKey = 'name' | 'profile' | 'state' | 'osHint' | 'publicIp' | 'privateIp' | 'instanceType'
 
@@ -35,6 +37,11 @@ export default function InstanceTable(): ReactElement {
   const s = useStore()
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 })
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null)
+  const tableRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const row = [...(tableRef.current?.querySelectorAll<HTMLElement>('[data-host-key]') ?? [])].find((el) => el.dataset.hostKey === s.selectedKey)
+    row?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [s.selectedKey, s.profileFilter, s.search, s.osFilter, s.stateFilter, s.reachFilter, s.settings?.collapsedGroups])
 
   const rows = useMemo(() => {
     const q = s.search.trim().toLowerCase()
@@ -55,8 +62,7 @@ export default function InstanceTable(): ReactElement {
       })
       .filter((i) => {
         if (!q) return true
-        const hay = [i.name, i.instanceId, i.publicIp, i.privateIp, i.osHint, i.profile, i.instanceType, ...Object.values(i.tags)].join(' ').toLowerCase()
-        return q.split(/\s+/).every((t) => hay.includes(t))
+        return matchesHost(i, q)
       })
       .sort((a, b) => {
         if ((s.settings?.groupBy ?? 'account') === 'none') {
@@ -108,8 +114,8 @@ export default function InstanceTable(): ReactElement {
   const groupKeys = groups.map((g) => g.key)
 
   const th = (key: SortKey, label: string, cls = ''): ReactElement => (
-    <th className={`sortable select-none ${cls}`} onClick={() => setSort((p) => ({ key, dir: p.key === key ? ((p.dir * -1) as 1 | -1) : 1 }))}>
-      {label} <span className="opacity-70">{sort.key === key ? (sort.dir === 1 ? '↑' : '↓') : ''}</span>
+    <th className={`sortable select-none ${cls}`} aria-sort={sort.key === key ? sort.dir === 1 ? 'ascending' : 'descending' : 'none'}>
+      <button onClick={() => setSort((p) => ({ key, dir: p.key === key ? ((p.dir * -1) as 1 | -1) : 1 }))}>{label} <span className="opacity-70">{sort.key === key ? (sort.dir === 1 ? '↑' : '↓') : ''}</span></button>
     </th>
   )
 
@@ -139,14 +145,15 @@ export default function InstanceTable(): ReactElement {
 
   return (
     <div className="flex h-full flex-col" onClick={() => setMenu(null)}>
-      <div className="flex items-center gap-3 px-4 py-2.5">
-        <div className="relative w-full max-w-md">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+        <div className="relative min-w-52 flex-1 max-w-md">
           <span className="muted pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">
             <Icon.search />
           </span>
           <input
             className="input !pl-8"
-            placeholder="Search name, id, IP, tag, type…"
+            aria-label="Search hosts"
+            placeholder="Search name, IP, region, tag…"
             value={s.search}
             onChange={(e) => s.set({ search: e.target.value })}
           />
@@ -156,7 +163,7 @@ export default function InstanceTable(): ReactElement {
           {s.profileFilter && <span> · {s.profileFilter}</span>}
         </span>
         <span className="flex-1" />
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <span className="muted text-[11px]">Group by</span>
           <div className="seg">
             {(
@@ -179,7 +186,9 @@ export default function InstanceTable(): ReactElement {
           </button>
         </div>
       </div>
-      <div className="panel mx-4 mb-3 min-h-0 flex-1 overflow-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+      <HostFilters />
+      <ScanNotice />
+      <div ref={tableRef} className="panel mx-4 mb-3 min-h-0 flex-1 overflow-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
         <table className="w-full text-xs">
           <thead>
             <tr>
@@ -223,7 +232,7 @@ export default function InstanceTable(): ReactElement {
                     <span className="group-count">{g.rows.length} host{g.rows.length === 1 ? '' : 's'}</span>
                     <span className="flex-1" />
                     <span className="mono muted text-[10px]">
-                      {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} reachable
+                      {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} with route
                     </span>
                   </div>
                 </td>
@@ -242,9 +251,10 @@ export default function InstanceTable(): ReactElement {
             {!isCollapsed && g.rows.map((i) => (
               <tr
                 key={i.key}
+                data-host-key={i.key}
                 className={`row in-group ${s.selectedKey === i.key ? 'selected' : ''}`}
-                onClick={() => s.set({ selectedKey: i.key })}
-                onDoubleClick={() => canConnect(i) && openDefaultFor(i.key)}
+                onClick={(e) => { if (!(e.target as HTMLElement).closest('button')) s.set({ selectedKey: i.key, detailsFor: i.key }) }}
+                onDoubleClick={(e) => { if (!(e.target as HTMLElement).closest('button')) canConnect(i) && openDefaultFor(i.key) }}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   s.set({ selectedKey: i.key })
@@ -264,10 +274,11 @@ export default function InstanceTable(): ReactElement {
                       <Icon.star filled={s.isFavorite(i.key)} />
                     </button>
                     <div className="min-w-0 max-w-[230px]">
-                      <div className="truncate font-medium leading-4" title={i.name}>
+                      <button className="block max-w-full truncate text-left font-medium leading-4 hover:underline" title={`View details for ${i.name}; double-click to connect`} onClick={() => s.set({ selectedKey: i.key, detailsFor: i.key })} onDoubleClick={() => canConnect(i) && openDefaultFor(i.key)}>
                         {i.name}
-                      </div>
+                      </button>
                       <div className="mono muted truncate text-[10px] leading-4">{i.instanceId}</div>
+                      {i.staleReason && <span className="badge badge-warn !px-1.5 !py-0" title={`Last verified ${i.lastSeenAt ? new Date(i.lastSeenAt).toLocaleString() : 'on a previous scan'}: ${i.staleReason}`}>Cached</span>}
                     </div>
                   </div>
                 </td>
@@ -356,20 +367,21 @@ export default function InstanceTable(): ReactElement {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={9} className="muted px-4 py-16 text-center">
-                  {s.instances.length === 0
+                  {allInstances(s).length === 0
                     ? s.scanning
                       ? 'Scanning your AWS accounts…'
                       : 'No instances yet. Click Rescan.'
                     : s.favoritesOnly && !(s.settings?.favorites ?? []).length
                       ? 'No favorites yet. Click the ☆ next to a machine name to pin it to the top.'
                       : 'No instances match the current filters.'}
+                  {allInstances(s).length > 0 && <div className="mt-3"><button className="btn" onClick={s.clearFilters}>Clear filters</button></div>}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-      {menu && (
+      {menu && allInstances(s).some((i) => i.key === menu.key) && (
         <ContextMenu
           x={menu.x}
           y={menu.y}
@@ -415,7 +427,8 @@ function ContextMenu({
   return (
     <div className="panel modal fixed z-50 min-w-56 border py-1 text-xs" style={{ left: x, top: y, borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>
       <div className="section-title px-3 py-1.5">{i.name}</div>
-      {(i.platform !== 'windows' || i.manual) && item('SSH with options…', () => s.set({ connectFor: { kind: 'ssh', key: i.key } }), !reachable)}
+      {item('Host details', () => s.revealHost(i.key))}
+      {(i.platform !== 'windows' || i.manual) && item('SSH with options…', () => s.set({ connectFor: { kind: 'ssh', key: i.key } }), i.state !== 'running')}
       {(i.platform !== 'windows' || i.manual) &&
         item(`SSH in ${s.settings?.externalTerminal ?? 'Terminal'}`, async () => {
           try {
@@ -424,8 +437,8 @@ function ContextMenu({
             s.toast('error', (e as Error).message)
           }
         }, !reachable)}
-      {item('RDP (Windows App)', () => s.set({ connectFor: { kind: 'rdp', key: i.key } }), !reachable)}
-      {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), !reachable)}
+      {item('RDP with options…', () => s.set({ connectFor: { kind: 'rdp', key: i.key } }), i.state !== 'running')}
+      {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), i.state !== 'running')}
       {i.platform === 'windows' && !i.manual && item('Get Windows password', () => s.set({ passwordFor: i.key }))}
       {i.manual && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}
       {i.manual &&

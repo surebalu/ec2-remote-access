@@ -23,6 +23,8 @@ import { lookupClient, registerClient, unregisterClient } from '../ssh/clients'
 import { startSshStream, type SsmHandle } from '../ssm/session'
 import { getSettings } from '../store'
 import { uid } from '../util'
+import { transferSafely, type ConflictChoice } from './safeTransfer'
+import { localDestination, remoteDestination } from './destinations'
 
 interface Live {
   info: SftpSessionInfo
@@ -37,6 +39,7 @@ interface Live {
 
 interface Transfer {
   state: SftpTransfer
+  cancelled?: boolean
   /** Called to abort the in-flight stream. */
   abort?: () => void
 }
@@ -153,6 +156,7 @@ export async function closeSftp(sessionId: string): Promise<void> {
   sessions.delete(sessionId)
   for (const t of [l.running, ...l.queue]) {
     if (!t) continue
+    t.cancelled = true
     t.abort?.()
     if (t.state.status === 'queued' || t.state.status === 'running') {
       t.state.status = 'cancelled'
@@ -284,6 +288,7 @@ export function cancelTransfer(transferId: string): void {
       return
     }
     if (l.running?.state.id === transferId) {
+      l.running.cancelled = true
       l.running.abort?.()
       return
     }
@@ -322,10 +327,8 @@ async function pump(l: Live): Promise<void> {
     }
   }
   try {
-    if (st.kind === 'upload') await uploadFile(l, next, progress)
-    else await downloadFile(l, next, progress)
-    st.status = 'done'
-    st.done = st.total
+    st.status = st.kind === 'upload' ? await uploadFile(l, next, progress) : await downloadFile(l, next, progress)
+    if (st.status === 'done') st.done = st.total
   } catch (e) {
     st.status = /cancelled/.test((e as Error).message) ? 'cancelled' : 'error'
     st.message = (e as Error).message
@@ -349,19 +352,41 @@ function counter(onBytes: (n: number) => void): Transform {
   })
 }
 
-async function uploadFile(l: Live, t: Transfer, progress: (n: number) => void): Promise<void> {
-  const src = createReadStream(t.state.localPath, { highWaterMark: 256 * 1024 })
-  const dst = l.sftp.createWriteStream(t.state.remotePath, { highWaterMark: 256 * 1024 } as never)
-  t.abort = () => src.destroy(new Error('cancelled'))
-  await pipeline(src, counter(progress), dst)
+async function chooseConflict(l: Live, t: Transfer, path: string): Promise<ConflictChoice> {
+  if (t.cancelled || sessions.get(l.info.sessionId) !== l) return 'cancel'
+  const r = await dialog.showMessageBox({
+    type: 'question', title: 'File already exists', message: `A file named “${posix.basename(path)}” already exists.`,
+    detail: `${t.state.kind === 'upload' ? `Upload to ${l.info.title}` : 'Download to this Mac'}\nDestination: ${path}\nSource: ${t.state.kind === 'upload' ? t.state.localPath : t.state.remotePath}\n\nReplace updates this file only after the transfer completes. Keep both creates a numbered copy.`,
+    buttons: ['Keep both', 'Skip', 'Replace', 'Cancel transfer'], defaultId: 0, cancelId: 3, noLink: true
+  })
+  return (['keep-both', 'skip', 'replace', 'cancel'] as const)[r.response] ?? 'cancel'
 }
 
-async function downloadFile(l: Live, t: Transfer, progress: (n: number) => void): Promise<void> {
+async function uploadFile(l: Live, t: Transfer, progress: (n: number) => void): Promise<'done' | 'skipped'> {
+  return transferSafely(t.state.remotePath, remoteDestination(l.sftp, async (temp) => {
+    const src = createReadStream(t.state.localPath, { highWaterMark: 256 * 1024 })
+    const dst = l.sftp.createWriteStream(temp, { flags: 'wx', highWaterMark: 256 * 1024 } as never)
+    t.abort = () => src.destroy(new Error('cancelled'))
+    await pipeline(src, counter(progress), dst)
+  }), (path) => chooseConflict(l, t, path), () => !!t.cancelled || sessions.get(l.info.sessionId) !== l, (path) => {
+    t.state.remotePath = path
+    t.state.name = posix.basename(path)
+    emitTransfer(t.state)
+  })
+}
+
+async function downloadFile(l: Live, t: Transfer, progress: (n: number) => void): Promise<'done' | 'skipped'> {
   await mkdir(dirname(t.state.localPath), { recursive: true })
-  const src = l.sftp.createReadStream(t.state.remotePath, { highWaterMark: 256 * 1024 } as never)
-  const dst = createWriteStream(t.state.localPath)
-  t.abort = () => src.destroy(new Error('cancelled'))
-  await pipeline(src, counter(progress), dst)
+  return transferSafely(t.state.localPath, localDestination(async (temp) => {
+    const src = l.sftp.createReadStream(t.state.remotePath, { highWaterMark: 256 * 1024 } as never)
+    const dst = createWriteStream(temp, { flags: 'wx' })
+    t.abort = () => src.destroy(new Error('cancelled'))
+    await pipeline(src, counter(progress), dst)
+  }), (path) => chooseConflict(l, t, path), () => !!t.cancelled || sessions.get(l.info.sessionId) !== l, (path) => {
+    t.state.localPath = path
+    t.state.name = basename(path)
+    emitTransfer(t.state)
+  })
 }
 
 /** Queues uploads for local files and folders (recursively) into remoteDir. Returns the number of files queued. */
