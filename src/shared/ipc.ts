@@ -78,6 +78,8 @@ export interface IpcApi {
   /** Saves enabled/port/bind and (re)starts or stops the in-app gateway accordingly. */
   'phone:configure': (patch: Partial<Pick<Settings, 'phoneAccessEnabled' | 'phoneAccessPort' | 'phoneAccessBind'>>) => Promise<PhoneAccessStatus>
   'phone:rotateToken': () => Promise<PhoneAccessStatus>
+  /** Tail of main.log for "Copy diagnostics"; `filter` is a case-insensitive regular expression. */
+  'diag:log': (opts?: { lines?: number; filter?: string }) => Promise<{ path: string | null; text: string }>
 }
 
 /** Push channels (main -> renderer) */

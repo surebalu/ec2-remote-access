@@ -19,6 +19,7 @@ import { closeAllTunnels } from '../main/tunnels'
 import { releaseAllRdp } from '../main/rdp/sessions'
 import { ensureProxy, stopProxy } from '../main/rdp/cleanpath'
 import { createGatewayHost } from './host'
+import { initLog } from '../main/log'
 import { createGatewayServer } from './server'
 
 function arg(name: string, env: string, fallback: string): string {
@@ -50,7 +51,8 @@ async function main(): Promise<void> {
   const port = Number(arg('port', 'EC2RA_GATEWAY_PORT', '8321'))
   const staticDir = resolve(arg('static', 'EC2RA_STATIC_DIR', join(dirname(fileURLToPath(import.meta.url)), '..', 'renderer')))
   const token = loadToken(dataDir)
-  const log = (l: string): void => console.log(`${new Date().toISOString()} ${l}`)
+  initLog(join(dataDir, 'logs'))
+  const log = (l: string): void => console.log(l)
 
   const gateway = createGatewayServer({ handlers, token, staticDir, rdpTarget: ensureProxy, log })
   setHost(createGatewayHost(dataDir, gateway.broadcast, log))

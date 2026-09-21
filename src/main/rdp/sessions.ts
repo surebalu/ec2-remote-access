@@ -6,7 +6,8 @@ import { startPortForward, type SsmHandle } from '../ssm/session'
 import { getSettings } from '../store'
 import { addTunnel, closeTunnel, updateTunnel } from '../tunnels'
 import { freePort, uid } from '../util'
-import { ensureProxy, registerTarget, unregisterTarget, lastErrorFor } from './cleanpath'
+import { ensureProxy, registerTarget, unregisterTarget, lastErrorFor, dropConnections } from './cleanpath'
+import { log } from '../log'
 
 interface Live {
   token: string
@@ -44,6 +45,12 @@ export async function prepareRdp(req: RdpPrepareRequest): Promise<RdpPrepared> {
       throw e
     }
     addTunnel({ id: tunnelId, instanceKey: inst.key, title, kind: 'rdp', localPort, remotePort, status: 'ready', message: 'embedded RDP', startedAt: Date.now() }, entry.ssm)
+    // When the SSM session ends (idle timeout, network drop, terminated in the console) the local socket may stay
+    // half-open; cut the relay so IronRDP sees a disconnect and the tab's auto-reconnect builds a fresh tunnel.
+    entry.ssm.child.on('exit', (code, signal) => {
+      log('rdp', 'ssm port-forward plugin exited', { sessionId: req.sessionId, token: token.slice(0, 8), code, signal })
+      dropConnections(token, `session-manager-plugin exited (${code ?? signal})`)
+    })
     host = '127.0.0.1'
     port = localPort
   } else {
@@ -51,6 +58,7 @@ export async function prepareRdp(req: RdpPrepareRequest): Promise<RdpPrepared> {
     port = remotePort
   }
   registerTarget(token, { host, port })
+  log('rdp', 'prepared', { sessionId: req.sessionId, token: token.slice(0, 8), instance: inst.key, route: route.route, target: `${host}:${port}` })
   return {
     sessionId: req.sessionId,
     token,
@@ -66,6 +74,7 @@ export async function releaseRdp(sessionId: string): Promise<void> {
   const entry = live.get(sessionId)
   if (!entry) return
   live.delete(sessionId)
+  log('rdp', 'released', { sessionId, token: entry.token.slice(0, 8) })
   unregisterTarget(entry.token)
   if (entry.tunnelId) await closeTunnel(entry.tunnelId)
   else await entry.ssm?.terminate()

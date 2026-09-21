@@ -5,6 +5,7 @@ import type { Instance } from '@shared/types'
 import { credentialsFor } from '../aws/credentials'
 import { getSettings } from '../store'
 import { findBinary } from '../util'
+import { log } from '../log'
 
 /** Duplex over a child process: reads from stdout, writes to stdin (what ssh's ProxyCommand does). */
 class ChildDuplex extends Duplex {
@@ -94,7 +95,9 @@ async function start(inst: Instance, documentName: string, parameters: Record<st
       ssm.destroy()
     }
   }
-  child.on('exit', () => {
+  log('ssm', 'session started', { ssmSessionId: resp.SessionId, instance: inst.key, document: documentName, pid: child.pid })
+  child.on('exit', (code, signal) => {
+    log('ssm', 'plugin exited', { ssmSessionId: resp.SessionId, code, signal, terminatedByUs: terminated })
     if (!terminated) void terminate()
   })
   return { sessionId: resp.SessionId!, child, terminate }
@@ -132,6 +135,7 @@ export async function startPortForward(
     }
     const onData = (d: Buffer): void => {
       buf += d.toString()
+      for (const line of d.toString().split('\n')) if (line.trim()) log('ssm', 'plugin', { ssmSessionId: handle.sessionId, line: line.trim() })
       for (const line of buf.split('\n')) if (line.trim()) onLog?.(line.trim())
       if (/Waiting for connections/i.test(buf)) finish()
       if (/(error|failed|Cannot perform)/i.test(buf) && !/Waiting for connections/i.test(buf)) finish(new Error(buf.trim()))

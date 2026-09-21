@@ -49,6 +49,8 @@ The connection engine in `src/main` never imports `electron` directly (only `ind
 
 `src/main/handlers.ts` holds the complete `IpcApi` implementation as a plain object keyed by channel. `ipc.ts` registers each entry with `ipcMain`; `src/gateway/server.ts` dispatches WebSocket RPC to the same object. **Add new channels to `handlers.ts`, not to `ipc.ts`.** Any new Electron-only need goes on the `Host` interface with a gateway fallback.
 
+`src/main/log.ts` mirrors `console.*` into `<host.logsDir()>/main.log` (5 MB rotation) and offers `log(scope, message, data)` for structured lines plus `recentLog()` behind the `diag:log` channel ("Copy diagnostics" in `RdpTab`). Both entries call `initLog` first thing. The RDP proxy (`rdp/cleanpath.ts`) logs each relay's open/close with byte counters, keeps TCP keepalive on, and runs a stall watchdog: 30 s of client input with no server bytes cuts the relay so IronRDP's reconnect kicks in; `dropConnections(token)` does the same when the tunnel's `session-manager-plugin` exits (`rdp/sessions.ts`).
+
 `src/main/store.ts` is a small atomic JSON store at `<userDataDir>/ec2-remote-access.json`, format-compatible with the electron-store file older versions wrote; it is lazy so the host can be set first.
 
 ### Gateway (`src/gateway`)

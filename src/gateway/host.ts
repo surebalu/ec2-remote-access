@@ -18,6 +18,7 @@ export function createGatewayHost(dataDir: string, broadcast: (channel: string, 
   return {
     broadcast,
     userDataDir: () => dataDir,
+    logsDir: () => join(dataDir, 'logs'),
     async openExternal(url) {
       // The phone's browser is not on this machine; the UI shows the URL (SSO device code) so the user opens it there.
       log(`[gateway] open in your browser: ${url}`)

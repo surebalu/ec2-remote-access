@@ -11,6 +11,7 @@ import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
 import { setupAutoUpdate } from './updater'
 import { startPhoneAccess, stopPhoneAccess } from './phoneAccess'
+import { initLog } from './log'
 
 setHost(electronHost)
 
@@ -49,6 +50,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  initLog(electronHost.logsDir())
+  console.log(`[app] EC2 Remote Access ${app.getVersion()} starting (packaged=${app.isPackaged})`)
   nativeTheme.themeSource = getSettings().theme
   registerIpc()
   createWindow()

@@ -415,6 +415,25 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
         <button className="btn !py-0.5" title="Send Windows key" onClick={() => uiRef.current?.metaKey()}>
           ⊞
         </button>
+        <button
+          className="btn !py-0.5"
+          title="Copy this session's event log plus the matching lines from the app log, for troubleshooting"
+          onClick={async () => {
+            const main = await window.api.invoke('diag:log', { lines: 300, filter: 'rdp|ssm|tunnel|phone-access|\\[app\\]' })
+            const head = [
+              `EC2 Remote Access RDP diagnostics (${new Date().toISOString()})`,
+              `Host: ${tab.title}  key=${tab.instanceKey}  status=${tab.status}  phase=${phase}`,
+              `Message: ${tab.message ?? ''}`,
+              `Request: user=${rdp.user} port=${rdp.port} forceRoute=${rdp.forceRoute ?? 'auto'}`,
+              `Log file: ${main.path ?? 'n/a'}`,
+              '', '--- Session events ---', ...log, '', '--- App log (rdp/ssm/tunnel) ---', main.text
+            ]
+            await window.api.invoke('clipboard:write', head.join('\n'))
+            toast('success', 'Diagnostics copied to the clipboard')
+          }}
+        >
+          Copy diagnostics
+        </button>
         <span className="mx-1 h-4 border-l" style={{ borderColor: 'var(--border)' }} />
         <HostActions instanceKey={tab.instanceKey} current="rdp" />
         <button className="btn !py-0.5" onClick={() => void useStore.getState().closeTab(tab.id)}>

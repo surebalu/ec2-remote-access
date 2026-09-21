@@ -129,6 +129,12 @@ Open the printed `http://<ip>:8321/#token=…` on the phone. On a Mac it shares 
 
 By default SSM is preferred when both exist because public IPs are usually behind security groups that don't allow your IP. Flip **Settings → Auto route** to prefer public IPs.
 
+## Troubleshooting
+
+- **Log file**: `~/Library/Logs/EC2 Remote Access/main.log` (the standalone gateway writes `<data-dir>/logs/main.log`). It records SSM plugin output and exits, tunnel lifecycle, and for every embedded RDP connection the open/close with bytes transferred and how long the server had been silent.
+- **Copy diagnostics** in an RDP tab's toolbar copies that tab's events plus the matching log lines, ready to paste into an issue.
+- **RDP freezes after being idle**: Session Manager ends port-forwarding sessions after its *idle session timeout* (20 minutes by default; Systems Manager → Session Manager → Preferences, up to 60). The proxy now detects a session that no longer answers input within 30 seconds and disconnects, so the tab's automatic reconnect opens a fresh tunnel instead of leaving a frozen desktop.
+
 ## Data locations
 
 - Settings, inventory cache, per-host overrides: `~/Library/Application Support/EC2 Remote Access/ec2-remote-access.json`

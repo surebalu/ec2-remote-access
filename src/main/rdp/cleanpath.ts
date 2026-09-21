@@ -13,6 +13,25 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect, type TLSSocket, type DetailedPeerCertificate, type ConnectionOptions } from 'node:tls'
 import { der, decodeInteger, readAll, readTlv } from './der'
+import { log } from '../log'
+
+/**
+ * A relay is declared stalled when the client has been sending input for this long without a single byte back.
+ * An idle desktop is silent in both directions, so idleness alone never trips it; a dead SSM tunnel or a half-open
+ * socket does, because the server never answers the user's clicks.
+ */
+const STALL_MS = 30_000
+/** Live relays per proxy token, so a dying SSM tunnel can cut them and let the client reconnect promptly. */
+const activeRelays = new Map<string, Set<() => void>>()
+
+/** Tears down every relay for a token (e.g. when its session-manager-plugin exits). Returns how many were cut. */
+export function dropConnections(token: string, why: string): number {
+  const set = activeRelays.get(token)
+  if (!set || set.size === 0) return 0
+  log('rdp-proxy', `cutting ${set.size} relay(s)`, { token: token.slice(0, 8), why })
+  for (const close of Array.from(set)) close()
+  return set.size
+}
 
 const VERSION_1 = 3390
 const GENERAL_ERROR = 1
@@ -221,6 +240,8 @@ async function connectAndNegotiate(target: CleanPathTarget, x224: Buffer): Promi
     s.setTimeout(20_000, () => rej(new Error(`TCP connect to ${target.host}:${target.port} timed out`)))
   })
   raw.setTimeout(0)
+  // Detects a peer that vanished at the IP level (direct route, or a dead local listener) within ~1 minute.
+  raw.setKeepAlive(true, 30_000)
   // X.224 negotiation happens in the clear.
   raw.write(x224)
   const confirm = await readTpkt(raw)
@@ -279,10 +300,16 @@ async function handle(ws: WebSocket, ctx: { token?: string }): Promise<void> {
   ws.send(encodeResponse(confirm, certChain(tls), `${target.host}:${target.port}`), { binary: true })
 
   // Transparent relay from here on. Byte counters let us tell the user roughly *when* the server dropped us.
+  const startedAt = Date.now()
+  const shortToken = (ctx.token ?? '').slice(0, 8)
+  log('rdp-proxy', 'relay open', { token: shortToken, target: `${target.host}:${target.port}` })
   let up = 0
   let down = 0
   let clientClosed = false
   let noted = false
+  /** Set when the client sends while nothing has come back yet; cleared by the next server byte. */
+  let waitingSince: number | null = null
+  let lastDown = Date.now()
   const phase = (): string => {
     if (down === 0) return 'right after the TLS handshake, before the server sent anything'
     if (up + down < 4096) return 'during the security handshake (NLA/CredSSP)'
@@ -298,17 +325,41 @@ async function handle(ws: WebSocket, ctx: { token?: string }): Promise<void> {
   ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
     const chunk = Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data)
     up += chunk.length
+    if (waitingSince === null) waitingSince = Date.now()
     tls.write(chunk)
   })
   tls.on('data', (d: Buffer) => {
     down += d.length
+    lastDown = Date.now()
+    waitingSince = null
     if (ws.readyState === ws.OPEN) ws.send(d, { binary: true })
   })
+  let closed = false
   const closeAll = (): void => {
+    if (closed) return
+    closed = true
+    clearInterval(watchdog)
+    if (ctx.token) activeRelays.get(ctx.token)?.delete(closeAll)
+    log('rdp-proxy', 'relay closed', {
+      token: shortToken, target: `${target.host}:${target.port}`, up, down,
+      seconds: Math.round((Date.now() - startedAt) / 1000), silentForSeconds: Math.round((Date.now() - lastDown) / 1000), byClient: clientClosed
+    })
     tls.destroy()
     if (ws.readyState === ws.OPEN) ws.close()
     target.onClose?.()
   }
+  if (ctx.token) {
+    const set = activeRelays.get(ctx.token) ?? new Set()
+    activeRelays.set(ctx.token, set)
+    set.add(closeAll)
+  }
+  const watchdog = setInterval(() => {
+    if (waitingSince !== null && Date.now() - waitingSince > STALL_MS) {
+      note(`stopped responding: ${Math.round(STALL_MS / 1000)} s of input with no reply`)
+      log('rdp-proxy', 'stall detected, cutting relay so the client reconnects', { token: shortToken, silentForSeconds: Math.round((Date.now() - lastDown) / 1000) })
+      closeAll()
+    }
+  }, 5_000)
   tls.on('close', () => {
     note('closed the connection')
     closeAll()

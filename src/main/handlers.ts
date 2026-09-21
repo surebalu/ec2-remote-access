@@ -16,6 +16,7 @@ import { getCredential, setCredential, deleteCredential, credentialKeys } from '
 import { listTunnels, closeTunnel } from './tunnels'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken } from './phoneAccess'
+import { recentLog } from './log'
 
 type Handler<K extends keyof IpcApi> = (...args: Parameters<IpcApi[K]>) => ReturnType<IpcApi[K]>
 export type Handlers = { [K in keyof IpcApi]: Handler<K> }
@@ -121,5 +122,6 @@ export const handlers: Handlers = {
   }),
   'phone:status': async () => phoneStatus(),
   'phone:configure': (patch) => configurePhoneAccess(patch),
-  'phone:rotateToken': () => rotatePhoneToken()
+  'phone:rotateToken': () => rotatePhoneToken(),
+  'diag:log': async (opts) => recentLog(opts?.lines, opts?.filter)
 }

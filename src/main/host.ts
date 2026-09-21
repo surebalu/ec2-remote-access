@@ -27,6 +27,8 @@ export interface Host {
   broadcast(channel: string, payload: unknown): void
   /** Directory for settings, inventory cache and generated files. */
   userDataDir(): string
+  /** Directory for main.log (see log.ts). */
+  logsDir(): string
   /** Open a URL in the user's browser. May be a no-op when no browser is reachable (headless gateway). */
   openExternal(url: string): Promise<void>
   /** Reveal a local path in the file manager, if there is one. */

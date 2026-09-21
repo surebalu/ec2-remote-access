@@ -40,6 +40,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'profiles:check': return profiles.map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
     case 'tunnels:list': case 'sso:sessions': return []
     case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', awsCli: null, windowsApp: false }
+    case 'diag:log': return { path: '/fixture/main.log', text: '' }
     case 'phone:status': return { enabled: true, running: true, port: 8321, bind: 'https', tailscaleAvailable: true, tailscaleHostname: 'fixture-mac.tail1234.ts.net', tailscaleHttps: true, urls: ['https://fixture-mac.tail1234.ts.net/#token=fixture-token'], token: 'fixture-token', clients: [{ address: '100.101.102.5', since: Date.now() - 120000 }] }
     case 'ssh:open':
       if (failSsh) throw new Error('Fixture: authentication failed')

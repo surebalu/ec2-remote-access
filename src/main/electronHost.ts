@@ -9,6 +9,7 @@ export const electronHost: Host = {
     broadcastToPhones(channel, payload)
   },
   userDataDir: () => app.getPath('userData'),
+  logsDir: () => app.getPath('logs'),
   openExternal: (url) => shell.openExternal(url),
   revealPath: (p) => shell.showItemInFolder(p),
   async trashPaths(paths) {
