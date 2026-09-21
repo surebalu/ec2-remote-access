@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { SshOpenRequest, SshSessionInfo, SshEvent } from '@shared/types'
 import { findInstance } from '../aws/inventory'
-import { decideRoute, defaultSshUser, defaultIdentityFile } from '../connect/route'
+import { decideRoute, defaultSshUser, defaultIdentityFile, defaultInitCommand } from '../connect/route'
 import type { Instance } from '@shared/types'
 import { startSshStream, type SsmHandle } from '../ssm/session'
 import { getSettings } from '../store'
@@ -198,6 +198,9 @@ function openShell(live: Live, req: SshOpenRequest): Promise<void> {
           void closeSsh(sessionId)
         }
       })
+      // sshd queues stdin until the shell reads it, so this runs as the first command of the session.
+      const init = defaultInitCommand(findInstance(req.instanceKey), req.initCommand)
+      if (init) channel.write(init.replace(/\r?\n/g, '\n').replace(/\n?$/, '\n'))
       resolve()
     })
   })

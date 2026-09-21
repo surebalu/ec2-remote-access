@@ -93,6 +93,8 @@ export interface HostOverride {
   forceRoute?: 'direct' | 'ssm'
   identityFile?: string
   useAgent?: boolean
+  /** Shell input sent right after an SSH session opens. Empty string disables the global default for this host. */
+  initCommand?: string
 }
 
 /** Per-AWS-account SSH defaults. When set, the SSH button connects immediately without the dialog. */
@@ -126,6 +128,8 @@ export interface Settings {
   hiddenProfiles: string[]
   defaultLinuxUser: string
   defaultWindowsUser: string
+  /** Sent to every new SSH shell (e.g. a coloured PS1 and ls --color aliases). Per-host overrides.initCommand wins. */
+  sshInitCommand: string
   sshAgentSock: string
   defaultIdentityFile: string
   pemFile: string
@@ -167,6 +171,8 @@ export interface SshOpenRequest {
   identityFile?: string
   useAgent?: boolean
   forceRoute?: 'direct' | 'ssm'
+  /** Shell input to send once the shell is open; undefined = resolve from host override / global setting. */
+  initCommand?: string
   /** Open the shell on the connection of this existing SSH/SFTP session (same host and user) instead of logging in again. */
   reuseSessionId?: string
   cols: number

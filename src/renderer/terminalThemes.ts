@@ -120,3 +120,9 @@ export function terminalFontFamily(font: string | undefined): string {
   const fallbacks = ['Menlo', 'SF Mono', 'monospace'].filter((f) => f !== first)
   return [first, ...fallbacks].map((f) => (/\s/.test(f) ? `'${f}'` : f)).join(', ')
 }
+
+/**
+ * Ready-made "run after connect" line: a user@host:path prompt in ANSI green/blue (so it picks up whichever
+ * scheme is active) plus colour aliases. Single line so the echo in the terminal stays short.
+ */
+export const COLOR_PROMPT_PRESET = String.raw`export PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '; alias ls='ls --color=auto'; alias grep='grep --color=auto'`

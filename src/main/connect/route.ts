@@ -49,6 +49,12 @@ export function defaultRdpUser(inst: Instance): string {
   return s.overrides[inst.key]?.rdpUser || s.defaultWindowsUser || 'Administrator'
 }
 
+/** Shell input sent after an SSH shell opens: explicit > host override (may be '' to disable) > global setting. */
+export function defaultInitCommand(inst: Instance, explicit?: string): string {
+  const s = getSettings()
+  return (explicit ?? s.overrides[inst.key]?.initCommand ?? s.sshInitCommand ?? '').trim()
+}
+
 /** Identity file precedence: explicit > host override > account default > global default. */
 export function defaultIdentityFile(inst: Instance, explicit?: string): string | undefined {
   const s = getSettings()

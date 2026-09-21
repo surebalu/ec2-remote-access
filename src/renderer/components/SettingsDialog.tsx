@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
 import type { AccentColor } from '@shared/types'
-import { TERMINAL_THEMES, TERMINAL_FONTS, resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isDarkMode } from '../store'
 
 export default function SettingsDialog(): ReactElement | null {
@@ -78,6 +78,15 @@ export default function SettingsDialog(): ReactElement | null {
             )
           })()}
           <div className="muted text-[10px]">Colour scheme, font and size for embedded SSH tabs. Open terminals update immediately. Monaco, Menlo and SF Mono ship with macOS.</div>
+        </div>
+        <label className="muted">Run after connect</label>
+        <div>
+          <textarea className="input mono min-h-[54px] resize-y text-[11px]" rows={2} spellCheck={false} placeholder="Shell commands sent to every new SSH session, e.g. a coloured prompt" value={draft.sshInitCommand ?? ''} onChange={(e) => upd('sshInitCommand', e.target.value)} />
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <button className="btn" onClick={() => upd('sshInitCommand', COLOR_PROMPT_PRESET)}>Use colour prompt preset</button>
+            {draft.sshInitCommand && <button className="btn" onClick={() => upd('sshInitCommand', '')}>Clear</button>}
+          </div>
+          <div className="muted mt-0.5 text-[10px]">Typed into the shell as its first input, so it applies to the login user only (not after <span className="mono">su</span>). The connect dialog can override it per host; append <span className="mono">; clear</span> to hide the echo.</div>
         </div>
         <label className="muted">Regions</label>
         <div>

@@ -36,6 +36,7 @@ export const defaultSettings: Settings = {
   hiddenProfiles: [],
   defaultLinuxUser: '',
   defaultWindowsUser: 'Administrator',
+  sshInitCommand: '',
   sshAgentSock: existsSync(onePasswordSock) ? onePasswordSock : (process.env.SSH_AUTH_SOCK ?? ''),
   defaultIdentityFile: '',
   pemFile: guessPem(),

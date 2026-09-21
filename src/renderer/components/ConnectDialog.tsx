@@ -16,6 +16,8 @@ export default function ConnectDialog(): ReactElement | null {
   const [route, setRoute] = useState<'auto' | 'direct' | 'ssm'>(ov.forceRoute ?? 'auto')
   const [identity, setIdentity] = useState(ov.identityFile ?? s.settings?.profileDefaults?.[inst?.profile ?? '']?.identityFile ?? '')
   const [useAgent, setUseAgent] = useState(ov.useAgent ?? true)
+  const globalInit = s.settings?.sshInitCommand ?? ''
+  const [initCmd, setInitCmd] = useState(ov.initCommand ?? globalInit)
   const [remember, setRemember] = useState(true)
   const [busy, setBusy] = useState(false)
   const [password, setPassword] = useState('')
@@ -71,6 +73,8 @@ export default function ConnectDialog(): ReactElement | null {
       patch.sshPort = Number(port) || undefined
       patch.identityFile = identity || undefined
       patch.useAgent = useAgent
+      // Store only a deviation from the global default; '' is a deliberate "nothing for this host".
+      patch.initCommand = initCmd.trim() === globalInit.trim() ? undefined : initCmd
     } else {
       patch.rdpUser = user || undefined
       patch.rdpPort = Number(port) || undefined
@@ -124,6 +128,7 @@ export default function ConnectDialog(): ReactElement | null {
         identityFile: identity || undefined,
         useAgent,
         forceRoute: force,
+        initCommand: initCmd,
         cols: 120,
         rows: 32
       }
@@ -208,6 +213,18 @@ export default function ConnectDialog(): ReactElement | null {
                 …
               </button>
             </div>
+            {target.kind === 'ssh' && (
+              <>
+                <label className="muted">Run after connect</label>
+                <div>
+                  <textarea className="input mono min-h-[40px] resize-y text-[11px]" rows={1} spellCheck={false} placeholder="none" value={initCmd} onChange={(e) => setInitCmd(e.target.value)} />
+                  <div className="muted mt-0.5 text-[10px]">
+                    {initCmd.trim() === globalInit.trim() ? 'Using the global setting from Settings.' : initCmd.trim() ? 'Overrides the global setting for this host.' : 'Disabled for this host.'}
+                    {globalInit && initCmd.trim() !== globalInit.trim() && <> <button className="underline" onClick={() => setInitCmd(globalInit)}>Reset to global</button></>}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
         <span />
