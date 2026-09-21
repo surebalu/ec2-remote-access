@@ -124,5 +124,13 @@ export const Icon = {
     <svg {...base} className={p.className}>
       <path d="M6 6l12 12M18 6 6 18" />
     </svg>
+  ),
+  /** Window with a right-hand side panel; the appearance-pane toggle. */
+  panelRight: (p: { className?: string; filled?: boolean }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M15 5v14" />
+      {p.filled && <rect x="15" y="5" width="6" height="14" rx="1" fill="currentColor" stroke="none" />}
+    </svg>
   )
 }

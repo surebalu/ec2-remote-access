@@ -78,6 +78,9 @@ interface State {
   ssoWait: { flow: SsoDeviceFlow; session: string; error?: string } | null
   /** Icon-only sidebar. Remembered per machine in localStorage. */
   sidebarCollapsed: boolean
+  /** Appearance pane (themes/font) shown inside SSH tabs. Remembered per machine in localStorage. */
+  terminalPaneOpen: boolean
+  toggleTerminalPane: (open?: boolean) => void
   authBannerDismissedFor: string | null
   refreshSsoSessions: () => Promise<void>
   /** Derived: are any enabled SSO accounts expired / expiring soon? */
@@ -119,10 +122,18 @@ interface State {
 
 let toastSeq = 0
 
+const SIDEBAR_KEY = 'ui.sidebarCollapsed'
+const TERMINAL_PANE_KEY = 'ui.terminalPaneOpen'
+
+function readPref(key: string): boolean {
+  try { return localStorage.getItem(key) === '1' } catch { return false }
+}
+
 export const useStore = create<State>((set, get) => ({
   profiles: [],
   statuses: {},
   sidebarCollapsed: readSidebarPref(),
+  terminalPaneOpen: readPref(TERMINAL_PANE_KEY),
   instances: [],
   scanErrors: [],
   scanning: false,
@@ -473,10 +484,14 @@ export const useStore = create<State>((set, get) => ({
       return { tabs, activeTab }
     })
   },
+  toggleTerminalPane: (open) => {
+    const next = open ?? !get().terminalPaneOpen
+    set({ terminalPaneOpen: next })
+    try { localStorage.setItem(TERMINAL_PANE_KEY, next ? '1' : '0') } catch { /* storage unavailable */ }
+  },
   setActive: (id) => set({ activeTab: id })
 }))
 
-const SIDEBAR_KEY = 'ui.sidebarCollapsed'
 
 function readRecentHosts(): string[] {
   try {

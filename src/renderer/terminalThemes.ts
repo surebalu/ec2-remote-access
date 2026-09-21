@@ -24,7 +24,7 @@ const p = (
 })
 
 export const TERMINAL_THEMES: TerminalTheme[] = [
-  { id: 'auto', name: 'Match app (default)', dark: true, theme: {} },
+  { id: 'auto', name: 'Match app', dark: true, theme: {} },
   {
     id: 'dracula', name: 'Dracula', dark: true,
     theme: p('#282a36', '#f8f8f2', '#f8f8f2', '#44475a80',

@@ -6,6 +6,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { isDarkMode, useStore, type Tab } from '../store'
 import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import HostActions from './HostActions'
+import TerminalAppearancePane from './TerminalAppearancePane'
+import { Icon } from './icons'
 
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const ref = useRef<HTMLDivElement>(null)
@@ -18,6 +20,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const font = useStore((s) => s.settings?.terminalFont)
   const fontSize = useStore((s) => s.settings?.terminalFontSize) ?? DEFAULT_TERMINAL_FONT_SIZE
   const appTheme = useStore((s) => s.settings?.theme)
+  const paneOpen = useStore((s) => s.terminalPaneOpen)
+  const togglePane = useStore((s) => s.toggleTerminalPane)
   const theme = resolveTerminalTheme(themeId, isDarkMode())
   const background = theme.background ?? (isDarkMode() ? '#0f1115' : '#ffffff')
 
@@ -138,6 +142,12 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     return () => mq.removeEventListener('change', apply)
   }, [themeId, font, fontSize, appTheme])
 
+  // Picking a scheme or size from the pane hands the keyboard straight back to the terminal. Font-family changes are
+  // excluded because they arrive per keystroke while typing in the pane's font field.
+  useEffect(() => {
+    if (active) termRef.current?.focus()
+  }, [themeId, fontSize, active])
+
   return (
     <div className="flex h-full flex-col">
       <div className="panel flex flex-wrap items-center gap-2 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
@@ -152,8 +162,14 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         <button className="btn !py-0.5" onClick={() => void useStore.getState().closeTab(tab.id)}>
           {tab.status === 'closed' || tab.status === 'error' ? 'Close tab' : 'Disconnect'}
         </button>
+        <button onMouseDown={(e) => e.preventDefault()} className={`btn btn-icon !py-0.5${paneOpen ? ' on' : ''}`} title={paneOpen ? 'Hide appearance pane' : 'Themes and font'} aria-pressed={paneOpen} onClick={() => togglePane()}>
+          <Icon.panelRight filled={paneOpen} />
+        </button>
       </div>
-      <div ref={ref} className="min-h-0 w-full flex-1" style={{ background }} />
+      <div className="flex min-h-0 flex-1">
+        <div ref={ref} className="min-h-0 min-w-0 flex-1" style={{ background }} />
+        {paneOpen && <TerminalAppearancePane />}
+      </div>
     </div>
   )
 }
