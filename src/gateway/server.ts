@@ -2,6 +2,7 @@
  * HTTP + WebSocket front for the connection engine, for browsers (phone, tablet, another Mac) instead of Electron.
  *
  *   GET  /            the built renderer (out/renderer) with a CSP that allows same-origin WebSockets
+ *   GET  /auth?token= 204 when the token is right, 401 otherwise (the page checks before opening the socket)
  *   WS   /ws?token=…  RPC: {t:'call',id,channel,args} -> {t:'result',id,result} | {t:'error',id,message}
  *                     and pushed events {t:'event',channel,payload} (the IpcEvents channels)
  *   WS   /rdp?token=… transparent relay to the local RDCleanPath proxy so IronRDP in the browser reaches it
@@ -99,6 +100,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
   async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
     const url = new URL(req.url ?? '/', 'http://localhost')
+    if (url.pathname === '/auth') { res.writeHead(url.searchParams.get('token') === opts.token ? 204 : 401, { 'cache-control': 'no-store' }).end(); return }
     if (url.pathname === '/health') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, clients: clients.size })); return }
     if (!opts.staticDir) { res.writeHead(404).end(); return }
     let rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '')

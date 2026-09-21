@@ -3,8 +3,10 @@
  * served by the gateway (src/gateway) this module speaks the gateway's WebSocket RPC instead, so every component keeps
  * calling `window.api.invoke(...)` unchanged.
  *
- * The bearer token arrives once as `#token=…` in the URL, is kept in localStorage, and is removed from the address
- * bar so it does not end up in screenshots or history.
+ * The bearer token arrives as `#token=…` in the URL and is also kept in localStorage. The fragment is left in place
+ * on purpose: an iOS Home Screen web app has its own storage, separate from Safari, so the bookmark it saves must
+ * carry the token itself. The token is checked against GET /auth before the socket opens, so a wrong or rotated
+ * token produces a prompt instead of a silent reconnect loop.
  */
 import type { IpcApi, IpcEvents } from '@shared/ipc'
 
@@ -17,10 +19,34 @@ function readToken(): string {
   if (m) {
     const t = decodeURIComponent(m[1])
     try { localStorage.setItem(TOKEN_KEY, t) } catch { /* private mode */ }
-    history.replaceState(null, '', location.pathname + location.search)
     return t
   }
   try { return localStorage.getItem(TOKEN_KEY) ?? '' } catch { return '' }
+}
+
+function rememberToken(t: string): void {
+  try { localStorage.setItem(TOKEN_KEY, t) } catch { /* private mode */ }
+  // Keep the URL in sync so "Add to Home Screen" (and a copied link) keeps working.
+  history.replaceState(null, '', `${location.pathname}${location.search}#token=${encodeURIComponent(t)}`)
+}
+
+/** Returns a token the gateway accepts, prompting when the stored one is missing or rejected. */
+async function ensureToken(): Promise<string> {
+  let token = readToken()
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (token) {
+      try {
+        const r = await fetch(`/auth?token=${encodeURIComponent(token)}`, { cache: 'no-store' })
+        if (r.status !== 401) { rememberToken(token); return token }
+      } catch {
+        return token // gateway unreachable right now; keep what we have and let the socket retry
+      }
+    }
+    const entered = window.prompt(token ? 'That gateway token was rejected (it may have been rotated). Enter the current token:' : 'Gateway access token')
+    if (entered === null) return token
+    token = entered.trim()
+  }
+  return token
 }
 
 /** Calls handled in the browser itself because the gateway machine has no clipboard / browser / file dialogs. */
@@ -44,13 +70,7 @@ async function local(channel: string, args: unknown[]): Promise<{ handled: boole
 }
 
 export function createWsApi(): Api {
-  let token = readToken()
-  if (!token) {
-    token = window.prompt('Gateway access token') ?? ''
-    try { localStorage.setItem(TOKEN_KEY, token) } catch { /* private mode */ }
-  }
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`
-
+  let url = ''
   let ws: WebSocket | null = null
   let nextId = 1
   let attempt = 0
@@ -59,6 +79,7 @@ export function createWsApi(): Api {
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
 
   const connect = (): void => {
+    if (!url) return
     ws = new WebSocket(url)
     ws.onopen = () => {
       attempt = 0
@@ -77,20 +98,18 @@ export function createWsApi(): Api {
         for (const cb of listeners.get(msg.channel) ?? []) cb(msg.payload)
       }
     }
-    ws.onclose = (ev) => {
+    ws.onclose = () => {
       ws = null
-      const unauthorized = ev.code === 1006 && attempt === 0 && !ev.wasClean
       for (const p of pending.values()) p.reject(new Error('Gateway connection lost'))
       pending.clear()
-      if (unauthorized && attempt === 0) {
-        // A refused upgrade shows as an immediate abnormal close; give the user a way to fix a bad token.
-        try { localStorage.removeItem(TOKEN_KEY) } catch { /* ignore */ }
-      }
       attempt += 1
       setTimeout(connect, Math.min(15_000, 500 * 2 ** Math.min(attempt, 5)))
     }
   }
-  connect()
+  void ensureToken().then((token) => {
+    url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`
+    connect()
+  })
 
   return {
     invoke<K extends keyof IpcApi>(channel: K, ...args: Parameters<IpcApi[K]>): ReturnType<IpcApi[K]> {

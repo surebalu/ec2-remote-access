@@ -88,7 +88,7 @@ export default function PhoneAccessSection({ onPatch }: { onPatch: (p: Patch) =>
             {st.clients.length > 0 && (
               <div className="muted">Connected: {st.clients.map((c) => `${c.address} (${ago(c.since)})`).join(', ')}</div>
             )}
-            <div className="muted">The link carries the access token; the phone stores it and hides it from the address bar. Install <a className="underline" href="https://tailscale.com/download" onClick={(e) => { e.preventDefault(); void window.api.invoke('shell:open', 'https://tailscale.com/download') }}>Tailscale</a> on this Mac and the phone to connect from anywhere. This Mac must stay awake.</div>
+            <div className="muted">The link carries the access token, so treat it like a password; keep it in the Home Screen bookmark. Install <a className="underline" href="https://tailscale.com/download" onClick={(e) => { e.preventDefault(); void window.api.invoke('shell:open', 'https://tailscale.com/download') }}>Tailscale</a> on this Mac and the phone to connect from anywhere. This Mac must stay awake.</div>
           </div>
         </div>
       )}

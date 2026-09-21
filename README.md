@@ -98,7 +98,7 @@ The same UI can be used from a phone or tablet browser while the Mac app is runn
 
 1. Install [Tailscale](https://tailscale.com/download) on the Mac and the phone and sign both into your tailnet (optional but recommended; Wi-Fi works too).
 2. **Settings → Phone access → Let my phone use this app while it is running.** The app starts a small server (port 8321 by default) and shows a QR code.
-3. Scan the QR code with the iPhone camera and add the page to the Home Screen. The link carries an access token that the phone keeps; **Rotate token** invalidates every paired phone.
+3. Scan the QR code with the iPhone camera and add the page to the Home Screen. The link carries the access token and the Home Screen bookmark keeps it, so treat the link like a password; **Rotate token** invalidates every paired phone.
 
 **Reachable from** picks how the phone connects:
 

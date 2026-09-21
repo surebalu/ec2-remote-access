@@ -135,6 +135,8 @@ test('serves the UI with a browser-friendly CSP and falls back to the app shell'
   assert.match(await escape.text(), /id=root/)
   const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json() as { ok: boolean }
   assert.equal(health.ok, true)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/auth?token=secret`)).status, 204)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/auth?token=nope`)).status, 401)
   await gw.close()
   await rm(dir, { recursive: true, force: true })
 })
