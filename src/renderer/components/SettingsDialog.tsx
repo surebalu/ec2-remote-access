@@ -7,6 +7,7 @@ import { ACCENTS, metaFor } from '../colors'
 import type { AccentColor } from '@shared/types'
 import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isDarkMode } from '../store'
+import PhoneAccessSection from './PhoneAccessSection'
 
 export default function SettingsDialog(): ReactElement | null {
   const s = useStore()
@@ -109,6 +110,8 @@ export default function SettingsDialog(): ReactElement | null {
           </label>
           <div className="muted mt-0.5 text-[10px]">Off (default) uses SSM Session Manager whenever the agent is online; public IPs often sit behind security groups that block your IP.</div>
         </div>
+        <label className="muted">Phone access</label>
+        <PhoneAccessSection onPatch={(p) => setDraft((d) => (d ? { ...d, ...p } : d))} />
         <label className="muted">Environments</label>
         <div className="space-y-1">
           <div className="muted text-[10px]">Label and color for each account; used for folders, avatars, and badges.</div>

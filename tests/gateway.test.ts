@@ -63,6 +63,32 @@ test('dispatches calls, returns results and errors, relays broadcasts', async ()
   await gw.close()
 })
 
+test('refuses browser upgrades from a foreign origin, accepts same-origin and origin-less clients', async () => {
+  const { gw, port } = await start()
+  const bad = new WebSocket(`ws://127.0.0.1:${port}/ws?token=secret`, { headers: { origin: 'https://evil.example' } })
+  const [err] = await once(bad, 'error') as [Error]
+  assert.match(err.message, /403/)
+  const good = new WebSocket(`ws://127.0.0.1:${port}/ws?token=secret`, { headers: { origin: `http://127.0.0.1:${port}` } })
+  await once(good, 'open')
+  good.close()
+  await gw.close()
+})
+
+test('reports connected clients with addresses and honours forwarded headers', async () => {
+  const seen: { address: string; since: number }[][] = []
+  const handlers = { 'settings:get': async () => ({}) } as unknown as GatewayHandlers
+  const gw = createGatewayServer({ handlers, token: 'secret', log: () => undefined, onClientsChanged: (c) => seen.push(c) })
+  const { port } = await gw.listen(0, '127.0.0.1')
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=secret`, { headers: { 'x-forwarded-for': '100.64.0.9', 'x-forwarded-host': 'mac.tail1234.ts.net', 'x-forwarded-proto': 'https', origin: 'https://mac.tail1234.ts.net' } })
+  await once(ws, 'open')
+  assert.equal(seen.at(-1)?.[0].address, '100.64.0.9')
+  ws.close()
+  await once(ws, 'close')
+  await new Promise((r) => setTimeout(r, 20))
+  assert.deepEqual(seen.at(-1), [])
+  await gw.close()
+})
+
 test('rewrites the RDP proxy URL to the gateway origin', async () => {
   const { gw, port } = await start()
   const c = await client(port, 'secret')
@@ -70,6 +96,13 @@ test('rewrites the RDP proxy URL to the gateway origin', async () => {
   const r = await c.call('rdp:prepare', { sessionId: 'rdp-1' })
   assert.equal((r.result as { proxyUrl: string }).proxyUrl, `ws://127.0.0.1:${port}/rdp?token=secret`)
   c.ws.close()
+  // Behind `tailscale serve` the forwarded headers describe the public HTTPS origin.
+  const fwd = new WebSocket(`ws://127.0.0.1:${port}/ws?token=secret`, { headers: { 'x-forwarded-host': 'mac.tail1234.ts.net', 'x-forwarded-proto': 'https' } })
+  await once(fwd, 'open')
+  const got = new Promise<Msg>((res) => fwd.on('message', (d) => { const m = JSON.parse(d.toString()) as Msg; if (m.t === 'result') res(m) }))
+  fwd.send(JSON.stringify({ t: 'call', id: 1, channel: 'rdp:prepare', args: [{ sessionId: 'rdp-2' }] }))
+  assert.equal(((await got).result as { proxyUrl: string }).proxyUrl, 'wss://mac.tail1234.ts.net/rdp?token=secret')
+  fwd.close()
   await gw.close()
 })
 

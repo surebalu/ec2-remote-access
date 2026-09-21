@@ -10,6 +10,7 @@ import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
 import { setupAutoUpdate } from './updater'
+import { startPhoneAccess, stopPhoneAccess } from './phoneAccess'
 
 setHost(electronHost)
 
@@ -51,6 +52,7 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = getSettings().theme
   registerIpc()
   createWindow()
+  if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -62,7 +64,7 @@ app.on('before-quit', (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
-  Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels()])
+  Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess()])
     .then(() => stopProxy())
     .catch(() => undefined)
     .finally(() => app.quit())

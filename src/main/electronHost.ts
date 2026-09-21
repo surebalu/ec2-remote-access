@@ -1,10 +1,12 @@
 import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, shell } from 'electron'
 import type { Host } from './host'
+import { broadcastToPhones } from './phoneAccess'
 
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */
 export const electronHost: Host = {
   broadcast(channel, payload) {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
+    broadcastToPhones(channel, payload)
   },
   userDataDir: () => app.getPath('userData'),
   openExternal: (url) => shell.openExternal(url),

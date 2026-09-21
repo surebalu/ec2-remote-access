@@ -92,22 +92,32 @@ scripts/release.sh --bump minor --publish
 
 The app built with `UPDATE_URL` checks that feed at launch and every six hours, downloads in the background, and offers a restart. Builds made without `UPDATE_URL` never phone home.
 
-## Gateway: use it from your phone
+## Phone access
 
-The same UI and connection engine can run as a small server (no Electron) and be opened in Safari or Chrome on a phone or tablet.
+The same UI can be used from a phone or tablet browser while the Mac app is running, without a relay service.
+
+1. Install [Tailscale](https://tailscale.com/download) on the Mac and the phone and sign both into your tailnet (optional but recommended; Wi-Fi works too).
+2. **Settings → Phone access → Let my phone use this app while it is running.** The app starts a small server (port 8321 by default) and shows a QR code.
+3. Scan the QR code with the iPhone camera and add the page to the Home Screen. The link carries an access token that the phone keeps; **Rotate token** invalidates every paired phone.
+
+**Reachable from** picks how the phone connects:
+
+- **HTTPS via Tailscale (recommended)**: the app listens on loopback only and runs `tailscale serve` so the phone opens `https://<your-mac>.<tailnet>.ts.net` with a real certificate. One-time prerequisite: in the Tailscale admin console, DNS tab, enable MagicDNS and **HTTPS Certificates**; the app tells you if that is missing. Turning phone access off withdraws the serve entry.
+- **Tailscale IP, plain HTTP**: binds the 100.x address only. Traffic is still WireGuard-encrypted between tailnet devices.
+- **Any network this Mac is on, plain HTTP**: also reachable over Wi-Fi. Use only on networks you trust, since the token travels in clear text there.
+
+Security model: only devices in your tailnet can reach the port at all, every WebSocket needs the token, browser upgrades must come from the gateway's own origin, and the Settings row lists connected client addresses. A phone holding the token can do everything the app can, so treat the link like your AWS password. The switch is remembered and the server starts with the app. AWS credentials and SSO tokens never leave the Mac. Sessions a phone opened are closed when it disconnects. Limitations: file pickers and the SFTP overwrite prompt appear on the Mac, not the phone, and Windows App hand-off is desktop-only.
+
+### Standalone gateway (always-on host)
+
+The same server also runs without Electron, e.g. on a small EC2 instance, for access when the Mac is asleep:
 
 ```bash
 pnpm build:gateway                       # builds the UI and out/gateway/index.js
 pnpm gateway -- --host 0.0.0.0           # listens on :8321; prints a URL with the access token
 ```
 
-Open the printed `http://<ip>:8321/#token=…` on the phone (add it to the home screen for an app-like window). The token is stored by the page and removed from the address bar. On a Mac the gateway shares the desktop app's settings and inventory cache; on Linux it uses `~/.config/ec2-remote-access` (or `--data-dir`). AWS credentials and SSO tokens stay on the gateway machine; the phone only ever holds the gateway token.
-
-**Reach it safely.** The gateway speaks plain HTTP and is meant to sit on a private network: install [Tailscale](https://tailscale.com) on the gateway host and the phone, bind with `--host <tailscale-ip>` (or `0.0.0.0`), and never expose the port to the internet. `tailscale serve --bg 8321` adds HTTPS, which also unlocks the async clipboard API in Safari.
-
-Options: `--host`, `--port`, `--data-dir`, `--token`, `--static` (or `EC2RA_GATEWAY_HOST/PORT/TOKEN`, `EC2RA_DATA_DIR`). Sessions opened from a browser tab are closed when that tab disconnects.
-
-**Not available through the gateway:** native file pickers (SFTP upload/download-with-dialog; "local" browsing shows the gateway machine's files), Windows App hand-off, and the SFTP overwrite prompt (conflicts default to *Keep both*). Saved RDP passwords are encrypted with a key file in the data dir, separately from the desktop app's Keychain entries.
+Open the printed `http://<ip>:8321/#token=…` on the phone. On a Mac it shares the desktop app's settings, inventory cache and token; on Linux it uses `~/.config/ec2-remote-access` (or `--data-dir`). Options: `--host`, `--port`, `--data-dir`, `--token`, `--static` (or `EC2RA_GATEWAY_HOST/PORT/TOKEN`, `EC2RA_DATA_DIR`). Headless differences: pickers report cancelled, SFTP conflicts default to *Keep both*, "local" file browsing shows the gateway machine, and saved RDP passwords are sealed with a key file in the data dir rather than the Keychain.
 
 ## How connections work
 

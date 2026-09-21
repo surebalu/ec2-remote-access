@@ -69,6 +69,27 @@ export interface ManualHost {
 
 export type Theme = 'system' | 'light' | 'dark'
 
+/** State of the in-app gateway that lets a phone browser use the app (see main/phoneAccess.ts). */
+export type PhoneAccessBind = 'https' | 'tailscale' | 'all'
+
+export interface PhoneAccessStatus {
+  enabled: boolean
+  running: boolean
+  port: number
+  bind: PhoneAccessBind
+  tailscaleAvailable: boolean
+  /** MagicDNS name of this machine when Tailscale is running (used by the 'https' bind mode). */
+  tailscaleHostname?: string
+  /** Whether the tailnet can issue HTTPS certificates (admin console → DNS → HTTPS Certificates). */
+  tailscaleHttps: boolean
+  /** One URL per reachable address, token included in the fragment; empty when not running. */
+  urls: string[]
+  token: string
+  /** Connected browsers: remote address and when they attached. */
+  clients: { address: string; since: number }[]
+  error?: string
+}
+
 /** Environment label and color for an account (or a manual-host group). */
 export interface AccountMeta {
   label?: string
@@ -130,6 +151,10 @@ export interface Settings {
   defaultWindowsUser: string
   /** Sent to every new SSH shell (e.g. a coloured PS1 and ls --color aliases). Per-host overrides.initCommand wins. */
   sshInitCommand: string
+  /** In-app gateway for phone browsers: start with the app, TCP port, and whether to bind only the Tailscale address. */
+  phoneAccessEnabled: boolean
+  phoneAccessPort: number
+  phoneAccessBind: PhoneAccessBind
   sshAgentSock: string
   defaultIdentityFile: string
   pemFile: string

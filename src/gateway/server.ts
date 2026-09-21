@@ -27,6 +27,8 @@ export interface GatewayOptions {
   /** Returns the local RDCleanPath proxy URL (ws://127.0.0.1:<port>/rdp) or null when RDP is unavailable. */
   rdpTarget?: () => Promise<string | null>
   log?: (line: string) => void
+  /** Called with the connected RPC clients whenever the set changes. */
+  onClientsChanged?: (clients: { address: string; since: number }[]) => void
 }
 
 export interface Gateway {
@@ -53,7 +55,12 @@ const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) =
 
 export function createGatewayServer(opts: GatewayOptions): Gateway {
   const log = opts.log ?? ((l: string): void => console.log(l))
-  const clients = new Set<WebSocket>()
+  const clients = new Map<WebSocket, { address: string; since: number }>()
+  const notifyClients = (): void => opts.onClientsChanged?.(Array.from(clients.values()))
+  /** Public host the browser used (behind `tailscale serve` that is the forwarded host, not 127.0.0.1). */
+  const publicHost = (req: IncomingMessage): string => String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost')
+  const remoteAddress = (req: IncomingMessage): string =>
+    String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress?.replace(/^::ffff:/, '') || 'unknown'
   const rpc = new WebSocketServer({ noServer: true })
   const relay = new WebSocketServer({ noServer: true })
 
@@ -67,6 +74,19 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
+    }
+    // Browsers always send Origin on WebSocket upgrades; it must be the page we served, not some other site the
+    // phone has open. Non-browser clients (tests, scripts) send none and are allowed through on the token alone.
+    const origin = req.headers.origin
+    if (origin) {
+      let originHost = ''
+      try { originHost = new URL(origin).host } catch { /* malformed */ }
+      if (originHost !== publicHost(req)) {
+        log(`[gateway] refused upgrade from origin ${origin} (expected ${publicHost(req)})`)
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+        socket.destroy()
+        return
+      }
     }
     if (url.pathname === '/ws') rpc.handleUpgrade(req, socket, head, (ws) => onRpcConnection(ws, req))
     else if (url.pathname === '/rdp' && opts.rdpTarget) relay.handleUpgrade(req, socket, head, (ws) => void onRdpConnection(ws))
@@ -103,11 +123,12 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
   }
 
   function onRpcConnection(ws: WebSocket, req: IncomingMessage): void {
-    clients.add(ws)
+    clients.set(ws, { address: remoteAddress(req), since: Date.now() })
+    notifyClients()
     const owned = new Map<string, keyof IpcApi>()
     const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '')
     const secure = forwardedProto === 'https' || forwardedProto === 'wss' || 'encrypted' in req.socket
-    const publicWsBase = `${secure ? 'wss' : 'ws'}://${req.headers.host ?? 'localhost'}`
+    const publicWsBase = `${secure ? 'wss' : 'ws'}://${publicHost(req)}`
     ws.send(JSON.stringify({ t: 'hello', protocol: 1 }))
 
     ws.on('message', (raw: RawData) => {
@@ -140,6 +161,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
 
     ws.on('close', () => {
       clients.delete(ws)
+      notifyClients()
       for (const [sid, closer] of owned) {
         const close = (opts.handlers as Record<string, AnyHandler>)[closer]
         void close(sid).catch(() => undefined)
@@ -165,7 +187,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     server,
     broadcast(channel, payload) {
       const data = JSON.stringify({ t: 'event', channel, payload })
-      for (const c of clients) if (c.readyState === WebSocket.OPEN) c.send(data)
+      for (const c of clients.keys()) if (c.readyState === WebSocket.OPEN) c.send(data)
     },
     listen: (port, host) =>
       new Promise((resolve, reject) => {
@@ -177,7 +199,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       }),
     close: () =>
       new Promise((resolve) => {
-        for (const c of clients) c.close(1001, 'Gateway shutting down')
+        for (const c of clients.keys()) c.close(1001, 'Gateway shutting down')
         rpc.close(); relay.close()
         server.close(() => resolve())
       })

@@ -40,6 +40,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'profiles:check': return profiles.map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
     case 'tunnels:list': case 'sso:sessions': return []
     case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', awsCli: null, windowsApp: false }
+    case 'phone:status': return { enabled: true, running: true, port: 8321, bind: 'https', tailscaleAvailable: true, tailscaleHostname: 'fixture-mac.tail1234.ts.net', tailscaleHttps: true, urls: ['https://fixture-mac.tail1234.ts.net/#token=fixture-token'], token: 'fixture-token', clients: [{ address: '100.101.102.5', since: Date.now() - 120000 }] }
     case 'ssh:open':
       if (failSsh) throw new Error('Fixture: authentication failed')
       return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu' }
@@ -166,6 +167,11 @@ app.whenReady().then(async () => {
     await click('Hosts')
     await js(`document.querySelector('button[title="Settings"]').click()`)
     await until(`!!document.querySelector('[role="dialog"]')`)
+    await until(`document.body.textContent.includes('Let my phone use this app')`)
+    await until(`!!document.querySelector('img[alt="QR code for the phone link"]')`)
+    assert.equal(await js(`document.body.textContent.includes('fixture-token')`), false, 'token must be masked in the settings dialog')
+    assert.equal(calls.some((c) => c.channel === 'phone:status'), true, 'settings dialog asks for phone access status')
+    await screenshot('settings-phone.png')
     win.setSize(960, 600)
     await new Promise((r) => setTimeout(r, 100))
     assert.equal(await js(`(() => { const r = document.querySelector('[role="dialog"]').getBoundingClientRect(); return r.height <= innerHeight && r.top >= 0 })()`), true)

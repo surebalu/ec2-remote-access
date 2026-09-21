@@ -3,7 +3,7 @@ import type {
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
-  SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget
+  SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -74,6 +74,10 @@ export interface IpcApi {
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
   'app:paths': () => Promise<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }>
+  'phone:status': () => Promise<PhoneAccessStatus>
+  /** Saves enabled/port/bind and (re)starts or stops the in-app gateway accordingly. */
+  'phone:configure': (patch: Partial<Pick<Settings, 'phoneAccessEnabled' | 'phoneAccessPort' | 'phoneAccessBind'>>) => Promise<PhoneAccessStatus>
+  'phone:rotateToken': () => Promise<PhoneAccessStatus>
 }
 
 /** Push channels (main -> renderer) */
@@ -85,6 +89,7 @@ export interface IpcEvents {
   'tunnels:changed': Tunnel[]
   'profiles:status': ProfileStatus
   'instances:updated': Instance[]
+  'phone:changed': PhoneAccessStatus
 }
 
 export type IpcChannel = keyof IpcApi

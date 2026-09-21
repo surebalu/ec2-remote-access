@@ -15,6 +15,7 @@ import { prepareRdp, releaseRdp, rdpLastError } from './rdp/sessions'
 import { getCredential, setCredential, deleteCredential, credentialKeys } from './creds'
 import { listTunnels, closeTunnel } from './tunnels'
 import { findBinary } from './util'
+import { phoneStatus, configurePhoneAccess, rotatePhoneToken } from './phoneAccess'
 
 type Handler<K extends keyof IpcApi> = (...args: Parameters<IpcApi[K]>) => ReturnType<IpcApi[K]>
 export type Handlers = { [K in keyof IpcApi]: Handler<K> }
@@ -118,4 +119,7 @@ export const handlers: Handlers = {
     awsCli: getSettings().awsCliPath || findBinary('aws'),
     windowsApp: hasWindowsApp()
   }),
+  'phone:status': async () => phoneStatus(),
+  'phone:configure': (patch) => configurePhoneAccess(patch),
+  'phone:rotateToken': () => rotatePhoneToken()
 }
