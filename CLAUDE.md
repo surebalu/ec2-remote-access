@@ -16,6 +16,8 @@ pnpm test                    # node --test over tests/*.test.ts (runs .ts direct
 node --experimental-strip-types --test tests/transfers.test.ts   # a single test file
 pnpm build                   # electron-vite build -> out/
 pnpm test:ui                 # Electron smoke test of the built renderer with synthetic hosts; run after pnpm build
+pnpm build:gateway           # electron-vite build + vite build -c vite.gateway.config.ts -> out/gateway/index.js
+pnpm gateway -- --host 0.0.0.0 --port 8321   # run the headless gateway (serves out/renderer + WebSocket RPC)
 pnpm dist                    # build + electron-builder DMG/zip for arm64 and x64 -> dist/
 pnpm dist:arm64              # arm64 only (faster local packaging)
 scripts/release.sh --bump patch [--publish]   # bump, typecheck, build; --publish uploads to S3 (needs UPDATE_URL, S3_URI)
@@ -23,7 +25,7 @@ scripts/release.sh --bump patch [--publish]   # bump, typecheck, build; --publis
 
 No linter is configured. `pnpm typecheck` is the gate `scripts/release.sh` runs before building; run it after touching `src/shared/` since both tsconfig projects include that directory.
 
-Tests live in `tests/` and use Node's built-in runner with no transpile step, so test files import source as `../src/.../file.ts` (explicit `.ts` extension) and can only cover code with no Electron or DOM imports: currently `src/shared/inventoryMerge.ts` and the SFTP `safeTransfer`/`destinations` modules. `tests/ui-smoke.cjs` launches Electron against `out/renderer` with a stub preload (`tests/ui-preload.cjs`), blocks network requests, uses a temp app-data dir, and writes screenshots to a temp directory it prints. It never reads `~/.aws` or opens real sessions.
+Tests live in `tests/` and use Node's built-in runner with no transpile step, so test files import source as `../src/.../file.ts` (explicit `.ts` extension) and can only cover code with no Electron or DOM imports and no `@shared` path alias: currently `src/shared/inventoryMerge.ts`, the SFTP `safeTransfer`/`destinations` modules, and the gateway server/host (`tests/gateway.test.ts` starts a real server on a random port and drives it with `ws`). `tests/ui-smoke.cjs` launches Electron against `out/renderer` with a stub preload (`tests/ui-preload.cjs`), blocks network requests, uses a temp app-data dir, and writes screenshots to a temp directory it prints. It never reads `~/.aws` or opens real sessions.
 
 Dev-only env vars read in `src/main/index.ts`: `RDP_DEBUG_PORT` enables Chromium remote debugging when running under `pnpm dev`.
 
@@ -38,6 +40,23 @@ Dev-only env vars read in `src/main/index.ts`: `RDP_DEBUG_PORT` enables Chromium
 
 ## Architecture
 
+### Host abstraction and the two front-ends
+
+The connection engine in `src/main` never imports `electron` directly (only `index.ts`, `ipc.ts`, `electronHost.ts`, `updater.ts` do). Everything environment-specific goes through the `Host` interface in `src/main/host.ts`: `broadcast` (push events to UIs), `userDataDir`, `openExternal`, native pickers/questions, clipboard, theme, and `encrypt`/`decrypt` for saved passwords. Two implementations exist:
+
+- `src/main/electronHost.ts`: real windows, native dialogs, `safeStorage`. Set by `index.ts` before anything else runs.
+- `src/gateway/host.ts`: headless. Broadcasts go to WebSocket clients, pickers return null (callers treat as cancelled), questions return their `defaultId`, passwords are AES-GCM sealed with `gateway.key` in the data dir.
+
+`src/main/handlers.ts` holds the complete `IpcApi` implementation as a plain object keyed by channel. `ipc.ts` registers each entry with `ipcMain`; `src/gateway/server.ts` dispatches WebSocket RPC to the same object. **Add new channels to `handlers.ts`, not to `ipc.ts`.** Any new Electron-only need goes on the `Host` interface with a gateway fallback.
+
+`src/main/store.ts` is a small atomic JSON store at `<userDataDir>/ec2-remote-access.json`, format-compatible with the electron-store file older versions wrote; it is lazy so the host can be set first.
+
+### Gateway (`src/gateway`)
+
+`server.ts` is a plain `node:http` server plus `ws`: serves `out/renderer` (rewriting the CSP `connect-src` so the browser may open same-origin WebSockets), `/ws?token=` for RPC (`{t:'call',id,channel,args}` / `{t:'result'|'error'}` / pushed `{t:'event',channel,payload}`), and `/rdp?token=` as a byte-transparent relay to the local RDCleanPath proxy (the `rdp:prepare` result's `proxyUrl` is rewritten to the gateway origin). It tracks sessions each socket opened (`ssh:open`, `sftp:open`, `rdp:prepare`) and closes them when the socket drops. `index.ts` is the CLI: args/env, token file, data dir defaults (shares the desktop app's dir on macOS), shutdown. `vite.gateway.config.ts` bundles it in SSR mode with all dependencies external; the build must contain no `electron` import.
+
+On the browser side `src/renderer/wsApi.ts` provides `window.api` when no preload did (see `main.tsx`), handling `clipboard:write`, `shell:open`, `theme:set` and `dialog:pickFile` locally and forwarding the rest. The renderer bundle is identical for Electron and the gateway.
+
 ### Process boundary and the IPC contract
 
 `src/shared/ipc.ts` is the single source of truth for main ↔ renderer communication:
@@ -47,7 +66,7 @@ Dev-only env vars read in `src/main/index.ts`: `RDP_DEBUG_PORT` enables Chromium
 
 The preload (`src/preload/index.ts`) exposes exactly two typed functions on `window.api`: `invoke(channel, ...args)` and `on(channel, cb)` (returns an unsubscribe), plus `pathForFile` for Finder drops. The main side registers every handler in `src/main/ipc.ts` through a typed `handle()` wrapper that logs and rethrows errors, and pushes events with a `send()` helper that broadcasts to all windows.
 
-**To add a channel**: declare it in `IpcApi`/`IpcEvents`, add the handler in `src/main/ipc.ts`, call it from the renderer via `window.api.invoke(...)`. Types in `src/shared/types.ts` are shared by both sides; the renderer never imports from `src/main`.
+**To add a channel**: declare it in `IpcApi`/`IpcEvents`, add the handler in `src/main/handlers.ts`, call it from the renderer via `window.api.invoke(...)`. Both front-ends pick it up automatically. Types in `src/shared/types.ts` are shared by both sides; the renderer never imports from `src/main`.
 
 ### Main process (`src/main`)
 

@@ -1,23 +1,25 @@
-import { safeStorage } from 'electron'
 import { store } from './store'
+import { host } from './host'
 import type { StoredCredential } from '@shared/types'
 
-/** Per-instance RDP credentials, encrypted with the macOS Keychain-backed key via Electron safeStorage. */
+/**
+ * Per-instance RDP credentials, encrypted by the host (Electron safeStorage = macOS Keychain key; the gateway uses
+ * its own key file). An entry another host wrote fails to decrypt and reads as "no saved password".
+ */
 type Blob = Record<string, string>
 
 function all(): Blob {
-  return (store.get('credentials' as never) as Blob | undefined) ?? {}
+  return store.get('credentials') ?? {}
 }
 function save(b: Blob): void {
-  store.set('credentials' as never, b as never)
+  store.set('credentials', b)
 }
 
 export function getCredential(instanceKey: string): StoredCredential | null {
   const enc = all()[instanceKey]
   if (!enc) return null
-  if (!safeStorage.isEncryptionAvailable()) return null
   try {
-    const json = safeStorage.decryptString(Buffer.from(enc, 'base64'))
+    const json = host().decrypt(Buffer.from(enc, 'base64'))
     return JSON.parse(json) as StoredCredential
   } catch {
     return null
@@ -25,9 +27,10 @@ export function getCredential(instanceKey: string): StoredCredential | null {
 }
 
 export function setCredential(instanceKey: string, cred: StoredCredential): void {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('Keychain encryption is not available; password not saved.')
+  const enc = host().encrypt(JSON.stringify(cred))
+  if (!enc) throw new Error('Secure storage is not available; password not saved.')
   const b = all()
-  b[instanceKey] = safeStorage.encryptString(JSON.stringify(cred)).toString('base64')
+  b[instanceKey] = enc.toString('base64')
   save(b)
 }
 

@@ -1,6 +1,8 @@
 import { app, BrowserWindow, shell, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
+import { setHost } from './host'
+import { electronHost } from './electronHost'
 import { closeAllSsh } from './ssh/session'
 import { closeAllSftp } from './sftp/session'
 import { closeAllTunnels } from './tunnels'
@@ -8,6 +10,8 @@ import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
 import { setupAutoUpdate } from './updater'
+
+setHost(electronHost)
 
 if (process.env.ELECTRON_RENDERER_URL && process.env.RDP_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.RDP_DEBUG_PORT)

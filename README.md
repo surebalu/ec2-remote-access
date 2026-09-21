@@ -92,6 +92,23 @@ scripts/release.sh --bump minor --publish
 
 The app built with `UPDATE_URL` checks that feed at launch and every six hours, downloads in the background, and offers a restart. Builds made without `UPDATE_URL` never phone home.
 
+## Gateway: use it from your phone
+
+The same UI and connection engine can run as a small server (no Electron) and be opened in Safari or Chrome on a phone or tablet.
+
+```bash
+pnpm build:gateway                       # builds the UI and out/gateway/index.js
+pnpm gateway -- --host 0.0.0.0           # listens on :8321; prints a URL with the access token
+```
+
+Open the printed `http://<ip>:8321/#token=…` on the phone (add it to the home screen for an app-like window). The token is stored by the page and removed from the address bar. On a Mac the gateway shares the desktop app's settings and inventory cache; on Linux it uses `~/.config/ec2-remote-access` (or `--data-dir`). AWS credentials and SSO tokens stay on the gateway machine; the phone only ever holds the gateway token.
+
+**Reach it safely.** The gateway speaks plain HTTP and is meant to sit on a private network: install [Tailscale](https://tailscale.com) on the gateway host and the phone, bind with `--host <tailscale-ip>` (or `0.0.0.0`), and never expose the port to the internet. `tailscale serve --bg 8321` adds HTTPS, which also unlocks the async clipboard API in Safari.
+
+Options: `--host`, `--port`, `--data-dir`, `--token`, `--static` (or `EC2RA_GATEWAY_HOST/PORT/TOKEN`, `EC2RA_DATA_DIR`). Sessions opened from a browser tab are closed when that tab disconnects.
+
+**Not available through the gateway:** native file pickers (SFTP upload/download-with-dialog; "local" browsing shows the gateway machine's files), Windows App hand-off, and the SFTP overwrite prompt (conflicts default to *Keep both*). Saved RDP passwords are encrypted with a key file in the data dir, separately from the desktop app's Keychain entries.
+
 ## How connections work
 
 | Situation | SSH | RDP |

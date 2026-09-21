@@ -8,7 +8,6 @@
 import ssh2, { type ConnectConfig, type SFTPWrapper } from 'ssh2'
 const { Client } = ssh2
 type Client = InstanceType<typeof ssh2.Client>
-import { BrowserWindow, dialog } from 'electron'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join as joinLocal } from 'node:path'
@@ -16,6 +15,7 @@ import { posix } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { SftpEntry, SftpEvent, SftpOpenRequest, SftpSessionInfo, SftpTransfer } from '@shared/types'
+import { host } from '../host'
 import { findInstance } from '../aws/inventory'
 import { decideRoute, defaultSshUser } from '../connect/route'
 import { authConfig } from '../ssh/session'
@@ -49,7 +49,7 @@ const sessions = new Map<string, Live>()
 const history = new Map<string, SftpTransfer[]>()
 
 function send<T>(channel: string, payload: T): void {
-  for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
+  host().broadcast(channel, payload)
 }
 const emitEvent = (ev: SftpEvent): void => send('sftp:event', ev)
 const emitTransfer = (t: SftpTransfer): void => send('sftp:transfer', { ...t })
@@ -354,12 +354,12 @@ function counter(onBytes: (n: number) => void): Transform {
 
 async function chooseConflict(l: Live, t: Transfer, path: string): Promise<ConflictChoice> {
   if (t.cancelled || sessions.get(l.info.sessionId) !== l) return 'cancel'
-  const r = await dialog.showMessageBox({
-    type: 'question', title: 'File already exists', message: `A file named “${posix.basename(path)}” already exists.`,
+  const response = await host().askQuestion({
+    title: 'File already exists', message: `A file named “${posix.basename(path)}” already exists.`,
     detail: `${t.state.kind === 'upload' ? `Upload to ${l.info.title}` : 'Download to this Mac'}\nDestination: ${path}\nSource: ${t.state.kind === 'upload' ? t.state.localPath : t.state.remotePath}\n\nReplace updates this file only after the transfer completes. Keep both creates a numbered copy.`,
-    buttons: ['Keep both', 'Skip', 'Replace', 'Cancel transfer'], defaultId: 0, cancelId: 3, noLink: true
+    buttons: ['Keep both', 'Skip', 'Replace', 'Cancel transfer'], defaultId: 0, cancelId: 3
   })
-  return (['keep-both', 'skip', 'replace', 'cancel'] as const)[r.response] ?? 'cancel'
+  return (['keep-both', 'skip', 'replace', 'cancel'] as const)[response] ?? 'cancel'
 }
 
 async function uploadFile(l: Live, t: Transfer, progress: (n: number) => void): Promise<'done' | 'skipped'> {
@@ -408,9 +408,9 @@ export async function uploadSftp(sessionId: string, localPaths: string[], remote
 }
 
 export async function pickUploads(sessionId: string, remoteDir: string): Promise<number> {
-  const r = await dialog.showOpenDialog({ title: 'Upload to ' + remoteDir, properties: ['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles'], buttonLabel: 'Upload' })
-  if (r.canceled || r.filePaths.length === 0) return 0
-  return uploadSftp(sessionId, r.filePaths, remoteDir)
+  const paths = await host().pickPaths({ title: 'Upload to ' + remoteDir, kind: 'any', multiple: true, buttonLabel: 'Upload' })
+  if (!paths || paths.length === 0) return 0
+  return uploadSftp(sessionId, paths, remoteDir)
 }
 
 /** Queues downloads of entries (directories recursively) so that each lands at `localFor(entry)`. */
@@ -434,13 +434,13 @@ export async function downloadSftp(sessionId: string, entries: SftpEntry[]): Pro
   const l = live(sessionId)
   if (entries.length === 0) return 0
   if (entries.length === 1 && entries[0].type !== 'dir') {
-    const r = await dialog.showSaveDialog({ title: 'Save file', defaultPath: entries[0].name, buttonLabel: 'Download' })
-    if (r.canceled || !r.filePath) return 0
-    return queueDownloads(l, entries, () => r.filePath)
+    const file = await host().pickSavePath({ title: 'Save file', defaultPath: entries[0].name, buttonLabel: 'Download' })
+    if (!file) return 0
+    return queueDownloads(l, entries, () => file)
   }
-  const r = await dialog.showOpenDialog({ title: 'Download into folder', properties: ['openDirectory', 'createDirectory'], buttonLabel: 'Download here' })
-  if (r.canceled || r.filePaths.length === 0) return 0
-  return queueDownloads(l, entries, (e) => joinLocal(r.filePaths[0], e.name))
+  const dirs = await host().pickPaths({ title: 'Download into folder', kind: 'directory', buttonLabel: 'Download here' })
+  if (!dirs || dirs.length === 0) return 0
+  return queueDownloads(l, entries, (e) => joinLocal(dirs[0], e.name))
 }
 
 /** Queues downloads straight into localDir, keeping the remote names. */

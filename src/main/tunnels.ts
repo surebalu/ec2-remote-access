@@ -1,12 +1,11 @@
-import { BrowserWindow } from 'electron'
 import type { Tunnel } from '@shared/types'
+import { host } from './host'
 import type { SsmHandle } from './ssm/session'
 
 const tunnels = new Map<string, { tunnel: Tunnel; handle?: SsmHandle }>()
 
 function broadcast(): void {
-  const list = listTunnels()
-  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('tunnels:changed', list)
+  host().broadcast('tunnels:changed', listTunnels())
 }
 
 export function listTunnels(): Tunnel[] {

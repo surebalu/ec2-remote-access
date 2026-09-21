@@ -1,7 +1,6 @@
 import ssh2, { type ClientChannel, type ConnectConfig } from 'ssh2'
 const { Client } = ssh2
 type Client = InstanceType<typeof ssh2.Client>
-import { BrowserWindow } from 'electron'
 import { readFileSync } from 'node:fs'
 import { StringDecoder } from 'node:string_decoder'
 import { spawn } from 'node:child_process'
@@ -14,6 +13,7 @@ import { decideRoute, defaultSshUser, defaultIdentityFile, defaultInitCommand } 
 import type { Instance } from '@shared/types'
 import { startSshStream, type SsmHandle } from '../ssm/session'
 import { getSettings } from '../store'
+import { host } from '../host'
 import { findBinary, shellQuote, uid } from '../util'
 import { getCredential } from '../creds'
 import { lookupClient, registerClient, unregisterClient } from './clients'
@@ -30,7 +30,7 @@ interface Live {
 const sessions = new Map<string, Live>()
 
 function emit(ev: SshEvent): void {
-  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('ssh:event', ev)
+  host().broadcast('ssh:event', ev)
 }
 
 /**

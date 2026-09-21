@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -9,6 +8,7 @@ import { startPortForward } from '../ssm/session'
 import { getSettings } from '../store'
 import { addTunnel, updateTunnel } from '../tunnels'
 import { freePort, uid } from '../util'
+import { host as appHost } from '../host'
 
 export const WINDOWS_APP = '/Applications/Windows App.app'
 
@@ -21,7 +21,7 @@ function rdpClientName(): string {
 }
 
 function writeRdpFile(id: string, host: string, port: number, user: string, title: string): string {
-  const dir = join(app.getPath('userData'), 'rdp')
+  const dir = join(appHost().userDataDir(), 'rdp')
   mkdirSync(dir, { recursive: true })
   const file = join(dir, `${id.replace(/[^\w.-]/g, '_')}.rdp`)
   const lines = [

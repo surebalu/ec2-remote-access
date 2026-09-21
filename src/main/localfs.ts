@@ -1,9 +1,9 @@
 /** Local filesystem browsing for the left pane of the Files tab. Same entry shape as the SFTP side. */
-import { shell } from 'electron'
 import { lstat, mkdir, readdir, realpath, rename, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { SftpEntry } from '@shared/types'
+import { host } from './host'
 
 export function localHome(): string {
   return homedir()
@@ -52,9 +52,9 @@ export async function localRename(from: string, to: string): Promise<void> {
 
 /** Moves to the Trash rather than deleting outright. */
 export async function localTrash(paths: string[]): Promise<void> {
-  for (const p of paths) await shell.trashItem(p)
+  await host().trashPaths(paths)
 }
 
 export function localReveal(p: string): void {
-  shell.showItemInFolder(p)
+  host().revealPath(p)
 }

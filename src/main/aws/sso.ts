@@ -6,7 +6,6 @@
 import { SSOOIDCClient, RegisterClientCommand, StartDeviceAuthorizationCommand, CreateTokenCommand } from '@aws-sdk/client-sso-oidc'
 import { SSOClient, paginateListAccounts, paginateListAccountRoles } from '@aws-sdk/client-sso'
 import { getSSOTokenFilepath } from '@aws-sdk/shared-ini-file-loader'
-import { shell } from 'electron'
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -15,6 +14,7 @@ import { CONFIG_FILE, CREDENTIALS_FILE, upsertSection, removeSection, renameSect
 import { listProfiles } from './profiles'
 import { resetCredentials } from './credentials'
 import { uid } from '../util'
+import { host } from '../host'
 
 interface Flow {
   id: string
@@ -55,7 +55,7 @@ export async function startDeviceFlow(req: SsoStartRequest): Promise<SsoDeviceFl
       expiresAt: Date.now() + (auth.expiresIn ?? 600) * 1000
     }
     flows.set(flow.id, flow)
-    if (req.openBrowser !== false && auth.verificationUriComplete) void shell.openExternal(auth.verificationUriComplete)
+    if (req.openBrowser !== false && auth.verificationUriComplete) void host().openExternal(auth.verificationUriComplete)
     return { flowId: flow.id, userCode: auth.userCode!, verificationUri: auth.verificationUri!, verificationUriComplete: auth.verificationUriComplete!, expiresIn: auth.expiresIn ?? 600 }
   } finally {
     client.destroy()
