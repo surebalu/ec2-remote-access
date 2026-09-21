@@ -5,6 +5,8 @@ import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
 import type { AccentColor } from '@shared/types'
+import { TERMINAL_THEMES, TERMINAL_FONTS, resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { isDarkMode } from '../store'
 
 export default function SettingsDialog(): ReactElement | null {
   const s = useStore()
@@ -52,6 +54,30 @@ export default function SettingsDialog(): ReactElement | null {
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
+        </div>
+        <label className="muted">Terminal</label>
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_72px] gap-1.5">
+            <select className="input" title="Colour scheme" value={draft.terminalTheme ?? 'auto'} onChange={(e) => { upd('terminalTheme', e.target.value); void s.saveSettings({ terminalTheme: e.target.value }) }}>
+              {TERMINAL_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <input className="input" list="terminal-fonts" title="Font family" placeholder="Monaco" value={draft.terminalFont ?? ''}
+              onChange={(e) => upd('terminalFont', e.target.value)} onBlur={() => void s.saveSettings({ terminalFont: draft.terminalFont })} />
+            <datalist id="terminal-fonts">{TERMINAL_FONTS.map((f) => <option key={f} value={f} />)}</datalist>
+            <input className="input" type="number" title="Font size (px)" min={9} max={24} value={draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE}
+              onChange={(e) => { const n = Math.min(24, Math.max(9, Number(e.target.value) || DEFAULT_TERMINAL_FONT_SIZE)); upd('terminalFontSize', n); void s.saveSettings({ terminalFontSize: n }) }} />
+          </div>
+          {(() => {
+            const t = resolveTerminalTheme(draft.terminalTheme, isDarkMode())
+            const ansi = [t.black, t.red, t.green, t.yellow, t.blue, t.magenta, t.cyan, t.white].filter(Boolean) as string[]
+            return (
+              <div className="rounded-md border px-2.5 py-1.5" style={{ background: t.background, color: t.foreground, borderColor: 'var(--border)', fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE, lineHeight: 1.35 }}>
+                <div><span style={{ color: t.green ?? t.foreground }}>ec2-user@ip-10-0-2-149</span>:<span style={{ color: t.blue ?? t.foreground }}>~</span>$ ls -la</div>
+                <div className="flex gap-1 pt-1">{ansi.map((c, i) => <span key={i} className="h-2.5 w-4 rounded-sm" style={{ background: c }} />)}</div>
+              </div>
+            )
+          })()}
+          <div className="muted text-[10px]">Colour scheme, font and size for embedded SSH tabs. Open terminals update immediately. Monaco, Menlo and SF Mono ship with macOS.</div>
         </div>
         <label className="muted">Regions</label>
         <div>

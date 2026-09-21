@@ -136,6 +136,17 @@ app.whenReady().then(async () => {
     await key('Escape')
     await until(`!document.querySelector('[role="dialog"]')`)
     await screenshot('ssh-reconnected.png')
+
+    // Terminal colour scheme applies live to the open SSH tab and persists through settings:set.
+    await js(`document.querySelector('button[title="Settings"]').click()`)
+    await until(`!!document.querySelector('[role="dialog"] select option[value="dracula"]')`)
+    await js(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="dracula"]').closest('select'); sel.value = 'dracula'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await until(`getComputedStyle(document.querySelector('.xterm').parentElement).backgroundColor === 'rgb(40, 42, 54)'`)
+    assert.equal(calls.filter((c) => c.channel === 'settings:set').at(-1).args[0].terminalTheme, 'dracula')
+    await screenshot('settings-terminal.png')
+    await key('Escape')
+    await until(`!document.querySelector('[role="dialog"]')`)
+    await screenshot('terminal-dracula.png')
     await click('Hosts')
     await js(`document.querySelector('button[title="Settings"]').click()`)
     await until(`!!document.querySelector('[role="dialog"]')`)

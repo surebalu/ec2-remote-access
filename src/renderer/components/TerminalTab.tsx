@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { isDarkMode, useStore, type Tab } from '../store'
+import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import HostActions from './HostActions'
 
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -13,17 +14,22 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const reconnectRef = useRef<() => void>(() => undefined)
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
+  const themeId = useStore((s) => s.settings?.terminalTheme)
+  const font = useStore((s) => s.settings?.terminalFont)
+  const fontSize = useStore((s) => s.settings?.terminalFontSize) ?? DEFAULT_TERMINAL_FONT_SIZE
+  const appTheme = useStore((s) => s.settings?.theme)
+  const theme = resolveTerminalTheme(themeId, isDarkMode())
+  const background = theme.background ?? (isDarkMode() ? '#0f1115' : '#ffffff')
 
   useEffect(() => {
     const el = ref.current!
-    const dark = isDarkMode()
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: 'JetBrains Mono, SF Mono, Menlo, monospace',
-      fontSize: 13,
+      fontFamily: terminalFontFamily(font),
+      fontSize,
       scrollback: 10_000,
       allowProposedApi: true,
-      theme: dark ? { background: '#0f1115' } : { background: '#ffffff', foreground: '#1c2128', cursor: '#1c2128' }
+      theme
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -115,6 +121,23 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     }
   }, [active])
 
+  // Live-apply appearance changes to the running terminal (Settings dialog, or the OS switching light/dark
+  // while the app follows the system and the terminal theme is 'auto').
+  useEffect(() => {
+    const apply = (): void => {
+      const term = termRef.current
+      if (!term) return
+      term.options.theme = resolveTerminalTheme(themeId, isDarkMode())
+      term.options.fontFamily = terminalFontFamily(font)
+      term.options.fontSize = fontSize
+      fitRef.current?.fit()
+    }
+    apply()
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [themeId, font, fontSize, appTheme])
+
   return (
     <div className="flex h-full flex-col">
       <div className="panel flex flex-wrap items-center gap-2 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
@@ -130,7 +153,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           {tab.status === 'closed' || tab.status === 'error' ? 'Close tab' : 'Disconnect'}
         </button>
       </div>
-      <div ref={ref} className="min-h-0 w-full flex-1" style={{ background: isDarkMode() ? '#0f1115' : '#ffffff' }} />
+      <div ref={ref} className="min-h-0 w-full flex-1" style={{ background }} />
     </div>
   )
 }

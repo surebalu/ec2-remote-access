@@ -110,6 +110,11 @@ export interface Settings {
   /** user-created folders for non-AWS servers (a folder may be empty); color/label live in accountMeta['group:<name>'] */
   manualFolders: string[]
   theme: Theme
+  /** Colour scheme id for embedded SSH terminals (see renderer/terminalThemes.ts); 'auto' follows `theme`. */
+  terminalTheme: string
+  /** Font family for embedded SSH terminals. Default Monaco. */
+  terminalFont: string
+  terminalFontSize: number
   /** keyed by profile name, or `group:<name>` for manual-host groups */
   accountMeta: Record<string, AccountMeta>
   groupBy: GroupBy
