@@ -10,7 +10,10 @@ export async function setupAutoUpdate(): Promise<void> {
   if (!app.isPackaged) return
   if (!existsSync(join(process.resourcesPath, 'app-update.yml'))) return
   try {
-    const { autoUpdater } = await import('electron-updater')
+    const mod = await import('electron-updater')
+    // electron-updater is CJS; under an ESM import the class instance may sit on `.default` instead of the named export.
+    const autoUpdater = mod.autoUpdater ?? (mod as unknown as { default?: { autoUpdater?: typeof mod.autoUpdater } }).default?.autoUpdater
+    if (!autoUpdater) { console.warn('[updater] disabled: autoUpdater export not found'); return }
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.on('update-downloaded', (info) => {

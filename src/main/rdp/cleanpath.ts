@@ -297,6 +297,9 @@ async function handle(ws: WebSocket, ctx: { token?: string }): Promise<void> {
     })
   }
 
+  // Probe the far side at the TCP layer so a silently-dead SSM tunnel (idle-timed-out, or the plugin's WebSocket to
+  // AWS dropped) becomes a socket error within ~1 min instead of an indefinite freeze.
+  tls.setKeepAlive(true, 30_000)
   ws.send(encodeResponse(confirm, certChain(tls), `${target.host}:${target.port}`), { binary: true })
 
   // Transparent relay from here on. Byte counters let us tell the user roughly *when* the server dropped us.

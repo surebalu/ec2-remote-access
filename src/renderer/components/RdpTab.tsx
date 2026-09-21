@@ -35,7 +35,7 @@ const INTENTIONAL_END = /logoff|logged off|by (the )?user|user[- ]initiated|term
 const TAKEN_OVER = /another user connected|forcing the disconnection/i
 const TAKEN_OVER_MSG = 'Another connection took over this Windows session (another tab or RDP client signed in as the same user). Click Reconnect to take it back.'
 
-type Phase = 'connecting' | 'connected' | 'waiting' | 'failed' | 'closed'
+type Phase = 'connecting' | 'connected' | 'waiting' | 'signin' | 'closed' | 'failed'
 
 /**
  * HiDPI: request the desktop at the display's native pixel density and ask Windows for the matching DPI scale, so
@@ -63,6 +63,8 @@ interface Failure {
   message: string
   detail: string
   fatal: boolean
+  /** The AWS SSO token expired: the fix is to sign in, not to retry, so it does not count as a lost attempt. */
+  authExpired?: boolean
 }
 
 /** Turns an IronRDP error into a user-facing message, preferring the proxy's account of what the server did. */
@@ -77,6 +79,9 @@ async function describeFailure(e: unknown, sessionId: string): Promise<Failure> 
   // to it) dropped the TCP connection. The proxy usually knows more about when that happened.
   if (/not enough bytes|read frame|UnexpectedEof|connection (reset|closed)/i.test(detail)) {
     message = 'The server dropped the connection before the session was established.'
+  }
+  if (/token is expired|sso session|ExpiredToken|credentials|not authorized to perform|InvalidClientTokenId|UnrecognizedClient/i.test(detail)) {
+    return { message: 'Your AWS session expired. Sign in and this desktop will reconnect automatically.', detail, fatal: false, authExpired: true }
   }
   const proxyDetail = await window.api.invoke('rdp:lastError', sessionId).catch(() => undefined)
   if (proxyDetail) message = proxyDetail
@@ -185,6 +190,27 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
       }, delay)
     }
 
+    /**
+     * The SSO token expired mid-session. Don't burn reconnect attempts on it: show the sign-in prompt (noteOperationError
+     * already raised the banner) and poll the store's auth state; the moment a fresh token lands, reconnect for free.
+     */
+    const waitForSignIn = (ui: UserInteraction): void => {
+      clearTimers()
+      c.attempt = 0
+      setPhase('signin')
+      const msg = 'AWS session expired. Sign in and this desktop reconnects automatically.'
+      say(msg)
+      updateTab(id, { status: 'connecting', message: msg })
+      c.ticker = setInterval(() => {
+        if (dead()) { clearTimers(); return }
+        if (useStore.getState().authState().kind === 'ok') {
+          clearTimers()
+          say('Signed in; reconnecting…')
+          void connectOnce(ui)
+        }
+      }, 1500)
+    }
+
     /** One full connection cycle: resolve the path, connect, then run until the session ends. */
     const connectOnce = async (ui: UserInteraction): Promise<void> => {
       const attempt = c.attempt
@@ -261,6 +287,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           toast('error', `RDP: ${f.message}`)
           return
         }
+        if (f.authExpired) { waitForSignIn(ui); return }
         scheduleRetry(ui, f.message)
       }
     }
@@ -378,6 +405,11 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
               Cancel
             </button>
           </>
+        )}
+        {phase === 'signin' && (
+          <button className="btn btn-primary !py-0.5" disabled={useStore.getState().loggingIn} onClick={() => void useStore.getState().refreshToken()}>
+            Sign in
+          </button>
         )}
         {(phase === 'failed' || phase === 'closed') && (
           <button className="btn !py-0.5" onClick={() => ctl.current.reconnect?.()}>
