@@ -16,11 +16,11 @@ import { der, decodeInteger, readAll, readTlv } from './der'
 import { log } from '../log'
 
 /**
- * A relay is declared stalled when the client has been sending input for this long without a single byte back.
- * An idle desktop is silent in both directions, so idleness alone never trips it; a dead SSM tunnel or a half-open
- * socket does, because the server never answers the user's clicks.
+ * Backstop for a half-open socket that TCP keepalive somehow missed: only when the client has been sending input
+ * with zero bytes back for a full 3 minutes. A healthy RDP session answers input in milliseconds, so this never
+ * trips on a working connection; keepalive (setKeepAlive below) is the real detector and fires within ~1 min.
  */
-const STALL_MS = 30_000
+const STALL_MS = 180_000
 /** Live relays per proxy token, so a dying SSM tunnel can cut them and let the client reconnect promptly. */
 const activeRelays = new Map<string, Set<() => void>>()
 
