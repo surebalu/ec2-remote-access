@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged with the keys Xcode generates from the INFOPLIST_KEY_* build settings; only dictionaries and arrays,
+	     which build settings cannot express, live here. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- The recommended pairing is HTTPS via `tailscale serve`, but Phone access can also hand out plain-HTTP
+		     links on the Tailscale IP (WireGuard-encrypted) or the LAN. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<!-- ec2remote://pair?url=<pairing link> pairs without the camera (a link sent to yourself, the simulator). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>me.surendrabalu.EC2Remote.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ec2remote</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tailscale</string>
+	</array>
+</dict>
+</plist>

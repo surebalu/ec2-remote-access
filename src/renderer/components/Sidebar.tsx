@@ -26,6 +26,7 @@ export default function Sidebar(): ReactElement {
     const r = routeOf(i, s.settings).route
     if (r === 'direct' || r === 'ssm') reachable++
   }
+  const workspaces = s.settings?.workspaces ?? []
   const errorsFor = (p: string): string[] => s.scanErrors.filter((e) => e.profile === p).map((e) => `${e.region}: ${e.message}`)
   const scanned = Object.values(s.progress)
   const done = scanned.filter((p) => p.status !== 'running').length
@@ -206,6 +207,12 @@ export default function Sidebar(): ReactElement {
             </button>
           )
         })}
+        {workspaces.length > 0 && <div className="rail-sep" />}
+        {workspaces.map((w) => (
+          <button key={w.id} className="rail-btn" title={`Workspace: ${w.name} · ${w.tabs.length} sessions`} onClick={() => s.openWorkspace(w.id)}>
+            <Icon.grid />
+          </button>
+        ))}
         <div className="mt-auto">
           <div className="rail-sep" />
           <button className="rail-btn" disabled={s.scanning} title={s.scanning ? `Scanning… ${done}/${scanned.length} regions` : 'Rescan'} onClick={() => void s.scan()}>
@@ -227,19 +234,21 @@ export default function Sidebar(): ReactElement {
 
   return (
     <aside className="sidebar panel flex shrink-0 flex-col overflow-y-auto border-r" style={{ borderColor: 'var(--border)' }}>
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-2 px-3 pt-3">
+      {/* Summary: each tile doubles as a quick filter. */}
+      <div className="grid grid-cols-3 gap-1.5 px-3 pt-3">
         {(
           [
-            ['Hosts', instances.length, 'violet'],
-            ['Running', running, 'emerald'],
-            ['Routes', reachable, 'sky']
-          ] as [string, number, string][]
-        ).map(([label, n, color]) => (
-          <div key={label} className="stat" data-accent={color}>
-            <div className="n">{n}</div>
-            <div className="l">{label}</div>
-          </div>
+            ['Hosts', instances.length, 'violet', 'Show every host', s.stateFilter === 'all' && s.reachFilter === 'all', { stateFilter: 'all', reachFilter: 'all' }],
+            ['Running', running, 'emerald', 'Show running hosts', s.stateFilter === 'running' && s.reachFilter === 'all', { stateFilter: 'running', reachFilter: 'all' }],
+            ['Reachable', reachable, 'sky', 'Show hosts with a connection route (SSM or direct)', s.reachFilter === 'reachable', { reachFilter: 'reachable' }]
+          ] as [string, number, string, string, boolean, Parameters<typeof s.set>[0]][]
+        ).map(([label, n, color, title, on, patch]) => (
+          <span key={label} className="grid" data-accent={color}>
+            <button className={`stat text-left ${on ? 'on' : ''}`} title={title} aria-pressed={on} onClick={() => s.set({ ...patch, activeTab: 'hosts' })}>
+              <div className="n">{n}</div>
+              <div className="l">{label}</div>
+            </button>
+          </span>
         ))}
       </div>
 
@@ -354,7 +363,7 @@ export default function Sidebar(): ReactElement {
               {openAcct && accountHosts(p.name)}
               {(st?.state === 'error' || errs.length > 0) && (
                 <div className="mb-1 ml-8 text-[11px]" style={{ color: 'var(--err)' }} title={[st?.message, ...errs].filter(Boolean).join('\n')}>
-                  {st?.state === 'error' ? st.message?.slice(0, 70) : `${errs.length} region error(s)`}
+                  {st?.state === 'error' ? st.message?.slice(0, 70) : `${errs.length} region${errs.length === 1 ? '' : 's'} failed to scan`}
                   {st?.state === 'error' && p.kind === 'sso' && (
                     <button className="ml-1 underline" onClick={() => void s.login(p.name)}>
                       login
@@ -425,6 +434,46 @@ export default function Sidebar(): ReactElement {
           </li>
         )}
       </ul>
+
+      {/* Saved sets of session tabs */}
+      {(workspaces.length > 0 || s.tabs.length > 0) && (
+        <>
+          <div className="mt-4 flex items-center justify-between px-3">
+            <span className="section-title">Workspaces</span>
+            <button className="btn btn-ghost btn-sm btn-icon" title="Save the open tabs as a workspace" disabled={!s.tabs.length} onClick={() => s.set({ workspaceSaveOpen: true })}>
+              <Icon.plus />
+            </button>
+          </div>
+          <ul className="mt-1 space-y-0.5 px-2">
+            {workspaces.map((w) => (
+              <li key={w.id} className="group">
+                <div className="nav-row">
+                  <button className="flex min-w-0 flex-1 items-center gap-2 text-left" title={`Open ${w.tabs.length} session${w.tabs.length === 1 ? '' : 's'}: ${w.tabs.map((t) => t.kind.toUpperCase()).join(', ')}`} onClick={() => s.openWorkspace(w.id)}>
+                    <Icon.grid className="muted" />
+                    <span className="truncate">{w.name}</span>
+                  </button>
+                  <span className="mono muted text-[11px]">{w.tabs.length}</span>
+                  <button
+                    className="muted opacity-0 group-hover:opacity-70 hover:!opacity-100"
+                    title="Delete workspace"
+                    onClick={() => { if (window.confirm(`Delete the workspace "${w.name}"? Open sessions are not affected.`)) void s.deleteWorkspace(w.id) }}
+                  >
+                    <Icon.x />
+                  </button>
+                </div>
+              </li>
+            ))}
+            {!workspaces.length && (
+              <li>
+                <button className="nav-row muted w-full text-left" onClick={() => s.set({ workspaceSaveOpen: true })}>
+                  <Icon.grid />
+                  <span className="flex-1">Save open tabs…</span>
+                </button>
+              </li>
+            )}
+          </ul>
+        </>
+      )}
 
       {/* Footer */}
       <div className="mt-auto space-y-2 border-t p-3" style={{ borderColor: 'var(--border)' }}>

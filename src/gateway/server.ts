@@ -10,6 +10,9 @@
  * Auth is a single shared bearer token in the query string; the intended deployment sits behind Tailscale (or
  * `tailscale serve` for HTTPS), so the token is a second lock rather than the only one. Sessions a socket opened
  * (SSH / SFTP / RDP) are closed when that socket goes away, so a phone losing signal does not leak connections.
+ * A page that identifies itself (`/ws?client=<id>`, random per page load) gets a grace period instead: iOS suspends
+ * a backgrounded app's sockets within seconds, and the same page reconnecting within `resumeGraceMs` keeps its
+ * terminals and desktops rather than finding them closed.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
@@ -28,6 +31,8 @@ export interface GatewayOptions {
   /** Returns the local RDCleanPath proxy URL (ws://127.0.0.1:<port>/rdp) or null when RDP is unavailable. */
   rdpTarget?: () => Promise<string | null>
   log?: (line: string) => void
+  /** How long sessions of a disconnected, self-identified page stay open for it to reconnect. Default 10 minutes. */
+  resumeGraceMs?: number
   /** Called with the connected RPC clients whenever the set changes. */
   onClientsChanged?: (clients: { address: string; since: number }[]) => void
 }
@@ -62,6 +67,17 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
   const publicHost = (req: IncomingMessage): string => String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost')
   const remoteAddress = (req: IncomingMessage): string =>
     String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress?.replace(/^::ffff:/, '') || 'unknown'
+  const resumeGraceMs = opts.resumeGraceMs ?? 10 * 60_000
+  /** Sessions per self-identified page, kept across its reconnects; `timer` runs while it is disconnected. */
+  const pages = new Map<string, { owned: Map<string, keyof IpcApi>; timer?: ReturnType<typeof setTimeout> }>()
+  const closeOwned = (owned: Map<string, keyof IpcApi>): void => {
+    for (const [sid, closer] of owned) {
+      const close = (opts.handlers as Record<string, AnyHandler>)[closer]
+      void close(sid).catch(() => undefined)
+    }
+    owned.clear()
+  }
+  let shuttingDown = false
   const rpc = new WebSocketServer({ noServer: true })
   const relay = new WebSocketServer({ noServer: true })
 
@@ -126,8 +142,17 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
 
   function onRpcConnection(ws: WebSocket, req: IncomingMessage): void {
     clients.set(ws, { address: remoteAddress(req), since: Date.now() })
+    ;(ws as WebSocket & { pageId?: string }).pageId = new URL(req.url ?? '/', 'http://localhost').searchParams.get('client')?.slice(0, 64) || undefined
     notifyClients()
-    const owned = new Map<string, keyof IpcApi>()
+    const pageId = new URL(req.url ?? '/', 'http://localhost').searchParams.get('client')?.slice(0, 64) || null
+    let page = pageId ? pages.get(pageId) : undefined
+    if (pageId && !page) pages.set(pageId, (page = { owned: new Map() }))
+    if (page?.timer) {
+      clearTimeout(page.timer)
+      page.timer = undefined
+      if (page.owned.size) log(`[gateway] client resumed with ${page.owned.size} session(s)`)
+    }
+    const owned = page?.owned ?? new Map<string, keyof IpcApi>()
     const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '')
     const secure = forwardedProto === 'https' || forwardedProto === 'wss' || 'encrypted' in req.socket
     const publicWsBase = `${secure ? 'wss' : 'ws'}://${publicHost(req)}`
@@ -164,11 +189,15 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     ws.on('close', () => {
       clients.delete(ws)
       notifyClients()
-      for (const [sid, closer] of owned) {
-        const close = (opts.handlers as Record<string, AnyHandler>)[closer]
-        void close(sid).catch(() => undefined)
+      if (!pageId || !page || !owned.size || resumeGraceMs <= 0 || shuttingDown) {
+        closeOwned(owned)
+        if (pageId) pages.delete(pageId)
+        return
       }
-      owned.clear()
+      // A newer socket from the same page may already be open (reconnect raced the close); it owns them now.
+      if ([...clients.keys()].some((c) => (c as WebSocket & { pageId?: string }).pageId === pageId)) return
+      const p = page
+      p.timer = setTimeout(() => { closeOwned(p.owned); pages.delete(pageId) }, resumeGraceMs)
     })
   }
 
@@ -201,6 +230,9 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       }),
     close: () =>
       new Promise((resolve) => {
+        shuttingDown = true
+        for (const p of pages.values()) { clearTimeout(p.timer); closeOwned(p.owned) }
+        pages.clear()
         for (const c of clients.keys()) c.close(1001, 'Gateway shutting down')
         rpc.close(); relay.close()
         server.close(() => resolve())

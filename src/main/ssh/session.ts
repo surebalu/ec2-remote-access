@@ -17,6 +17,7 @@ import { host } from '../host'
 import { findBinary, shellQuote, uid } from '../util'
 import { getCredential } from '../creds'
 import { lookupClient, registerClient, unregisterClient } from './clients'
+import { startRecorder, type Recorder } from './recorder'
 
 interface Live {
   info: SshSessionInfo
@@ -25,6 +26,7 @@ interface Live {
   ssm?: SsmHandle
   /** True when the client belongs to another session (SFTP tab) and must not be ended here. */
   shared?: boolean
+  recorder?: Recorder | null
 }
 
 const sessions = new Map<string, Live>()
@@ -189,9 +191,20 @@ function openShell(live: Live, req: SshOpenRequest): Promise<void> {
       if (err) return reject(err)
       if (sessions.get(sessionId) !== live) { channel.close(); reject(new Error('cancelled')); return }
       live.channel = channel
+      try {
+        live.recorder = startRecorder(findInstance(req.instanceKey).name, live.info.user)
+        if (live.recorder) live.info.logFile = live.recorder.file
+      } catch (e) {
+        emit({ sessionId, type: 'status', message: `Session log not written: ${(e as Error).message}` })
+      }
       const dec = new StringDecoder('utf8')
-      channel.on('data', (d: Buffer) => { if (sessions.get(sessionId) === live) emit({ sessionId, type: 'data', data: dec.write(d) }) })
-      channel.stderr.on('data', (d: Buffer) => { if (sessions.get(sessionId) === live) emit({ sessionId, type: 'data', data: d.toString() }) })
+      const out = (data: string): void => {
+        if (sessions.get(sessionId) !== live) return
+        live.recorder?.write(data)
+        emit({ sessionId, type: 'data', data })
+      }
+      channel.on('data', (d: Buffer) => out(dec.write(d)))
+      channel.stderr.on('data', (d: Buffer) => out(d.toString()))
       channel.on('close', () => {
         if (sessions.get(sessionId) === live) {
           emit({ sessionId, type: 'closed', message: 'Connection closed' })
@@ -218,6 +231,7 @@ export async function closeSsh(sessionId: string): Promise<void> {
   const live = sessions.get(sessionId)
   if (!live) return
   sessions.delete(sessionId)
+  live.recorder?.close()
   try {
     live.channel?.close()
   } catch {

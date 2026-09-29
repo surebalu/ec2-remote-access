@@ -173,10 +173,11 @@ export async function saveSsoProfiles(req: SsoSaveRequest): Promise<string[]> {
 }
 
 /** Re-authenticates an existing sso-session by name (what the Refresh token button does). */
-export async function loginExistingSession(sessionName: string): Promise<SsoDeviceFlow & { done: Promise<void> }> {
+/** `openBrowser: false` when the sign-in was started from a phone: the approval page opens there, not on this Mac. */
+export async function loginExistingSession(sessionName: string, openBrowser = true): Promise<SsoDeviceFlow & { done: Promise<void> }> {
   const sec = readSection(CONFIG_FILE, `sso-session ${sessionName}`)
   if (!sec?.sso_start_url || !sec.sso_region) throw new Error(`sso-session "${sessionName}" is missing sso_start_url / sso_region`)
-  const dev = await startDeviceFlow({ startUrl: sec.sso_start_url, region: sec.sso_region, openBrowser: true })
+  const dev = await startDeviceFlow({ startUrl: sec.sso_start_url, region: sec.sso_region, openBrowser })
   const done = (async () => {
     const flow = flows.get(dev.flowId)!
     await waitForDeviceFlow(dev.flowId)

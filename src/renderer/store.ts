@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow } from '@shared/types'
+import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
-import { clearHostFilters } from '@shared/hostSearch'
+import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 
 export interface RdpTabRequest {
   user: string
@@ -25,6 +25,10 @@ export interface Tab {
   rdpRequest?: RdpTabRequest
   /** SFTP parameters; the Files tab issues sftp:open on mount. */
   sftpRequest?: Omit<SftpOpenRequest, 'sessionId'>
+  /** When the current connection came up; drives the tab's uptime tooltip. */
+  connectedAt?: number
+  /** Session transcript being written by the main process (Settings → Session logs). */
+  logFile?: string
 }
 
 export interface Toast {
@@ -59,7 +63,27 @@ interface State {
   selectedKey: string | null
   detailsFor: string | null
   quickSwitcherOpen: boolean
+  /** Text the quick switcher opens with, e.g. '>' for the command list. */
+  quickSwitcherQuery: string
+  openQuickSwitcher: (query?: string) => void
   recentHosts: string[]
+  /** Tabs shown side by side. The group is on screen while its focused pane (activeTab) is one of them. */
+  splitGroup: string[]
+  /** Keystrokes typed in one pane of the split group go to every connected SSH pane in it. */
+  broadcastInput: boolean
+  splitWith: (tabId: string, otherId: string) => void
+  unsplit: (tabId: string) => void
+  moveTab: (id: string, beforeId: string | null) => void
+  /** Opens another session with the same parameters; `split` shows it next to the original. */
+  duplicateTab: (id: string, split?: boolean) => void
+  portForwardFor: { key?: string; presetId?: string } | null
+  openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
+  snippetsOpen: { hostKey?: string } | null
+  workspaceSaveOpen: boolean
+  saveWorkspace: (name: string, tabs: WorkspaceTab[]) => Promise<void>
+  openWorkspace: (id: string) => void
+  deleteWorkspace: (id: string) => Promise<void>
+  shortcutsOpen: boolean
   clearFilters: () => void
   revealHost: (key: string) => void
   connectFor: { kind: 'ssh' | 'rdp' | 'sftp'; key: string } | null
@@ -152,7 +176,76 @@ export const useStore = create<State>((set, get) => ({
   selectedKey: null,
   detailsFor: null,
   quickSwitcherOpen: false,
+  quickSwitcherQuery: '',
+  openQuickSwitcher: (query = '') => set({ quickSwitcherOpen: true, quickSwitcherQuery: query }),
   recentHosts: readRecentHosts(),
+  splitGroup: [],
+  broadcastInput: false,
+  splitWith: (tabId, otherId) => set((s) => {
+    const group = s.splitGroup.includes(tabId) ? s.splitGroup.filter((id) => id !== otherId) : [tabId]
+    const at = group.indexOf(tabId)
+    group.splice(at + 1, 0, otherId)
+    return { splitGroup: group.slice(0, 4), activeTab: otherId }
+  }),
+  unsplit: (tabId) => set((s) => {
+    const splitGroup = s.splitGroup.filter((id) => id !== tabId)
+    return { splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
+  }),
+  moveTab: (id, beforeId) => set((s) => {
+    const tab = s.tabs.find((t) => t.id === id)
+    if (!tab || id === beforeId) return {}
+    const rest = s.tabs.filter((t) => t.id !== id)
+    const at = beforeId ? rest.findIndex((t) => t.id === beforeId) : -1
+    rest.splice(at < 0 ? rest.length : at, 0, tab)
+    return { tabs: rest }
+  }),
+  duplicateTab: (id, split = false) => {
+    const st = get()
+    const tab = st.tabs.find((t) => t.id === id)
+    if (!tab) return
+    const nid = `${tab.kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    const base = { id: nid, kind: tab.kind, instanceKey: tab.instanceKey, title: tab.title, status: 'connecting' as const }
+    // A connected SSH/SFTP tab lends its authenticated connection, as quickConnect does.
+    const reuse = tab.status === 'connected' && tab.kind !== 'rdp' ? tab.id : undefined
+    if (tab.kind === 'ssh' && tab.request) st.addTab({ ...base, request: { ...tab.request, sessionId: nid, reuseSessionId: reuse } })
+    else if (tab.kind === 'sftp' && tab.sftpRequest) st.addTab({ ...base, sftpRequest: { ...tab.sftpRequest, reuseSessionId: reuse } })
+    else if (tab.kind === 'rdp' && tab.rdpRequest) st.addTab({ ...base, rdpRequest: tab.rdpRequest })
+    else return
+    if (split) get().splitWith(id, nid)
+  },
+  portForwardFor: null,
+  openPortForward: async (req) => {
+    try {
+      const t = await window.api.invoke('tunnels:open', req)
+      get().toast('success', `Forwarding localhost:${t.localPort} → ${t.remoteHost ?? t.title.split(':')[0]}:${t.remotePort}`)
+      return t
+    } catch (e) {
+      get().noteOperationError((e as Error).message)
+      get().toast('error', (e as Error).message)
+      return null
+    }
+  },
+  snippetsOpen: null,
+  workspaceSaveOpen: false,
+  saveWorkspace: async (name, tabs) => {
+    const cur = get().settings?.workspaces ?? []
+    const existing = cur.find((w) => w.name.toLowerCase() === name.trim().toLowerCase())
+    const ws: Workspace = { id: existing?.id ?? `ws-${Date.now().toString(36)}`, name: name.trim(), tabs, savedAt: Date.now() }
+    await get().saveSettings({ workspaces: [...cur.filter((w) => w.id !== ws.id), ws].sort((a, b) => a.name.localeCompare(b.name)) })
+    get().toast('success', `Workspace "${ws.name}" saved (${tabs.length} tab${tabs.length === 1 ? '' : 's'})`)
+  },
+  openWorkspace: (id) => {
+    const ws = get().settings?.workspaces.find((w) => w.id === id)
+    if (!ws) return
+    const known = new Set(allInstances(get()).map((i) => i.key))
+    const missing = ws.tabs.filter((t) => !known.has(t.instanceKey)).length
+    for (const t of ws.tabs.filter((x) => known.has(x.instanceKey))) openWorkspaceTab(t)
+    if (missing) get().toast('info', `${missing} host${missing === 1 ? '' : 's'} in "${ws.name}" no longer in the inventory; skipped.`)
+  },
+  deleteWorkspace: async (id) => {
+    await get().saveSettings({ workspaces: (get().settings?.workspaces ?? []).filter((w) => w.id !== id) })
+  },
+  shortcutsOpen: false,
   clearFilters: () => set({ ...clearHostFilters }),
   revealHost: (key) => {
     const st = get()
@@ -315,8 +408,11 @@ export const useStore = create<State>((set, get) => ({
     }
     set({ loggingIn: true })
     try {
-      const flow = await window.api.invoke('sso:loginSession', sso.ssoSession)
+      // From a phone or browser the approval page belongs on that device; opening it on the Mac helps nobody.
+      const remote = !/\bElectron\//.test(navigator.userAgent)
+      const flow = await window.api.invoke('sso:loginSession', sso.ssoSession, { openBrowser: !remote })
       set({ ssoWait: { flow, session: sso.ssoSession } })
+      if (remote) void window.api.invoke('shell:open', flow.verificationUriComplete)
       // completion arrives via profiles:status pushes (see init); watch for all-ok
       const started = Date.now()
       const timer = setInterval(() => {
@@ -466,6 +562,7 @@ export const useStore = create<State>((set, get) => ({
   addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id })),
   updateTab: (id, patch) => set((s) => {
     const tab = s.tabs.find((t) => t.id === id)
+    if (tab && patch.status && patch.status !== tab.status) patch = { ...patch, connectedAt: patch.status === 'connected' ? Date.now() : undefined }
     const recentHosts = tab && patch.status === 'connected'
       ? [tab.instanceKey, ...s.recentHosts.filter((key) => key !== tab.instanceKey)].slice(0, 20) : s.recentHosts
     if (recentHosts !== s.recentHosts) {
@@ -479,9 +576,14 @@ export const useStore = create<State>((set, get) => ({
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
     else await window.api.invoke('ssh:close', id).catch(() => undefined)
     set((s) => {
+      const idx = s.tabs.findIndex((t) => t.id === id)
       const tabs = s.tabs.filter((t) => t.id !== id)
-      const activeTab = s.activeTab === id ? (tabs.at(-1)?.id ?? 'hosts') : s.activeTab
-      return { tabs, activeTab }
+      const splitGroup = s.splitGroup.filter((t) => t !== id)
+      const inSplit = s.splitGroup.includes(id)
+      // Focus stays inside a split when a pane closes; otherwise the neighbour to the left takes over.
+      const next = inSplit && splitGroup.length ? splitGroup[Math.max(0, s.splitGroup.indexOf(id) - 1)] : (tabs[Math.max(0, idx - 1)]?.id ?? 'hosts')
+      const activeTab = s.activeTab === id ? next : s.activeTab
+      return { tabs, activeTab, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
     })
   },
   toggleTerminalPane: (open) => {
@@ -492,6 +594,32 @@ export const useStore = create<State>((set, get) => ({
   setActive: (id) => set({ activeTab: id })
 }))
 
+
+/** Reopens one saved workspace tab through the same openers the hosts table uses. */
+function openWorkspaceTab(t: WorkspaceTab): void {
+  const s = useStore.getState()
+  const i = allInstances(s).find((x) => x.key === t.instanceKey)
+  if (!i) return
+  const id = `${t.kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  const title = `${i.name} @ ${i.profile}`
+  const params = { user: t.user, port: t.port, identityFile: t.identityFile, useAgent: t.useAgent, forceRoute: t.forceRoute }
+  if (t.kind === 'ssh') s.addTab({ id, kind: 'ssh', instanceKey: i.key, title, status: 'connecting', request: { instanceKey: i.key, sessionId: id, ...params, initCommand: t.initCommand } })
+  else if (t.kind === 'sftp') s.addTab({ id, kind: 'sftp', instanceKey: i.key, title, status: 'connecting', sftpRequest: { instanceKey: i.key, ...params } })
+  else {
+    // RDP passwords are not part of a workspace; the saved Keychain credential is used, or the dialog asks.
+    void window.api.invoke('creds:get', i.key).catch(() => null).then((cred) => {
+      if (!cred) { s.set({ connectFor: { kind: 'rdp', key: i.key } }); return }
+      s.addTab({ id, kind: 'rdp', instanceKey: i.key, title, status: 'connecting', rdpRequest: { user: t.user ?? cred.user, password: cred.password, domain: cred.domain, port: t.port, forceRoute: t.forceRoute } })
+    })
+  }
+}
+
+/** What a workspace remembers about an open tab. */
+export function workspaceTabOf(t: Tab): WorkspaceTab {
+  const r = t.kind === 'ssh' ? t.request : t.kind === 'sftp' ? t.sftpRequest : undefined
+  if (t.kind === 'rdp') return { kind: 'rdp', instanceKey: t.instanceKey, user: t.rdpRequest?.user, port: t.rdpRequest?.port, forceRoute: t.rdpRequest?.forceRoute }
+  return { kind: t.kind, instanceKey: t.instanceKey, user: r?.user, port: r?.port, identityFile: r?.identityFile, useAgent: r?.useAgent, forceRoute: r?.forceRoute, initCommand: t.kind === 'ssh' ? t.request?.initCommand : undefined }
+}
 
 function readRecentHosts(): string[] {
   try {
@@ -538,6 +666,27 @@ export function visibleInstances(s: { instances: Instance[]; settings?: Settings
   const disabled = new Set(s.profiles.filter((p) => !p.enabled).map((p) => p.name))
   if (!disabled.size) return allInstances(s)
   return allInstances(s).filter((i) => i.manual || !disabled.has(i.profile))
+}
+
+/** The hosts the current filter bar selects (search, account, OS, state, reachability, favorites), unsorted. */
+export function filteredInstances(s: Pick<State, 'instances' | 'settings' | 'profiles' | 'search' | 'favoritesOnly' | 'profileFilter' | 'osFilter' | 'stateFilter' | 'reachFilter'>): Instance[] {
+  const q = s.search.trim().toLowerCase()
+  const favs = new Set(s.settings?.favorites ?? [])
+  return visibleInstances(s)
+    .filter((i) => (s.favoritesOnly ? favs.has(i.key) : true))
+    .filter((i) => {
+      if (!s.profileFilter) return true
+      if (s.profileFilter.startsWith('group:')) return !!i.manual && i.region === s.profileFilter.slice(6)
+      return i.profile === s.profileFilter
+    })
+    .filter((i) => (s.osFilter === 'all' ? true : i.platform === s.osFilter))
+    .filter((i) => (s.stateFilter === 'all' ? true : i.state === 'running'))
+    .filter((i) => {
+      if (s.reachFilter === 'all') return true
+      const r = routeOf(i, s.settings).route
+      return s.reachFilter === 'reachable' ? r === 'direct' || r === 'ssm' : r === 'unreachable'
+    })
+    .filter((i) => !q || matchesHost(i, q))
 }
 
 export function routeOf(i: Instance, settings?: Settings): { route: Route; reason: string } {

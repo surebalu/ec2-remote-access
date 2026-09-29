@@ -47,6 +47,8 @@ export interface Instance {
   ssmOnline: boolean
   ssmPingStatus?: string
   ssmAgentVersion?: string
+  /** ISO time the SSM agent last checked in (DescribeInstanceInformation LastPingDateTime). */
+  ssmLastPing?: string
   ssmError?: string
   /** Last successful EC2 scan, retained when a refresh fails. */
   lastSeenAt?: number
@@ -165,6 +167,79 @@ export interface Settings {
   /** Auto-route: when true and a public IP exists, use it even if SSM is online. Default false (SSM first). */
   preferDirect: boolean
   overrides: Record<string, HostOverride>
+  /** Saved shell commands, offered in SSH tabs and the quick switcher. */
+  snippets: Snippet[]
+  /** Saved port forwards, one click to reopen from the tunnel bar or the quick switcher. */
+  portForwards: PortForwardPreset[]
+  /** Named sets of session tabs that reopen together. */
+  workspaces: Workspace[]
+  /** Write every SSH session's output (ANSI codes stripped) to a log file in sessionLogDir. */
+  sessionLogging: boolean
+  /** Empty = ~/Documents/EC2 Remote Access/Session logs. */
+  sessionLogDir: string
+}
+
+export interface Snippet {
+  id: string
+  name: string
+  command: string
+  /** Instance key the snippet belongs to; omitted = offered on every host. */
+  hostKey?: string
+  /** Press Enter after typing the command. Off pastes it for editing first. */
+  run: boolean
+}
+
+export interface PortForwardPreset {
+  id: string
+  instanceKey: string
+  name: string
+  remotePort: number
+  /** Omitted = any free local port. */
+  localPort?: number
+  /** Forward to this host as seen from the instance (e.g. an RDS endpoint) instead of the instance itself. */
+  remoteHost?: string
+}
+
+export interface PortForwardRequest {
+  instanceKey: string
+  remotePort: number
+  localPort?: number
+  remoteHost?: string
+  name?: string
+}
+
+/** Connection parameters worth keeping for a tab in a workspace. RDP passwords are never stored here. */
+export interface WorkspaceTab {
+  kind: 'ssh' | 'rdp' | 'sftp'
+  instanceKey: string
+  user?: string
+  port?: number
+  identityFile?: string
+  useAgent?: boolean
+  forceRoute?: 'direct' | 'ssm'
+  initCommand?: string
+}
+
+export interface Workspace {
+  id: string
+  name: string
+  tabs: WorkspaceTab[]
+  savedAt: number
+}
+
+/** EC2 status checks, recent CPU and SSM check-in for the host details panel. */
+export interface HostHealth {
+  /** EC2 instance status check: ok | impaired | initializing | insufficient-data | not-applicable */
+  instanceStatus?: string
+  systemStatus?: string
+  /** Scheduled events such as a retirement or reboot. */
+  events: { code: string; description: string; notBefore?: string }[]
+  /** CPUUtilization, 5-minute averages for the last 3 hours, oldest first. */
+  cpu: { t: number; v: number }[]
+  ssmLastPing?: string
+  fetchedAt: number
+  /** Partial failures (e.g. no cloudwatch:GetMetricData permission); the rest of the fields still apply. */
+  errors: string[]
 }
 
 export interface ScanProgress {
@@ -211,6 +286,8 @@ export interface SshSessionInfo {
   route: Route
   host: string
   user: string
+  /** Where this session's output is being recorded, when session logging is on. */
+  logFile?: string
 }
 
 export interface SshEvent {
@@ -227,6 +304,8 @@ export interface Tunnel {
   kind: 'rdp' | 'ssh' | 'port'
   localPort: number
   remotePort: number
+  /** Forward target as seen from the instance, when it is not the instance itself. */
+  remoteHost?: string
   status: 'starting' | 'ready' | 'closed' | 'error'
   message?: string
   startedAt: number

@@ -10,7 +10,7 @@ import { createGatewayHost } from '../src/gateway/host.ts'
 
 type Msg = { t: string; id?: number; result?: unknown; message?: string; channel?: string; payload?: unknown }
 
-async function start(overrides: Partial<Record<string, (...a: unknown[]) => Promise<unknown>>> = {}, staticDir?: string) {
+async function start(overrides: Partial<Record<string, (...a: unknown[]) => Promise<unknown>>> = {}, staticDir?: string, resumeGraceMs?: number) {
   const closed: string[] = []
   const handlers = {
     'settings:get': async () => ({ theme: 'dark' }),
@@ -23,13 +23,13 @@ async function start(overrides: Partial<Record<string, (...a: unknown[]) => Prom
     'ec2:start': async () => { throw new Error('boom') },
     ...overrides
   } as unknown as GatewayHandlers
-  const gw = createGatewayServer({ handlers, token: 'secret', staticDir, rdpTarget: async () => null, log: () => undefined })
+  const gw = createGatewayServer({ handlers, token: 'secret', staticDir, rdpTarget: async () => null, log: () => undefined, resumeGraceMs })
   const { port } = await gw.listen(0, '127.0.0.1')
   return { gw, port, closed }
 }
 
-function client(port: number, token: string): Promise<{ ws: WebSocket; next: () => Promise<Msg>; call: (channel: string, ...args: unknown[]) => Promise<Msg> }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+function client(port: number, token: string, clientId?: string): Promise<{ ws: WebSocket; next: () => Promise<Msg>; call: (channel: string, ...args: unknown[]) => Promise<Msg> }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}${clientId ? `&client=${clientId}` : ''}`)
   const inbox: Msg[] = []
   const waiters: ((m: Msg) => void)[] = []
   ws.on('message', (d) => { const m = JSON.parse(d.toString()) as Msg; const w = waiters.shift(); if (w) w(m); else inbox.push(m) })
@@ -150,4 +150,41 @@ test('gateway host seals and opens credentials with its key file, rejecting fore
   assert.equal(await host.pickPaths({ title: 't', kind: 'file' }), null)
   assert.equal(await host.askQuestion({ title: 't', message: 'm', buttons: ['Keep both', 'Replace'], defaultId: 0 }), 0)
   await rm(dir, { recursive: true, force: true })
+})
+
+test('a page that reconnects within the grace period keeps its sessions', async () => {
+  const { gw, port, closed } = await start({}, undefined, 200)
+  const a = await client(port, 'secret', 'page-1')
+  await a.next()
+  await a.call('ssh:open', { sessionId: 'ssh-a' })
+  a.ws.close()
+  await once(a.ws, 'close')
+  await new Promise((r) => setTimeout(r, 50))
+  assert.deepEqual(closed, [], 'nothing closes while the page may still come back')
+  const b = await client(port, 'secret', 'page-1')
+  await b.next()
+  await new Promise((r) => setTimeout(r, 300))
+  assert.deepEqual(closed, [], 'the resumed page owns the session again')
+  b.ws.close()
+  await once(b.ws, 'close')
+  await new Promise((r) => setTimeout(r, 300))
+  assert.deepEqual(closed, ['ssh:ssh-a'], 'closed once the grace period runs out')
+  await gw.close()
+})
+
+test('another page cannot claim sessions, and shutdown closes parked ones', async () => {
+  const { gw, port, closed } = await start({}, undefined, 60_000)
+  const a = await client(port, 'secret', 'page-1')
+  await a.next()
+  await a.call('ssh:open', { sessionId: 'ssh-a' })
+  a.ws.close()
+  await once(a.ws, 'close')
+  const other = await client(port, 'secret', 'page-2')
+  await other.next()
+  other.ws.close()
+  await once(other.ws, 'close')
+  await new Promise((r) => setTimeout(r, 30))
+  assert.deepEqual(closed, [])
+  await gw.close()
+  assert.deepEqual(closed, ['ssh:ssh-a'])
 })

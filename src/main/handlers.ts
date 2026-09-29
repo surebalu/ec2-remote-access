@@ -14,6 +14,8 @@ import { localHome, localList, localRealpath, localMkdir, localRename, localTras
 import { prepareRdp, releaseRdp, rdpLastError } from './rdp/sessions'
 import { getCredential, setCredential, deleteCredential, credentialKeys } from './creds'
 import { listTunnels, closeTunnel } from './tunnels'
+import { openPortForward } from './portForward'
+import { hostHealth } from './aws/health'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken } from './phoneAccess'
 import { recentLog } from './log'
@@ -48,8 +50,8 @@ export const handlers: Handlers = {
   'sso:wait': (flowId) => waitForDeviceFlow(flowId),
   'sso:save': (req) => saveSsoProfiles(req),
   'sso:cancel': async (flowId) => cancelDeviceFlow(flowId),
-  'sso:loginSession': async (name) => {
-    const r = await loginExistingSession(name)
+  'sso:loginSession': async (name, opts) => {
+    const r = await loginExistingSession(name, opts?.openBrowser !== false)
     // Completion is reported via profiles:status once the token lands.
     void r.done
       .then(async () => {
@@ -102,6 +104,8 @@ export const handlers: Handlers = {
   'creds:keys': async () => credentialKeys(),
   'tunnels:list': async () => listTunnels(),
   'tunnels:close': (id) => closeTunnel(id),
+  'tunnels:open': (req) => openPortForward(req),
+  'ec2:health': (key) => hostHealth(key),
   'ec2:password': (key, pem) => windowsPassword(key, pem),
   'ec2:start': (key) => setInstanceState(key, 'start'),
   'ec2:stop': (key) => setInstanceState(key, 'stop'),

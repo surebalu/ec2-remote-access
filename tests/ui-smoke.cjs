@@ -25,7 +25,8 @@ let settings = {
   accountMeta: { production: { label: 'Production', color: 'rose' }, development: { label: 'Development', color: 'emerald' } },
   groupBy: 'account', collapsedGroups: [], extraRegions: [], scanAllRegions: false, disabledProfiles: [], hiddenProfiles: [],
   defaultLinuxUser: '', defaultWindowsUser: 'Administrator', sshAgentSock: '', defaultIdentityFile: '', pemFile: '',
-  externalTerminal: 'Terminal', sessionManagerPluginPath: '', awsCliPath: '', connectTimeoutSec: 20, preferDirect: false, overrides: {}
+  externalTerminal: 'Terminal', sessionManagerPluginPath: '', awsCliPath: '', connectTimeoutSec: 20, preferDirect: false, overrides: {},
+  snippets: [{ id: 'sn-1', name: 'Disk usage', command: 'df -h', run: true }], portForwards: [], workspaces: [], sessionLogging: false, sessionLogDir: ''
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
@@ -45,6 +46,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'ssh:open':
       if (failSsh) throw new Error('Fixture: authentication failed')
       return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu' }
+    case 'ec2:health': return { instanceStatus: 'ok', systemStatus: 'ok', events: [], cpu: Array.from({ length: 36 }, (_, n) => ({ t: now - (36 - n) * 300000, v: 20 + 15 * Math.sin(n / 4) })), ssmLastPing: new Date(now - 90000).toISOString(), fetchedAt: now, errors: [] }
     case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
@@ -69,6 +71,7 @@ app.whenReady().then(async () => {
     await win.loadFile(resolve('out/renderer/index.html'))
     await until(`document.querySelectorAll('[data-host-key]').length === 3`)
     await screenshot('hosts-dark.png')
+    assert.equal(await js(`getComputedStyle(document.querySelector('thead th button')).textTransform`), 'uppercase', 'sortable headers match the others')
     assert.equal(await js(`!!document.querySelector('[data-host-key="${stopped.key}"]')`), false, 'running filter initially hides stopped host')
 
     // Open account tree and select a stopped host: filters and collapsed groups must not hide it.
@@ -165,6 +168,64 @@ app.whenReady().then(async () => {
     assert.equal(await js(`localStorage.getItem('ui.terminalPaneOpen')`), '1')
     await js(`document.querySelector('button[title="Hide appearance pane"]').click()`)
     await until(`!document.querySelector('.appearance-pane')`)
+
+    // Find bar (⌘F), snippet menu, split (⌘D) with broadcast, and ⌘W closing the split pane.
+    await js(`document.querySelector('.xterm-helper-textarea').focus()`)
+    await key('f', { metaKey: true })
+    await until(`document.activeElement?.getAttribute('aria-label') === 'Find in terminal'`)
+    await key('Escape')
+    await until(`!document.querySelector('[aria-label="Find in terminal"]')`)
+    await js(`document.querySelector('button[title="Snippets"]').click()`)
+    await until(`!!document.querySelector('.popover') && document.querySelector('.popover').textContent.includes('Disk usage')`)
+    const writes = calls.filter((c) => c.channel === 'ssh:write').length
+    await js(`document.querySelector('.popover .menu-item').click()`)
+    for (let n = 0; n < 100 && calls.filter((c) => c.channel === 'ssh:write').length === writes; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'ssh:write').at(-1).args[1], 'df -h\r', 'snippet runs with Enter')
+    await js(`document.querySelector('.xterm-helper-textarea').focus()`)
+    await key('d', { metaKey: true })
+    await until(`document.querySelectorAll('.split-pane:not(.hidden)').length === 2`)
+    await until(`document.querySelectorAll('.term-toolbar button[title^="Broadcast typing"]').length >= 1`)
+    await screenshot('split.png')
+    await key('w', { metaKey: true })
+    await until(`document.querySelectorAll('.split-pane').length === 0 && document.querySelectorAll('.tab').length === ${tabsBefore}`)
+
+    // Many tabs: the strip overflows into "»" and the title bar must settle, not flip between layouts.
+    for (let n = 0; n < 4; n++) {
+      await js(`document.querySelector('.xterm-helper-textarea').focus()`)
+      await key('d', { metaKey: true, shiftKey: true })
+      await until(`document.querySelectorAll('.session-panes > div').length === ${n + 2}`)
+    }
+    // The strip flipped between layouts only when the tabs' width fell inside the band the brand frees up, so sweep
+    // the window width across that band and require the title bar to settle at every width.
+    const churnAt = () => js(`new Promise((resolve) => {
+      let n = 0
+      const mo = new MutationObserver((list) => { n += list.length })
+      mo.observe(document.querySelector('.titlebar'), { subtree: true, childList: true, attributes: true })
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-tabs-crowded'] })
+      setTimeout(() => { mo.disconnect(); resolve(n) }, 400)
+    })`)
+    for (let w = 1000; w <= 2400; w += 50) {
+      win.setSize(w, 900)
+      await new Promise((r) => setTimeout(r, 250))
+      const churn = await churnAt()
+      assert.ok(churn < 4, `title bar keeps re-laying out at width ${w} (${churn} mutations in 400 ms)`)
+    }
+    win.setSize(1400, 900)
+    await new Promise((r) => setTimeout(r, 200))
+    assert.equal(await js(`document.documentElement.hasAttribute('data-tabs-crowded')`), true)
+    await screenshot('many-tabs.png')
+    for (let n = 0; n < 4; n++) {
+      await key('w', { metaKey: true })
+      await until(`document.querySelectorAll('.session-panes > div').length === ${5 - n - 1}`)
+    }
+
+    // Command mode in the switcher and the shortcuts sheet.
+    await key('p', { metaKey: true, shiftKey: true })
+    await until(`!!document.querySelector('[role="combobox"]') && document.querySelector('[role="combobox"]').value === '>'`)
+    assert.equal(await js(`[...document.querySelectorAll('[role="option"]')].some((o) => o.textContent.includes('Rescan inventory'))`), true)
+    await screenshot('commands.png')
+    await key('Escape')
+    await until(`!document.querySelector('[role="dialog"]')`)
     await click('Hosts')
     await js(`document.querySelector('button[title="Settings"]').click()`)
     await until(`!!document.querySelector('[role="dialog"]')`)
@@ -178,6 +239,97 @@ app.whenReady().then(async () => {
     assert.equal(await js(`(() => { const r = document.querySelector('[role="dialog"]').getBoundingClientRect(); return r.height <= innerHeight && r.top >= 0 })()`), true)
     await key('Escape')
     await until(`!document.querySelector('[role="dialog"]')`)
+
+    // Phone layout (what the gateway serves to an iPhone): host list, action sheet, terminal key bar, back to lists.
+    const phone = new BrowserWindow({ show: false, width: 430, height: 932, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    phone.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
+    phone.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const pjs = (code) => phone.webContents.executeJavaScript(code)
+    const puntil = async (code) => {
+      for (let n = 0; n < 100; n++) { if (await pjs(code)) return; await new Promise((r) => setTimeout(r, 30)) }
+      throw new Error(`Timed out (phone): ${code}`)
+    }
+    const ptap = (label) => pjs(`(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim().startsWith(${JSON.stringify(label)}) && x.getClientRects().length); if (!b) throw new Error('Missing button: ' + ${JSON.stringify(label)}); b.click() })()`)
+    const pshot = async (name) => { await pjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 150)); writeFileSync(join(output, name), (await phone.webContents.capturePage()).toPNG()) }
+    const noSideScroll = () => pjs(`document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth`)
+    await phone.loadFile(resolve('out/renderer/index.html'), { query: { layout: 'mobile' } })
+    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('[data-host-key]').length === 2`)
+    assert.equal(await pjs(`!!document.querySelector('.titlebar')`), false, 'phone layout replaces the desktop chrome')
+    assert.equal(await noSideScroll(), true, 'host list fits the phone width')
+    await pshot('phone-hosts.png')
+    await pjs(`document.querySelector('[data-host-key="${running.key}"]').click()`)
+    await puntil(`!!document.querySelector('.m-sheet')`)
+    await pshot('phone-host-actions.png')
+    const phoneOpens = calls.filter((c) => c.channel === 'ssh:open').length
+    await ptap('SSH terminal')
+    await puntil(`!!document.querySelector('.m-keybar') && !!document.querySelector('.m-session-header')`)
+    for (let n = 0; n < 100 && calls.filter((c) => c.channel === 'ssh:open').length === phoneOpens; n++) await new Promise((r) => setTimeout(r, 30))
+    const phoneSession = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].sessionId
+    await new Promise((r) => setTimeout(r, 200))
+    const lastWrite = () => calls.filter((c) => c.channel === 'ssh:write' && c.args[0] === phoneSession).at(-1)?.args[1]
+    await pjs(`document.querySelector('.m-key[aria-label="Esc"]').click()`)
+    await puntil(`true`)
+    for (let n = 0; n < 50 && lastWrite() !== '\x1b'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(lastWrite(), '\x1b', 'Esc key sends ESC')
+    await pjs(`document.querySelector('.m-key[aria-label^="Control"]').click()`)
+    await pjs(`(() => { const t = document.querySelector('.xterm-helper-textarea'); t.focus(); t.value = 'c'; t.dispatchEvent(new InputEvent('input', { data: 'c', inputType: 'insertText', bubbles: true })) })()`)
+    for (let n = 0; n < 50 && lastWrite() !== '\x03'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(lastWrite(), '\x03', 'sticky Ctrl turns the next letter into a control code')
+    assert.equal(await pjs(`document.querySelector('.m-key[aria-label^="Control"]').getAttribute('aria-pressed')`), 'false', 'Ctrl releases after one key')
+    assert.equal(await noSideScroll(), true, 'terminal view fits the phone width')
+    await pshot('phone-terminal.png')
+    await pjs(`document.querySelector('.m-key[aria-label="More actions"]').click()`)
+    await puntil(`!!document.querySelector('.m-sheet') && document.querySelector('.m-sheet').textContent.includes('Disk usage')`)
+    await pshot('phone-terminal-menu.png')
+    await ptap('Cancel')
+    await pjs(`document.querySelector('.m-back').click()`)
+    await puntil(`!!document.querySelector('.m-tabbar') && document.querySelector('.m-header h1')?.textContent === 'Sessions'`)
+    assert.equal(await pjs(`document.querySelectorAll('.m-row-close').length`), 1, 'the terminal stays open in the sessions list')
+    await pshot('phone-sessions.png')
+    await ptap('More')
+    await ptap('Settings')
+    await puntil(`!!document.querySelector('.modal')`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.modal').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 })()`), true, 'dialogs fit the phone screen')
+    await pshot('phone-settings.png')
+    await pjs(`document.querySelector('[aria-label="Close dialog"]').click()`)
+    await puntil(`!document.querySelector('.modal')`)
+
+    // Unfolding (a foldable opening to tablet width) keeps the session mounted and shows list and session side by side.
+    await pjs(`document.querySelectorAll('.m-tabbar button')[1].click()`)
+    await puntil(`!!document.querySelector('.m-host[role="button"]')`)
+    await pjs(`document.querySelector('.m-host[role="button"]').click()`)
+    await puntil(`document.querySelector('.m-app').classList.contains('has-session')`)
+    const opensBeforeFold = calls.filter((c) => c.channel === 'ssh:open').length
+    phone.setSize(744, 1133)
+    await puntil(`document.querySelector('.m-app').classList.contains('wide')`)
+    await new Promise((r) => setTimeout(r, 300))
+    assert.equal(await pjs(`getComputedStyle(document.querySelector('.m-side')).display !== 'none' && getComputedStyle(document.querySelector('.m-stage')).display !== 'none'`), true, 'unfolded: list and session both visible')
+    assert.equal(await pjs(`!!document.querySelector('.m-back')`), false, 'no back button when the list is on screen')
+    assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeFold, 'unfolding must not reconnect the session')
+    assert.equal(await noSideScroll(), true, 'unfolded layout fits')
+    await pshot('unfolded-session.png')
+    // Book pose on a foldable: the iPhone app reports the fold and the split lines up with it.
+    await pjs(`window.dispatchEvent(new CustomEvent('ec2ra:fold', { detail: { x: 372, y: 0, width: 24, height: 1133 } }))`)
+    await new Promise((r) => setTimeout(r, 150))
+    assert.deepEqual(await pjs(`(() => { const a = document.querySelector('.m-side').getBoundingClientRect(), b = document.querySelector('.m-stage').getBoundingClientRect(); return [Math.round(a.right), Math.round(b.left)] })()`), [372, 396], 'list ends at the fold, session starts past it')
+    await pshot('unfolded-book-pose.png')
+    await pjs(`window.dispatchEvent(new CustomEvent('ec2ra:fold', { detail: null }))`)
+    // Full-screen session on a wide screen: the divider handle hides the list and brings it back.
+    await pjs(`document.querySelector('.m-divider-toggle').click()`)
+    await puntil(`getComputedStyle(document.querySelector('.m-side')).display === 'none'`)
+    assert.equal(await pjs(`Math.round(document.querySelector('.m-stage').getBoundingClientRect().width) === innerWidth`), true, 'session takes the full width')
+    await pshot('unfolded-full-session.png')
+    await pjs(`document.querySelector('.m-divider-toggle').click()`)
+    await puntil(`getComputedStyle(document.querySelector('.m-side')).display !== 'none'`)
+    assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeFold, 'hiding the list must not reconnect the session')
+    await pjs(`window.dispatchEvent(new CustomEvent('ec2ra:fold', { detail: null }))`)
+    await ptap('Hosts')
+    await pshot('unfolded-hosts.png')
+    phone.setSize(430, 932)
+    await puntil(`!document.querySelector('.m-app').classList.contains('wide')`)
+    assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeFold, 'folding must not reconnect the session')
+    assert.equal(await pjs(`getComputedStyle(document.querySelector('.m-side')).display`), 'none', 'folded with a session open: session is full screen')
+    phone.destroy()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)

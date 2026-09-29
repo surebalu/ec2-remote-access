@@ -24,7 +24,9 @@ export function tailscaleCli(): string | null {
 
 function run(cli: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cli, args, { timeout: 20_000 }, (err, stdout, stderr) => {
+    // The macOS app bundle's binary is both the GUI and the CLI; without a terminal attached (as when a GUI app runs
+    // it) it tries to start the GUI and fails with "Tailscale.CLIError error 3". This forces CLI mode.
+    execFile(cli, args, { timeout: 20_000, env: { ...process.env, TAILSCALE_BE_CLI: '1' } }, (err, stdout, stderr) => {
       if (err) reject(new Error((stderr || err.message).trim()))
       else resolve({ stdout, stderr })
     })
@@ -44,7 +46,8 @@ export async function tailscaleInfo(): Promise<TailscaleInfo | null> {
       ips: st.Self?.TailscaleIPs ?? [],
       certDomains: st.CertDomains ?? []
     }
-  } catch {
+  } catch (e) {
+    console.warn(`[phone-access] tailscale status failed: ${(e as Error).message}`)
     return { cli, running: false, ips: [], certDomains: [] }
   }
 }

@@ -18,6 +18,13 @@ import SsoWaitDialog from './components/SsoWaitDialog'
 import HostDetails from './components/HostDetails'
 import QuickSwitcher from './components/QuickSwitcher'
 import { Icon } from './components/icons'
+import PortForwardDialog from './components/PortForwardDialog'
+import SnippetsDialog from './components/SnippetsDialog'
+import WorkspaceDialog from './components/WorkspaceDialog'
+import ShortcutsDialog from './components/ShortcutsDialog'
+import { handleAppShortcut } from './shortcuts'
+import { isMobile } from './mobile'
+import MobileApp from './components/mobile/MobileApp'
 
 export default function App(): ReactElement {
   const init = useStore((s) => s.init)
@@ -30,6 +37,10 @@ export default function App(): ReactElement {
   const addAccountOpen = useStore((s) => s.addAccountOpen)
   const editAccount = useStore((s) => s.editAccount)
   const quickSwitcherOpen = useStore((s) => s.quickSwitcherOpen)
+  const portForwardFor = useStore((s) => s.portForwardFor)
+  const snippetsOpen = useStore((s) => s.snippetsOpen)
+  const workspaceSaveOpen = useStore((s) => s.workspaceSaveOpen)
+  const shortcutsOpen = useStore((s) => s.shortcutsOpen)
   const profiles = useStore((s) => s.profiles)
   const manualCount = useStore((s) => s.settings?.manualHosts.length ?? 0)
   const settingsLoaded = useStore((s) => !!s.settings)
@@ -47,8 +58,11 @@ export default function App(): ReactElement {
         if (e.repeat) return
         const state = useStore.getState()
         if (!state.quickSwitcherOpen && document.querySelector('.modal-backdrop')) return
-        state.set({ quickSwitcherOpen: !state.quickSwitcherOpen })
+        if (state.quickSwitcherOpen) state.set({ quickSwitcherOpen: false })
+        else state.openQuickSwitcher()
+        return
       }
+      handleAppShortcut(e)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -74,6 +88,26 @@ export default function App(): ReactElement {
     }
   }, [])
 
+  const dialogs = (
+    <>
+      {connectFor && <ConnectDialog />}
+      {passwordFor && <PasswordDialog />}
+      {settingsOpen && <SettingsDialog />}
+      {manualHostEditor && <ManualHostDialog />}
+      {folderEditor && <FolderDialog key={folderEditor} />}
+      {addAccountOpen && <AddAccountDialog />}
+      {editAccount && <EditAccountDialog key={editAccount} />}
+      <SsoWaitDialog />
+      {quickSwitcherOpen && <QuickSwitcher />}
+      {portForwardFor && <PortForwardDialog />}
+      {snippetsOpen && <SnippetsDialog />}
+      {workspaceSaveOpen && <WorkspaceDialog />}
+      {shortcutsOpen && <ShortcutsDialog />}
+      <Toasts />
+    </>
+  )
+  if (isMobile()) return <><MobileApp />{dialogs}</>
+
   return (
     <div className="flex h-full flex-col">
       <header className="titlebar drag">
@@ -82,7 +116,7 @@ export default function App(): ReactElement {
           <span>EC2 Remote Access</span>
         </div>
         <TerminalTabs />
-        <button className="btn btn-ghost no-drag mr-3 shrink-0" title="Find a host or session (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().set({ quickSwitcherOpen: true })}><Icon.search /><kbd>⌘K</kbd></button>
+        <button className="btn btn-ghost no-drag mr-3 shrink-0" title="Find a host or session (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().openQuickSwitcher()}><Icon.search /><kbd>⌘K</kbd></button>
       </header>
       <div className="flex min-h-0 flex-1">
         <Sidebar />
@@ -93,16 +127,7 @@ export default function App(): ReactElement {
           <TunnelBar />
         </main>
       </div>
-      {connectFor && <ConnectDialog />}
-      {passwordFor && <PasswordDialog />}
-      {settingsOpen && <SettingsDialog />}
-      {manualHostEditor && <ManualHostDialog />}
-      {folderEditor && <FolderDialog key={folderEditor} />}
-      {addAccountOpen && <AddAccountDialog />}
-      {editAccount && <EditAccountDialog key={editAccount} />}
-      <SsoWaitDialog />
-      {quickSwitcherOpen && <QuickSwitcher />}
-      <Toasts />
+      {dialogs}
     </div>
   )
 }

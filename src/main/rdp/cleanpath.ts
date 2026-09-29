@@ -13,12 +13,14 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect, type TLSSocket, type DetailedPeerCertificate, type ConnectionOptions } from 'node:tls'
 import { der, decodeInteger, readAll, readTlv } from './der'
+import { afterProbe, CLOCK_JUMP_MS, probeRdp, shouldProbe } from './liveness'
 import { log } from '../log'
 
 /**
- * Backstop for a half-open socket that TCP keepalive somehow missed: only when the client has been sending input
- * with zero bytes back for a full 3 minutes. A healthy RDP session answers input in milliseconds, so this never
- * trips on a working connection; keepalive (setKeepAlive below) is the real detector and fires within ~1 min.
+ * Last-resort backstop: the client has been sending input with zero bytes back for a full 3 minutes. Input alone is
+ * not evidence (a mouse moving over a static area gets no reply), which is why this is so long. The real detectors
+ * are TCP keepalive for direct routes and the tunnel liveness probe (./liveness) for SSM routes; keepalive cannot
+ * see a dead SSM tunnel because its far end is the plugin's always-alive local listener.
  */
 const STALL_MS = 180_000
 /** Live relays per proxy token, so a dying SSM tunnel can cut them and let the client reconnect promptly. */
@@ -41,6 +43,11 @@ export interface CleanPathTarget {
   host: string
   port: number
   onClose?: () => void
+  /**
+   * Probe host:port with a fresh X.224 exchange while the relay is silent. Only for SSM port-forwards through a
+   * multiplexing agent: there a second connection is a separate stream that exercises the same data channel.
+   */
+  probe?: boolean
 }
 
 const targets = new Map<string, CleanPathTarget>()
@@ -297,8 +304,8 @@ async function handle(ws: WebSocket, ctx: { token?: string }): Promise<void> {
     })
   }
 
-  // Probe the far side at the TCP layer so a silently-dead SSM tunnel (idle-timed-out, or the plugin's WebSocket to
-  // AWS dropped) becomes a socket error within ~1 min instead of an indefinite freeze.
+  // Keepalive catches a direct-route peer that vanished at the IP level. For an SSM route it only reaches the plugin's
+  // local listener, which stays up after the tunnel dies; target.probe covers that case.
   tls.setKeepAlive(true, 30_000)
   ws.send(encodeResponse(confirm, certChain(tls), `${target.host}:${target.port}`), { binary: true })
 
@@ -356,7 +363,40 @@ async function handle(ws: WebSocket, ctx: { token?: string }): Promise<void> {
     activeRelays.set(ctx.token, set)
     set.add(closeAll)
   }
+  let lastTick = Date.now()
+  let lastProbeAt: number | null = null
+  let probeFailures = 0
+  let probing = false
+  const runProbe = (clockJumped: boolean): void => {
+    probing = true
+    const startedAt = Date.now()
+    void probeRdp(target.host, target.port).then((result) => {
+      probing = false
+      lastProbeAt = Date.now()
+      if (closed) return
+      const was = probeFailures
+      const r = afterProbe(probeFailures, result, startedAt, lastDown)
+      probeFailures = r.failures
+      const silentForSeconds = Math.round((Date.now() - lastDown) / 1000)
+      if (!result.ok || was > 0 || clockJumped) {
+        log('rdp-proxy', result.ok ? 'tunnel probe answered' : 'tunnel probe failed', {
+          token: shortToken, ms: result.ms, error: result.error, failures: probeFailures, silentForSeconds, clockJumped
+        })
+      }
+      if (r.cut) {
+        note(`tunnel stopped carrying data (${probeFailures} liveness probes through it got no answer: ${result.error})`)
+        log('rdp-proxy', 'tunnel dead, cutting relay so the client reconnects', { token: shortToken, silentForSeconds })
+        closeAll()
+      }
+    })
+  }
   const watchdog = setInterval(() => {
+    const now = Date.now()
+    const clockJumped = now - lastTick > CLOCK_JUMP_MS
+    lastTick = now
+    if (target.probe && !probing && shouldProbe({ now, lastDownAt: lastDown, waitingSince, lastProbeAt, failures: probeFailures, clockJumped })) {
+      runProbe(clockJumped)
+    }
     if (waitingSince !== null && Date.now() - waitingSince > STALL_MS) {
       note(`stopped responding: ${Math.round(STALL_MS / 1000)} s of input with no reply`)
       log('rdp-proxy', 'stall detected, cutting relay so the client reconnects', { token: shortToken, silentForSeconds: Math.round((Date.now() - lastDown) / 1000) })

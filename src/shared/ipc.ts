@@ -3,7 +3,8 @@ import type {
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
-  SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus
+  SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
+  PortForwardRequest, HostHealth
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -19,7 +20,7 @@ export interface IpcApi {
   'sso:wait': (flowId: string) => Promise<SsoAccount[]>
   'sso:save': (req: SsoSaveRequest) => Promise<string[]>
   'sso:cancel': (flowId: string) => Promise<void>
-  'sso:loginSession': (sessionName: string) => Promise<SsoDeviceFlow>
+  'sso:loginSession': (sessionName: string, opts?: { openBrowser?: boolean }) => Promise<SsoDeviceFlow>
   'shell:open': (url: string) => Promise<void>
   'inventory:cached': () => Promise<ScanResult | null>
   'inventory:scan': (profiles?: string[], retryTargets?: ScanTarget[]) => Promise<ScanResult>
@@ -66,6 +67,9 @@ export interface IpcApi {
   'creds:keys': () => Promise<string[]>
   'tunnels:list': () => Promise<Tunnel[]>
   'tunnels:close': (id: string) => Promise<void>
+  /** SSM port forward to the instance (or remoteHost through it); resolves once it is listening. */
+  'tunnels:open': (req: PortForwardRequest) => Promise<Tunnel>
+  'ec2:health': (instanceKey: string) => Promise<HostHealth>
   'ec2:password': (instanceKey: string, pemFile?: string) => Promise<WindowsPasswordResult>
   'ec2:start': (instanceKey: string) => Promise<void>
   'ec2:stop': (instanceKey: string) => Promise<void>

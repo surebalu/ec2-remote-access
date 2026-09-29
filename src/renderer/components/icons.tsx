@@ -120,6 +120,90 @@ export const Icon = {
       <path d="m3 12 9 5 9-5M3 16l9 5 9-5" />
     </svg>
   ),
+  /** Horizontal ellipsis: overflow menus. */
+  more: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="5" cy="12" r="1.2" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.2" fill="currentColor" />
+    </svg>
+  ),
+  caret: (p: { className?: string }): ReactElement => (
+    <svg {...base} width={10} height={10} className={p.className}>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  ),
+  /** Two panes side by side. */
+  split: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M12 5v14" />
+    </svg>
+  ),
+  /** Input fanned out to several panes. */
+  broadcast: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="12" cy="12" r="2" />
+      <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14" />
+    </svg>
+  ),
+  download: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+    </svg>
+  ),
+  /** Braces: saved command snippets. */
+  snippet: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M8 4c-2 0-3 1-3 3v2c0 1-1 2-2 3 1 1 2 2 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1 1 2 2 3-1 1-2 2-2 3v2c0 2-1 3-3 3" />
+    </svg>
+  ),
+  maximize: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </svg>
+  ),
+  /** Plug: port forwards. */
+  plug: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4" />
+    </svg>
+  ),
+  /** Grid of panes: workspaces. */
+  grid: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+    </svg>
+  ),
+  keyboard: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+    </svg>
+  ),
+  arrowUp: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 19V5M6 11l6-6 6 6" />
+    </svg>
+  ),
+  arrowDown: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 5v14M6 13l6 6 6-6" />
+    </svg>
+  ),
+  alert: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 4 2.5 20h19zM12 10v4M12 17h.01" />
+    </svg>
+  ),
+  activity: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M3 12h4l3-8 4 16 3-8h4" />
+    </svg>
+  ),
   x: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M6 6l12 12M18 6 6 18" />

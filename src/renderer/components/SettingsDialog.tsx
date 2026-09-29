@@ -40,7 +40,10 @@ export default function SettingsDialog(): ReactElement | null {
     </>
   )
   const save = async (): Promise<void> => {
-    await s.saveSettings(draft)
+    // Snippets, port-forward presets and workspaces are edited in their own dialogs while this one is open;
+    // writing the draft's copy back would undo those edits.
+    const { snippets: _sn, portForwards: _pf, workspaces: _ws, ...rest } = draft
+    await s.saveSettings(rest)
     await s.refreshProfiles()
     close()
     s.toast('success', 'Settings saved')
@@ -88,6 +91,22 @@ export default function SettingsDialog(): ReactElement | null {
             {draft.sshInitCommand && <button className="btn" onClick={() => upd('sshInitCommand', '')}>Clear</button>}
           </div>
           <div className="muted mt-0.5 text-[10px]">Typed into the shell as its first input, so it applies to the login user only (not after <span className="mono">su</span>). The connect dialog can override it per host; append <span className="mono">; clear</span> to hide the echo.</div>
+        </div>
+        <label className="muted">Snippets</label>
+        <div className="flex items-center gap-2">
+          <span className="muted">{s.settings?.snippets.length ?? 0} saved</span>
+          <button className="btn" onClick={() => s.set({ snippetsOpen: {} })}>Manage snippets…</button>
+        </div>
+        <label className="muted">Session logs</label>
+        <div>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={draft.sessionLogging} onChange={(e) => upd('sessionLogging', e.target.checked)} /> Record every SSH session to a text file
+          </label>
+          <div className="mt-1 flex gap-1">
+            <input className="input" placeholder="~/Documents/EC2 Remote Access/Session logs" value={draft.sessionLogDir} onChange={(e) => upd('sessionLogDir', e.target.value)} />
+            <button className="btn" title="Choose folder" onClick={async () => { const f = await window.api.invoke('dialog:pickFile', 'Choose a file in the log folder'); if (f) upd('sessionLogDir', f.replace(/\/[^/]*$/, '')) }}>…</button>
+          </div>
+          <div className="muted mt-0.5 text-[10px]">One file per session, colours and cursor codes removed. Applies to sessions opened after saving; a REC badge shows in the tab.</div>
         </div>
         <label className="muted">Regions</label>
         <div>

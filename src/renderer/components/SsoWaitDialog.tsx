@@ -7,6 +7,8 @@ export default function SsoWaitDialog(): ReactElement | null {
   const s = useStore()
   const w = s.ssoWait
   if (!w) return null
+  // On a phone the page opened on the phone (or was blocked as a pop-up); the wording and buttons follow that.
+  const remote = !/\bElectron\//.test(navigator.userAgent)
   const close = (): void => {
     void window.api.invoke('sso:cancel', w.flow.flowId)
     s.set({ ssoWait: null, loggingIn: false })
@@ -15,14 +17,15 @@ export default function SsoWaitDialog(): ReactElement | null {
     <Modal title={`Sign in to AWS · ${w.session}`} onClose={close} width="max-w-md">
       <div className="flex flex-col items-center gap-3 py-2 text-center">
         <div className="muted text-[12px]">
-          Approve the request in your browser. If it didn't open, visit <span className="mono">{w.flow.verificationUri}</span> and enter:
+          {remote ? 'Sign in on the AWS page and approve this code. If the page did not open, tap Open sign-in page.' : 'Approve the request in your browser. If it didn\'t open, visit'}{' '}
+          {!remote && <><span className="mono">{w.flow.verificationUri}</span> and enter:</>}
         </div>
         <div className="mono rounded-lg border px-4 py-2 text-2xl font-semibold tracking-[.3em]" style={{ borderColor: 'var(--border)' }}>
           {w.flow.userCode}
         </div>
         <div className="flex gap-2">
-          <button className="btn" onClick={() => void window.api.invoke('shell:open', w.flow.verificationUriComplete)}>
-            Open browser again
+          <button className={`btn ${remote ? 'btn-primary' : ''}`} onClick={() => void window.api.invoke('shell:open', w.flow.verificationUriComplete)}>
+            {remote ? 'Open sign-in page' : 'Open browser again'}
           </button>
           <button className="btn" onClick={() => void window.api.invoke('clipboard:write', w.flow.userCode).then(() => s.toast('success', 'Code copied'))}>
             Copy code

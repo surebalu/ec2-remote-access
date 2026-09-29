@@ -1,15 +1,14 @@
 import type { ReactElement } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { matchesHost } from '@shared/hostSearch'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Instance } from '@shared/types'
-import { allInstances, routeOf, useStore, visibleInstances } from '../store'
+import { allInstances, filteredInstances, routeOf, useStore, visibleInstances } from '../store'
 import { openDefaultFor, openFilesFor, openRdpFor, openSshFor } from '../quickConnect'
 import { Icon } from './icons'
 import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
 import HostFilters, { ScanNotice } from './HostFilters'
 
-type SortKey = 'name' | 'profile' | 'state' | 'osHint' | 'publicIp' | 'privateIp' | 'instanceType'
+type SortKey = 'name' | 'profile' | 'state' | 'osHint' | 'address' | 'instanceType'
 
 function RouteBadge({ i }: { i: Instance }): ReactElement {
   const settings = useStore((s) => s.settings)
@@ -44,34 +43,17 @@ export default function InstanceTable(): ReactElement {
   }, [s.selectedKey, s.profileFilter, s.search, s.osFilter, s.stateFilter, s.reachFilter, s.settings?.collapsedGroups])
 
   const rows = useMemo(() => {
-    const q = s.search.trim().toLowerCase()
     const favs = new Set(s.settings?.favorites ?? [])
-    return visibleInstances(s)
-      .filter((i) => (s.favoritesOnly ? favs.has(i.key) : true))
-      .filter((i) => {
-        if (!s.profileFilter) return true
-        if (s.profileFilter.startsWith('group:')) return !!i.manual && i.region === s.profileFilter.slice(6)
-        return i.profile === s.profileFilter
-      })
-      .filter((i) => (s.osFilter === 'all' ? true : i.platform === s.osFilter))
-      .filter((i) => (s.stateFilter === 'all' ? true : i.state === 'running'))
-      .filter((i) => {
-        if (s.reachFilter === 'all') return true
-        const r = routeOf(i, s.settings).route
-        return s.reachFilter === 'reachable' ? r === 'direct' || r === 'ssm' : r === 'unreachable'
-      })
-      .filter((i) => {
-        if (!q) return true
-        return matchesHost(i, q)
-      })
+    return filteredInstances(s)
       .sort((a, b) => {
         if ((s.settings?.groupBy ?? 'account') === 'none') {
           const fa = favs.has(a.key) ? 0 : 1
           const fb = favs.has(b.key) ? 0 : 1
           if (fa !== fb) return fa - fb
         }
-        const av = String(a[sort.key] ?? '')
-        const bv = String(b[sort.key] ?? '')
+        const val = (i: Instance): string => String((sort.key === 'address' ? i.publicIp ?? i.privateIp : i[sort.key]) ?? '')
+        const av = val(a)
+        const bv = val(b)
         return av.localeCompare(bv, undefined, { numeric: true }) * sort.dir || a.name.localeCompare(b.name)
       })
   }, [s.instances, s.profiles, s.search, s.profileFilter, s.favoritesOnly, s.osFilter, s.stateFilter, s.reachFilter, s.settings, sort]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -145,8 +127,8 @@ export default function InstanceTable(): ReactElement {
 
   return (
     <div className="flex h-full flex-col" onClick={() => setMenu(null)}>
-      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-        <div className="relative min-w-52 flex-1 max-w-md">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+        <div className="relative min-w-52 flex-1 max-w-sm">
           <span className="muted pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">
             <Icon.search />
           </span>
@@ -158,11 +140,11 @@ export default function InstanceTable(): ReactElement {
             onChange={(e) => s.set({ search: e.target.value })}
           />
         </div>
-        <span className="muted text-[11px]">
-          <span className="mono text-2 font-semibold">{rows.length}</span> of {visibleInstances(s).length} hosts
-          {s.profileFilter && <span> · {s.profileFilter}</span>}
-        </span>
+        <HostFilters />
         <span className="flex-1" />
+        <span className="muted text-[11px]">
+          <span className="mono text-2 font-semibold">{rows.length}</span> of {visibleInstances(s).length}
+        </span>
         <div className="flex flex-wrap items-center gap-1">
           <span className="muted text-[11px]">Group by</span>
           <div className="seg">
@@ -178,15 +160,14 @@ export default function InstanceTable(): ReactElement {
               </button>
             ))}
           </div>
-          <button className="btn btn-ghost btn-sm" title="Collapse all" disabled={groupBy === 'none'} onClick={() => void s.setAllGroups(groupKeys, true)}>
-            <Icon.chevron /> Collapse
+          <button className="btn btn-ghost btn-sm btn-icon" title="Collapse all groups" aria-label="Collapse all groups" disabled={groupBy === 'none'} onClick={() => void s.setAllGroups(groupKeys, true)}>
+            <Icon.chevron />
           </button>
-          <button className="btn btn-ghost btn-sm" title="Expand all" disabled={groupBy === 'none'} onClick={() => void s.setAllGroups(groupKeys, false)}>
-            <Icon.chevron open /> Expand
+          <button className="btn btn-ghost btn-sm btn-icon" title="Expand all groups" aria-label="Expand all groups" disabled={groupBy === 'none'} onClick={() => void s.setAllGroups(groupKeys, false)}>
+            <Icon.chevron open />
           </button>
         </div>
       </div>
-      <HostFilters />
       <ScanNotice />
       <div ref={tableRef} className="panel mx-4 mb-3 min-h-0 flex-1 overflow-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
         <table className="w-full text-xs">
@@ -196,8 +177,7 @@ export default function InstanceTable(): ReactElement {
               {th('profile', 'Account')}
               {th('osHint', 'OS')}
               {th('state', 'State')}
-              {th('publicIp', 'Public IP')}
-              {th('privateIp', 'Private IP')}
+              {th('address', 'Address')}
               {th('instanceType', 'Type', 'col-type')}
               <th>Route</th>
               <th className="!text-right">Actions</th>
@@ -209,7 +189,7 @@ export default function InstanceTable(): ReactElement {
           <tbody key={g.key} data-accent={g.color}>
             {groupBy !== 'none' && (
               <tr className="group-row">
-                <td colSpan={9}>
+                <td colSpan={8}>
                   <div className="group-head" onClick={() => void s.toggleGroup(g.key)}>
                     <span className="chev">
                       <Icon.chevron open={!isCollapsed} />
@@ -240,7 +220,7 @@ export default function InstanceTable(): ReactElement {
             )}
             {!isCollapsed && g.rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="muted px-12 py-3 text-[11px]">
+                <td colSpan={8} className="muted px-12 py-3 text-[11px]">
                   Empty folder.{' '}
                   <button className="underline" onClick={() => s.set({ manualHostEditor: 'new', manualHostFolder: g.key.slice(6) })}>
                     Add a server
@@ -306,25 +286,29 @@ export default function InstanceTable(): ReactElement {
                   </span>
                 </td>
                 <td className="mono">
-                  {i.publicIp ? (
-                    <button className="hover:underline" title="Copy" onClick={() => void copy(i.publicIp, 'Public IP')}>
+                  {/* Public address first when there is one (what a direct route uses); the private one underneath. */}
+                  {i.publicIp && (
+                    <button className="block leading-4 hover:underline" title="Public IP (click to copy)" onClick={() => void copy(i.publicIp, 'Public IP')}>
                       {i.publicIp}
                     </button>
-                  ) : (
-                    <span className="muted">—</span>
                   )}
-                </td>
-                <td className="mono">
-                  <button className="hover:underline" title="Copy" onClick={() => void copy(i.privateIp, 'Private IP')}>
-                    {i.privateIp ?? '—'}
-                  </button>
+                  {i.privateIp ? (
+                    <button className={`block leading-4 hover:underline ${i.publicIp ? 'muted text-[10px]' : ''}`} title="Private IP (click to copy)" onClick={() => void copy(i.privateIp, 'Private IP')}>
+                      {i.privateIp}
+                    </button>
+                  ) : !i.publicIp && <span className="muted">—</span>}
                 </td>
                 <td className="mono text-2 col-type">{i.manual ? <span className="muted font-sans">{i.tags.Notes ?? ''}</span> : i.instanceType}</td>
                 <td>
                   <RouteBadge i={i} />
                 </td>
                 <td className="row-actions text-right whitespace-nowrap">
-                  {(i.platform !== 'windows' || i.manual) && (
+                  {/* One primary action per OS; the rest are in the ⋯ menu (also the right-click menu). */}
+                  {i.platform === 'windows' ? (
+                    <button className="btn btn-sm btn-rdp mr-1" disabled={!canConnect(i)} title="Remote desktop (connects with saved credentials; shift-click for options)" onClick={(e) => void openRdpFor(i.key, e.shiftKey)}>
+                      <Icon.monitor /> RDP
+                    </button>
+                  ) : (
                     <button
                       className="btn btn-sm btn-ssh mr-1"
                       disabled={!canConnect(i)}
@@ -334,29 +318,29 @@ export default function InstanceTable(): ReactElement {
                       <Icon.terminal /> SSH
                     </button>
                   )}
-                  <button className="btn btn-sm btn-rdp mr-1" disabled={!canConnect(i)} title="Remote desktop (connects with saved credentials; shift-click for options)" onClick={(e) => void openRdpFor(i.key, e.shiftKey)}>
-                    <Icon.monitor /> RDP
-                  </button>
-                  {(i.platform !== 'windows' || i.manual) && (
+                  {i.platform !== 'windows' && (
                     <button className="btn btn-sm mr-1" disabled={!canConnect(i)} title="Browse and transfer files over SFTP (shift-click for options)" onClick={(e) => openFilesFor(i.key, e.shiftKey)}>
                       <Icon.folder /> Files
                     </button>
                   )}
-                  {i.platform === 'windows' && !i.manual && (
-                    <button className="btn btn-sm btn-icon mr-1" title="Retrieve Windows administrator password" onClick={() => s.set({ passwordFor: i.key })}>
-                      <Icon.key />
-                    </button>
-                  )}
-                  {i.manual && (
-                    <button className="btn btn-sm btn-icon" title="Edit server" onClick={() => s.set({ manualHostEditor: i.key.replace('manual/', '') })}>
-                      <Icon.edit />
-                    </button>
-                  )}
-                  {i.state === 'stopped' && (
-                    <button className="btn btn-sm btn-icon" title="Start instance" onClick={() => void power(i, 'start')}>
+                  {i.state === 'stopped' && !i.manual && (
+                    <button className="btn btn-sm btn-icon mr-1" title="Start instance" onClick={() => void power(i, 'start')}>
                       <Icon.play />
                     </button>
                   )}
+                  <button
+                    className="btn btn-ghost btn-sm btn-icon"
+                    title="More actions"
+                    aria-label={`More actions for ${i.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      s.set({ selectedKey: i.key })
+                      setMenu({ x: r.right - 224, y: r.bottom + 4, key: i.key })
+                    }}
+                  >
+                    <Icon.more />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -366,7 +350,7 @@ export default function InstanceTable(): ReactElement {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="muted px-4 py-16 text-center">
+                <td colSpan={8} className="muted px-4 py-16 text-center">
                   {allInstances(s).length === 0
                     ? s.scanning
                       ? 'Scanning your AWS accounts…'
@@ -412,6 +396,19 @@ function ContextMenu({
 }): ReactElement {
   const s = useStore()
   const reachable = ['direct', 'ssm'].includes(routeOf(i, s.settings).route)
+  // Keep the menu inside the window: flip up/left when it would overflow.
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ x, y })
+  useLayoutEffect(() => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    setPos({ x: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)), y: y + r.height > window.innerHeight - 8 ? Math.max(8, y - r.height) : y })
+  }, [x, y])
+  useEffect(() => {
+    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', esc)
+    return () => document.removeEventListener('keydown', esc)
+  }, [onClose])
   const item = (label: string, fn: () => void, disabled = false): ReactElement => (
     <button
       disabled={disabled}
@@ -425,9 +422,11 @@ function ContextMenu({
     </button>
   )
   return (
-    <div className="panel modal fixed z-50 min-w-56 border py-1 text-xs" style={{ left: x, top: y, borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>
+    <div ref={ref} className="panel modal fixed z-50 min-w-56 border py-1 text-xs" style={{ left: pos.x, top: pos.y, borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>
       <div className="section-title px-3 py-1.5">{i.name}</div>
       {item('Host details', () => s.revealHost(i.key))}
+      {i.platform === 'windows' && item('Remote desktop', () => void openRdpFor(i.key), !reachable)}
+      {i.platform !== 'windows' && item('Open SSH', () => openSshFor(i.key), !reachable)}
       {(i.platform !== 'windows' || i.manual) && item('SSH with options…', () => s.set({ connectFor: { kind: 'ssh', key: i.key } }), i.state !== 'running')}
       {(i.platform !== 'windows' || i.manual) &&
         item(`SSH in ${s.settings?.externalTerminal ?? 'Terminal'}`, async () => {
@@ -439,6 +438,7 @@ function ContextMenu({
         }, !reachable)}
       {item('RDP with options…', () => s.set({ connectFor: { kind: 'rdp', key: i.key } }), i.state !== 'running')}
       {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), i.state !== 'running')}
+      {!i.manual && item('Forward a port…', () => s.set({ portForwardFor: { key: i.key } }), !i.ssmOnline || i.state !== 'running')}
       {i.platform === 'windows' && !i.manual && item('Get Windows password', () => s.set({ passwordFor: i.key }))}
       {i.manual && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}
       {i.manual &&

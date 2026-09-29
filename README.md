@@ -18,6 +18,13 @@ A macOS (Apple Silicon) desktop app that scans all of your AWS accounts for EC2 
 - Filters stay above the host table when the sidebar is collapsed. Selecting a host in the sidebar clears conflicting filters and reveals its group.
 - Failed account/region scans preserve the last known hosts with a **Cached** badge and a retry action. Successful empty scans still remove hosts that are no longer present.
 - Disconnected SSH tabs retain their output and offer **Reconnect**, **Edit connection**, and **Copy message**.
+- **Port forwarding** over SSM: forward any port on an instance (or a host it can reach, such as an RDS endpoint) to `localhost`, from the host's ⋯ menu, host details, the tunnel bar or `⌘K` (`forward <host>`). Presets are saved for one-click reuse; web ports get an **open** link.
+- **Terminal tools**: find in scrollback (`⌘F`), saved **snippets** (per host or global), **split view** (`⌘D`) with **broadcast input** (`⌘⇧I`) to every pane, **Save output** of the whole scrollback, and optional **session logs** (Settings → Session logs; a REC badge marks recorded tabs).
+- **Command palette**: type `>` in `⌘K` (or `⌘⇧P`) for rescan, sign-in, theme, port forwards, workspaces, snippets; `start`/`stop`/`ssh`/`files <host>` act directly on a host.
+- **Workspaces**: save the open tabs under a name and reopen them together from the sidebar or `⌘K` (RDP passwords are not stored; the Keychain credential is used).
+- **Keyboard shortcuts** (`⌘/` lists them): `⌘1`–`⌘9` switch tabs, `⌘W` closes a tab (`⌘⇧W` closes the window), `⌘T` new session, `⌘⇧]`/`⌘⇧[` next/previous. Tabs can be dragged to reorder and show their route and uptime.
+- **Host health** in host details: EC2 status checks, scheduled events, SSM check-in time and a 3-hour CPU chart (needs `ec2:DescribeInstanceStatus` and `cloudwatch:GetMetricData`).
+- **RDP** tabs add full screen (Keyboard Lock sends Esc/⌘Tab to Windows; hold Esc to leave) and fixed resolution presets. SSM-tunnelled desktops are probed for liveness so a dead tunnel reconnects in about a minute instead of freezing.
 - SFTP transfers offer **Keep both / Skip / Replace** when the destination exists. Files are transferred to temporary siblings and published only after completion; cancellation leaves existing destination files intact. Replacing remote files requires the server's OpenSSH atomic-rename extension. If unavailable, use Keep both. A lost connection can leave a hidden `.part` file for later cleanup.
 
 ## Adding AWS accounts (for teammates)
@@ -99,6 +106,29 @@ The same UI can be used from a phone or tablet browser while the Mac app is runn
 1. Install [Tailscale](https://tailscale.com/download) on the Mac and the phone and sign both into your tailnet (optional but recommended; Wi-Fi works too).
 2. **Settings → Phone access → Let my phone use this app while it is running.** The app starts a small server (port 8321 by default) and shows a QR code.
 3. Scan the QR code with the iPhone camera and add the page to the Home Screen. The link carries the access token and the Home Screen bookmark keeps it, so treat the link like a password; **Rotate token** invalidates every paired phone.
+
+### The phone app
+
+On a phone the page opens in a layout built for touch, and the Home Screen icon launches it full screen like an installed app (no App Store needed).
+
+- **Hosts**: search, filter chips (running, favorites, Linux/Windows, account), hosts grouped by account. Tap a host for Remote desktop, SSH terminal, Files, or connection options.
+- **Terminal**: a key bar above the iOS keyboard with Esc, Tab, arrows, Home/End/PgUp/PgDn and common symbols. **ctrl** and **alt** are one-shot: tap ctrl, then `c` on the keyboard, to send Ctrl+C. The ••• menu has paste, snippets, text size (kept per phone, separate from the Mac), and disconnect.
+- **Remote desktop**: the desktop is sized to the phone screen (Retina sharpness on by default). Tap to click, press and hold to right-click, drag to select or move windows, two fingers to scroll, two-finger tap to right-click. **R-click** makes the next tap a right click. The keyboard button raises the iOS keyboard; the key bar adds Ctrl, Alt, Win, Esc, Tab, arrows, Delete and F-keys, and the ••• menu sends Ctrl+Alt+Del and the phone's clipboard.
+- **Sessions**: every open terminal, desktop and file browser. Going back to the host list leaves them connected.
+
+The layout is chosen when the page loads: phones, and phones in landscape, get the phone layout, larger screens get the desktop one. Add `?layout=desktop` or `?layout=mobile` to the URL to force one (More → **Use desktop layout** saves that choice; `?layout=auto` clears it).
+
+### iPhone app (`ios/`)
+
+A native app, **EC2 Remote**, wraps the same phone interface with things a web page can't do: it pairs by scanning the QR code, stores paired computers in the Keychain, locks with Face ID, shows a clear "can't reach your Mac" screen with retry, opens AWS sign-in pages in Safari, saves downloads through the share sheet, and keeps the screen on while sessions are open. It works on any iPhone or iPad; on a wide screen (an unfolded foldable, an iPad) the host list and the session sit side by side and re-lay out live as it folds.
+
+```bash
+ios/install.sh    # build and install on the iPhone connected to this Mac
+```
+
+Needs Xcode signed in to an Apple ID (Settings → Accounts) and Developer Mode on the iPhone. With a free Apple ID the app must be reinstalled every 7 days; a paid developer account extends that to a year. The app talks to the Mac app's Phone access (or a standalone gateway), so the Mac side must be set up as below.
+
+Sessions survive switching apps: iOS pauses the app's connection within seconds, so the gateway keeps a disconnected page's SSH, SFTP and RDP sessions for 10 minutes and hands them back when the same page reconnects (output printed while away is not replayed).
 
 **Reachable from** picks how the phone connects:
 

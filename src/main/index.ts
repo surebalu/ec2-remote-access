@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, nativeTheme } from 'electron'
+import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { setHost } from './host'
@@ -17,6 +17,28 @@ setHost(electronHost)
 
 if (process.env.ELECTRON_RENDERER_URL && process.env.RDP_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.RDP_DEBUG_PORT)
+}
+
+/**
+ * The default menu binds Cmd+W to Close Window, which would take every open session with it. The renderer uses Cmd+W
+ * to close the current tab instead, so the window close moves to Cmd+Shift+W.
+ */
+function setMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { label: 'File', submenu: [{ label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' }] },
+      { role: 'editMenu' },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' },
+          { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }
+        ]
+      },
+      { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] }
+    ])
+  )
 }
 
 function createWindow(): void {
@@ -54,6 +76,7 @@ app.whenReady().then(() => {
   console.log(`[app] EC2 Remote Access ${app.getVersion()} starting (packaged=${app.isPackaged})`)
   nativeTheme.themeSource = getSettings().theme
   registerIpc()
+  setMenu()
   createWindow()
   if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()

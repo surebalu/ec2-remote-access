@@ -527,7 +527,7 @@ export default function SftpTab({ tab, active }: { tab: Tab; active: boolean }):
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="sftp-panes flex min-h-0 flex-1">
         <FilePane
           side="local"
           title="This Mac"
@@ -542,7 +542,7 @@ export default function SftpTab({ tab, active }: { tab: Tab; active: boolean }):
           }}
           onOpenFile={(e) => connected && void upload([e.path], remoteCwd.current)}
         />
-        <div className="flex w-12 shrink-0 flex-col items-center justify-center gap-2 border-x" style={{ borderColor: 'var(--border)', background: 'var(--panel-2)' }}>
+        <div className="sftp-transfer flex w-12 shrink-0 flex-col items-center justify-center gap-2 border-x" style={{ borderColor: 'var(--border)', background: 'var(--panel-2)' }}>
           <button className="btn btn-icon" title="Upload the files selected on the left into the remote folder" disabled={!connected} onClick={() => void upload(localSel.current.map((e) => e.path), remoteCwd.current)}>
             →
           </button>

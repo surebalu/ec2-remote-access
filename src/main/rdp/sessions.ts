@@ -8,6 +8,7 @@ import { addTunnel, closeTunnel, updateTunnel } from '../tunnels'
 import { freePort, uid } from '../util'
 import { ensureProxy, registerTarget, unregisterTarget, lastErrorFor, dropConnections } from './cleanpath'
 import { log } from '../log'
+import { agentSupportsMux } from './liveness'
 
 interface Live {
   token: string
@@ -32,6 +33,7 @@ export async function prepareRdp(req: RdpPrepareRequest): Promise<RdpPrepared> {
 
   let host: string
   let port: number
+  let probe = false
   if (route.route === 'ssm') {
     const localPort = await freePort()
     const tunnelId = uid('rdp')
@@ -53,12 +55,13 @@ export async function prepareRdp(req: RdpPrepareRequest): Promise<RdpPrepared> {
     })
     host = '127.0.0.1'
     port = localPort
+    probe = agentSupportsMux(inst.ssmAgentVersion)
   } else {
     host = route.host!
     port = remotePort
   }
-  registerTarget(token, { host, port })
-  log('rdp', 'prepared', { sessionId: req.sessionId, token: token.slice(0, 8), instance: inst.key, route: route.route, target: `${host}:${port}` })
+  registerTarget(token, { host, port, probe })
+  log('rdp', 'prepared', { sessionId: req.sessionId, token: token.slice(0, 8), instance: inst.key, route: route.route, target: `${host}:${port}`, probe })
   return {
     sessionId: req.sessionId,
     token,

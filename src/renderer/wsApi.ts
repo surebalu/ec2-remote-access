@@ -107,7 +107,9 @@ export function createWsApi(): Api {
     }
   }
   void ensureToken().then((token) => {
-    url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`
+    // Per page load, not stored: only this live page can pick its sessions back up after a dropped socket.
+    const client = crypto.getRandomValues(new Uint32Array(4)).join('-')
+    url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}&client=${client}`
     connect()
   })
 

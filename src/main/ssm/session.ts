@@ -109,17 +109,20 @@ export async function startSshStream(inst: Instance, remotePort = 22): Promise<{
   return { handle, stream: new ChildDuplex(handle.child) }
 }
 
-/** Local port forwarding: resolves once the plugin reports it is listening. */
+/**
+ * Local port forwarding: resolves once the plugin reports it is listening. With `remoteHost` the instance relays to
+ * that host (an RDS endpoint, an internal ALB) via AWS-StartPortForwardingSessionToRemoteHost.
+ */
 export async function startPortForward(
   inst: Instance,
   remotePort: number,
   localPort: number,
-  onLog?: (line: string) => void
+  onLog?: (line: string) => void,
+  remoteHost?: string
 ): Promise<SsmHandle> {
-  const handle = await start(inst, 'AWS-StartPortForwardingSession', {
-    portNumber: [String(remotePort)],
-    localPortNumber: [String(localPort)]
-  })
+  const params: Record<string, string[]> = { portNumber: [String(remotePort)], localPortNumber: [String(localPort)] }
+  if (remoteHost) params.host = [remoteHost]
+  const handle = await start(inst, remoteHost ? 'AWS-StartPortForwardingSessionToRemoteHost' : 'AWS-StartPortForwardingSession', params)
   await new Promise<void>((resolve, reject) => {
     let buf = ''
     let settled = false
@@ -133,9 +136,23 @@ export async function startPortForward(
         reject(err)
       } else resolve()
     }
+    let sawAccept = false
     const onData = (d: Buffer): void => {
+      // The listener stays attached for the tunnel's life. Once ready, only new lines matter, and the RDP liveness
+      // probe makes the plugin print "Connection accepted" about once a minute, so that line is recorded only once.
+      const lines = d.toString().split('\n').map((l) => l.trim()).filter((l) => {
+        if (!l) return false
+        if (!/^Connection accepted for session/i.test(l)) return true
+        if (sawAccept) return false
+        sawAccept = true
+        return true
+      })
+      for (const line of lines) log('ssm', 'plugin', { ssmSessionId: handle.sessionId, line })
+      if (settled) {
+        for (const line of lines) onLog?.(line)
+        return
+      }
       buf += d.toString()
-      for (const line of d.toString().split('\n')) if (line.trim()) log('ssm', 'plugin', { ssmSessionId: handle.sessionId, line: line.trim() })
       for (const line of buf.split('\n')) if (line.trim()) onLog?.(line.trim())
       if (/Waiting for connections/i.test(buf)) finish()
       if (/(error|failed|Cannot perform)/i.test(buf) && !/Waiting for connections/i.test(buf)) finish(new Error(buf.trim()))

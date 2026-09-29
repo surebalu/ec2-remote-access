@@ -71,6 +71,7 @@ async function scanOne(profile: string, region: string, accountId: string | unde
           inst.ssmPingStatus = info.PingStatus
           inst.ssmOnline = info.PingStatus === 'Online'
           inst.ssmAgentVersion = info.AgentVersion
+          inst.ssmLastPing = info.LastPingDateTime?.toISOString()
           if (inst.platform === 'linux' && info.PlatformName) {
             inst.osHint = /red hat/i.test(info.PlatformName) ? 'RHEL' : info.PlatformName.replace(/ Linux$/, ' Linux').trim()
           }

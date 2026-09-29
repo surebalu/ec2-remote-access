@@ -48,7 +48,12 @@ export const defaultSettings: Settings = {
   awsCliPath: '',
   connectTimeoutSec: 20,
   preferDirect: false,
-  overrides: {}
+  overrides: {},
+  snippets: [],
+  portForwards: [],
+  workspaces: [],
+  sessionLogging: false,
+  sessionLogDir: ''
 }
 
 interface Schema {

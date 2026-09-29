@@ -21,7 +21,8 @@ export default function HostActions({ instanceKey, current }: { instanceKey: str
           <Icon.folder /> Files
         </button>
       )}
-      {current !== 'rdp' && (
+      {/* Linux hosts rarely run an RDP server; RDP stays available from the host's right-click menu. */}
+      {current !== 'rdp' && i.platform === 'windows' && (
         <button className="btn btn-sm btn-rdp" disabled={!reachable} title="Remote desktop to this host (shift-click for options)" onClick={(e) => void openRdpFor(instanceKey, e.shiftKey)}>
           <Icon.monitor /> RDP
         </button>

@@ -22,6 +22,9 @@ let lastError: string | undefined
 let ts: TailscaleInfo | null = null
 /** Set while `tailscale serve` is publishing our port, so stop() can withdraw it. */
 let serving: string | null = null
+/** Re-checks Tailscale while HTTPS is not yet published (Tailscale often connects after this app starts at login). */
+let serveRetry: ReturnType<typeof setInterval> | null = null
+const SERVE_RETRY_MS = 20_000
 
 const tokenFile = (): string => join(host().userDataDir(), 'gateway.token')
 
@@ -75,6 +78,31 @@ export async function refreshTailscale(): Promise<void> {
   ts = await tailscaleInfo()
 }
 
+/** Publishes the gateway through `tailscale serve` if Tailscale is ready; records why not otherwise. */
+async function tryServe(): Promise<boolean> {
+  if (!bound || serving) return !!serving
+  if (!ts?.cli) lastError = 'Tailscale CLI not found. Install Tailscale from tailscale.com/download and sign in.'
+  else if (!ts.running || !ts.dnsName) lastError = 'Tailscale is not running or has no MagicDNS name. Open Tailscale and sign in; this switches to HTTPS on its own once Tailscale is connected.'
+  else if (ts.certDomains.length === 0) lastError = 'HTTPS certificates are not enabled for your tailnet. In the Tailscale admin console open DNS → HTTPS Certificates → Enable HTTPS; this picks it up within a minute.'
+  else {
+    try {
+      await serveEnable(ts.cli, bound.port)
+      serving = ts.dnsName
+      lastError = undefined
+      return true
+    } catch (e) {
+      lastError = (e as Error).message
+    }
+  }
+  console.warn(`[phone-access] ${lastError}`)
+  return false
+}
+
+function stopServeRetry(): void {
+  if (serveRetry) clearInterval(serveRetry)
+  serveRetry = null
+}
+
 export async function startPhoneAccess(): Promise<PhoneAccessStatus> {
   if (gateway) return phoneStatus()
   const s = getSettings()
@@ -99,24 +127,19 @@ export async function startPhoneAccess(): Promise<PhoneAccessStatus> {
     bound = null
     return phoneStatus()
   }
-  if (https) {
-    if (!ts?.cli) lastError = 'Tailscale CLI not found. Install Tailscale from tailscale.com/download and sign in.'
-    else if (!ts.running || !ts.dnsName) lastError = 'Tailscale is not running or has no MagicDNS name. Open Tailscale, sign in, and enable MagicDNS in the admin console.'
-    else if (ts.certDomains.length === 0) lastError = 'HTTPS certificates are not enabled for your tailnet. In the Tailscale admin console open DNS → HTTPS Certificates → Enable HTTPS, then switch this off and on.'
-    else {
-      try {
-        await serveEnable(ts.cli, bound.port)
-        serving = ts.dnsName
-      } catch (e) {
-        lastError = (e as Error).message
-      }
-    }
-    if (lastError) console.warn(`[phone-access] ${lastError}`)
+  if (https && !(await tryServe())) {
+    serveRetry = setInterval(() => {
+      void refreshTailscale().then(tryServe).then((ok) => {
+        if (ok || !gateway) stopServeRetry()
+        host().broadcast('phone:changed', phoneStatus())
+      })
+    }, SERVE_RETRY_MS)
   }
   return phoneStatus()
 }
 
 export async function stopPhoneAccess(): Promise<PhoneAccessStatus> {
+  stopServeRetry()
   const gw = gateway
   gateway = null
   bound = null
