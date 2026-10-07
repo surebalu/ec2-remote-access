@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
+import { ssoWaitOutcome } from '@shared/ssoWait'
 
 export interface RdpTabRequest {
   user: string
@@ -413,8 +414,47 @@ export const useStore = create<State>((set, get) => ({
       const flow = await window.api.invoke('sso:loginSession', sso.ssoSession, { openBrowser: !remote })
       set({ ssoWait: { flow, session: sso.ssoSession } })
       if (remote) void window.api.invoke('shell:open', flow.verificationUriComplete)
-      // completion arrives via profiles:status pushes (see init); watch for all-ok
+      // Completion normally arrives via profiles:status pushes (see init); watch for all-ok.
       const started = Date.now()
+      const expiresAtBefore = get().ssoSessions.find((x) => x.name === sso.ssoSession)?.expiresAt
+      const accountsOk = (sinceStart: boolean): boolean => {
+        const st = get()
+        const enabled = st.profiles.filter((p) => p.enabled && p.ssoSession === sso.ssoSession)
+        return enabled.length > 0 && enabled.every((p) => st.statuses[p.name]?.state === 'ok' && (!sinceStart || (st.statuses[p.name]?.checkedAt ?? 0) > started))
+      }
+      let finished = false
+      const finish = (): void => {
+        if (finished) return
+        finished = true
+        clearInterval(timer)
+        set({ ssoWait: null, loggingIn: false, authBannerDismissedFor: null })
+        get().toast('success', 'Signed in. Refreshing inventory…')
+        void get().refreshSsoSessions()
+        void get().scan()
+      }
+      // A push only reaches sockets open at that moment. On a phone the user approves in Safari, iOS suspends the
+      // page and drops its socket, and the "signed in" push is gone by the time it reconnects. So also ask the
+      // computer what token it holds (see ssoWaitOutcome); this works however long the page was away.
+      let asking = false
+      const askComputer = async (): Promise<void> => {
+        try {
+          const list = await window.api.invoke('sso:sessions')
+          const w = get().ssoWait
+          if (finished || !w) return
+          set({ ssoSessions: list })
+          const outcome = ssoWaitOutcome({ session: list.find((x) => x.name === sso.ssoSession), expiresAtBefore, startedAt: started, flowExpiresInSec: flow.expiresIn, now: Date.now() })
+          if (outcome === 'signed-in') {
+            await get().checkAuth()
+            if (!finished && get().ssoWait && accountsOk(false)) finish()
+          } else if (outcome === 'expired') {
+            clearInterval(timer)
+            set({ ssoWait: { ...w, error: 'The login code expired. Start again.' }, loggingIn: false })
+          }
+        } catch {
+          /* computer unreachable for the moment (reconnecting); the next tick asks again */
+        }
+      }
+      let ticks = 0
       const timer = setInterval(() => {
         const st = get()
         if (!st.ssoWait) {
@@ -422,14 +462,13 @@ export const useStore = create<State>((set, get) => ({
           set({ loggingIn: false })
           return
         }
-        const enabled = st.profiles.filter((p) => p.enabled && p.ssoSession === sso.ssoSession)
-        const allOk = enabled.length > 0 && enabled.every((p) => st.statuses[p.name]?.state === 'ok' && (st.statuses[p.name]?.checkedAt ?? 0) > started)
-        if (allOk) {
-          clearInterval(timer)
-          set({ ssoWait: null, loggingIn: false, authBannerDismissedFor: null })
-          get().toast('success', 'Signed in. Refreshing inventory…')
-          void get().refreshSsoSessions()
-          void get().scan()
+        if (accountsOk(true)) {
+          finish()
+          return
+        }
+        if (++ticks % 3 === 0 && !asking) {
+          asking = true
+          void askComputer().finally(() => { asking = false })
         }
       }, 1000)
     } catch (e) {

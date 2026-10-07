@@ -30,6 +30,10 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+// Sign-in scenario: one SSO profile whose token the "Mac" writes on demand, without ever pushing profiles:status.
+let ssoScenario = false
+let ssoTokenWritten = false
+const ssoProfile = { name: 'corp-prod', region: 'us-east-1', kind: 'sso', enabled: true, accountId: '123456789012', ssoSession: 'corp' }
 ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
   calls.push({ channel, args })
   switch (channel) {
@@ -37,9 +41,16 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'settings:set': settings = { ...settings, ...args[0] }; return settings
     case 'inventory:cached': return cached
     case 'inventory:scan': cached = { ...cached, instances: cached.instances.map((i) => ({ ...i, staleReason: undefined, lastSeenAt: Date.now() })), errors: [], scannedAt: Date.now() }; return cached
-    case 'profiles:list': return profiles
-    case 'profiles:check': return profiles.map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
-    case 'tunnels:list': case 'sso:sessions': return []
+    case 'profiles:list': return ssoScenario ? [ssoProfile] : profiles
+    case 'profiles:check':
+      if (ssoScenario) return [{ profile: ssoProfile.name, state: ssoTokenWritten ? 'ok' : 'login-required', accountId: ssoProfile.accountId, checkedAt: Date.now() }]
+      return profiles.map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
+    case 'tunnels:list': return []
+    case 'sso:sessions':
+      if (!ssoScenario) return []
+      return [{ name: 'corp', tokenValid: ssoTokenWritten, expiresAt: new Date(Date.now() + (ssoTokenWritten ? 1 : -1) * 3600000).toISOString(), hasRefreshToken: false, profiles: [ssoProfile.name] }]
+    case 'sso:loginSession': return { flowId: 'flow-1', userCode: 'ABCD-EFGH', verificationUri: 'https://device.sso.example/', verificationUriComplete: 'https://device.sso.example/?user_code=ABCD-EFGH', expiresIn: 600 }
+    case 'sso:cancel': return
     case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', awsCli: null, windowsApp: false }
     case 'diag:log': return { path: '/fixture/main.log', text: '' }
     case 'phone:status': return { enabled: true, running: true, port: 8321, bind: 'https', tailscaleAvailable: true, tailscaleHostname: 'fixture-mac.tail1234.ts.net', tailscaleHttps: true, urls: ['https://fixture-mac.tail1234.ts.net/#token=fixture-token'], token: 'fixture-token', clients: [{ address: '100.101.102.5', since: Date.now() - 120000 }] }
@@ -357,6 +368,30 @@ app.whenReady().then(async () => {
     assert.equal(await pjs(`(() => { const r = document.querySelector('.m-sheet').getBoundingClientRect(); return r.width <= 520 && r.left > 100 && r.right < innerWidth - 100 })()`), true, 'tablet sheets are centred, not full width')
     await pshot('ipad-sheet.png')
     await ptap('Cancel')
+
+    // Signing in from a phone: the approval happens in Safari, iOS suspends the page and drops its socket, and the
+    // "signed in" push is sent to nobody. The dialog must still finish by asking the computer what token it holds.
+    ssoScenario = true
+    phone.setContentSize(430, 932)
+    await phone.loadFile(resolve('out/renderer/index.html'), { query: { layout: 'mobile' } })
+    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 3`)
+    await puntil(`document.body.textContent.includes('corp-prod')`) // profiles loaded and checked: the sign-in banner names the account
+    await ptap('More')
+    await ptap('Sign in to AWS')
+    try {
+      await puntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('ABCD-EFGH') && document.querySelector('.modal').textContent.includes('Waiting for approval')`)
+    } catch (e) {
+      await pshot('phone-sso-failure.png')
+      console.error('page text:', (await pjs(`document.body.innerText`)).slice(0, 600), '\ncalls:', calls.slice(-8).map((c) => c.channel).join(', '))
+      throw e
+    }
+    await pshot('phone-sso-waiting.png')
+    ssoTokenWritten = true // the Mac got the approval and wrote the token; no event reaches the page
+    for (let n = 0; n < 400 && await pjs(`!!document.querySelector('.modal')`); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(await pjs(`!!document.querySelector('.modal')`), false, 'sign-in dialog closes once the computer holds a new token, even with no push')
+    assert.equal(await pjs(`document.body.textContent.includes('Waiting for sign-in')`), false, 'sign-in no longer reported as waiting')
+    await pshot('phone-sso-done.png')
+    ssoScenario = false
     phone.destroy()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
