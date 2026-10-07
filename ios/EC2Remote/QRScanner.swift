@@ -18,6 +18,9 @@ struct QRScanner: UIViewControllerRepresentable {
         var onCode: ((String) -> Void)?
         private let session = AVCaptureSession()
         private var preview: AVCaptureVideoPreviewLayer?
+        /// Keeps the preview upright as the device turns. Unset, the picture is rotated a quarter turn on an iPad held
+        /// in landscape (iPads are used in every orientation, unlike a phone held upright to scan).
+        private var rotation: AVCaptureDevice.RotationCoordinator?
         private var done = false
 
         override func viewDidLoad() {
@@ -44,11 +47,21 @@ struct QRScanner: UIViewControllerRepresentable {
             layer.videoGravity = .resizeAspectFill
             view.layer.addSublayer(layer)
             preview = layer
+            rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: layer)
+            applyRotation()
         }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
             preview?.frame = view.bounds
+            // A turn of the device relayouts this view, so this is where the new angle is picked up.
+            applyRotation()
+        }
+
+        private func applyRotation() {
+            guard let angle = rotation?.videoRotationAngleForHorizonLevelPreview, let connection = preview?.connection,
+                  connection.isVideoRotationAngleSupported(angle) else { return }
+            connection.videoRotationAngle = angle
         }
 
         override func viewWillAppear(_ animated: Bool) {
@@ -91,12 +104,12 @@ struct PairingView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Image("Logo").resizable().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         Text("Connect to your Mac").font(.largeTitle.bold())
-                        Text("EC2 Remote uses the EC2 Remote Access app on your Mac (or a gateway) to reach your instances. AWS credentials stay there; this phone never sees them.")
+                        Text("EC2 Remote uses the EC2 Remote Access app on your Mac (or a gateway) to reach your instances. AWS credentials stay there; this \(Device.name) never sees them.")
                             .foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 12) {
                         step(1, "On the Mac, open EC2 Remote Access → Settings → Phone access and turn it on.")
-                        step(2, "Choose \u{201C}HTTPS via Tailscale\u{201D}, and have Tailscale running on both the Mac and this iPhone.")
+                        step(2, "Choose \u{201C}HTTPS via Tailscale\u{201D}, and have Tailscale running on both the Mac and this \(Device.name).")
                         step(3, "Scan the QR code shown there.")
                     }
                     Button { scanning = true } label: {

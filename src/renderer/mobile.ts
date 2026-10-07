@@ -86,12 +86,12 @@ export function trackVisualViewport(): () => void {
 type NativeMessage = { type: 'settings' } | { type: 'sessions'; count: number }
 type NativeBridge = { messageHandlers?: { ec2ra?: { postMessage: (m: NativeMessage) => void } } }
 
-/** True inside the EC2 Remote iPhone app (ios/), which injects a WKScriptMessageHandler named `ec2ra`. */
+/** True inside the EC2 Remote iPhone/iPad app (ios/), which injects a WKScriptMessageHandler named `ec2ra`. */
 export function nativeApp(): boolean {
   return !!(window as unknown as { webkit?: NativeBridge }).webkit?.messageHandlers?.ec2ra
 }
 
-/** Tells the iPhone app something only it can act on (its own settings screen, keeping the screen awake). */
+/** Tells the iOS app something only it can act on (its own settings screen, keeping the screen awake). */
 export function postNative(m: NativeMessage): void {
   ;(window as unknown as { webkit?: NativeBridge }).webkit?.messageHandlers?.ec2ra?.postMessage(m)
 }

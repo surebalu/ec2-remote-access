@@ -118,15 +118,18 @@ On a phone the page opens in a layout built for touch, and the Home Screen icon 
 
 The layout is chosen when the page loads: phones, and phones in landscape, get the phone layout, larger screens get the desktop one. Add `?layout=desktop` or `?layout=mobile` to the URL to force one (More → **Use desktop layout** saves that choice; `?layout=auto` clears it).
 
-### iPhone app (`ios/`)
+### iPhone and iPad app (`ios/`)
 
-A native app, **EC2 Remote**, wraps the same phone interface with things a web page can't do: it pairs by scanning the QR code, stores paired computers in the Keychain, locks with Face ID, shows a clear "can't reach your Mac" screen with retry, opens AWS sign-in pages in Safari, saves downloads through the share sheet, and keeps the screen on while sessions are open. It works on any iPhone or iPad; on a wide screen (an unfolded foldable, an iPad) the host list and the session sit side by side and re-lay out live as it folds.
+A native app, **EC2 Remote**, wraps the same phone interface with things a web page can't do: it pairs by scanning the QR code, stores paired computers in the Keychain, locks with Face ID, shows a clear "can't reach your Mac" screen with retry, opens AWS sign-in pages in Safari, saves downloads through the share sheet, and keeps the screen on while sessions are open. It runs natively on iPhone and iPad; on a wide screen (an iPad in either orientation or in Split View, an unfolded foldable) the host list and the session sit side by side and re-lay out live. An iPad with a keyboard uses the same ⌘ shortcuts as the Mac app.
 
 ```bash
-ios/install.sh    # build and install on the iPhone connected to this Mac
+ios/install.sh    # build and install on the iPhone or iPad connected to this Mac
+ios/archive.sh    # archive and upload to App Store Connect (TestFlight)
 ```
 
-Needs Xcode signed in to an Apple ID (Settings → Accounts) and Developer Mode on the iPhone. With a free Apple ID the app must be reinstalled every 7 days; a paid developer account extends that to a year. The app talks to the Mac app's Phone access (or a standalone gateway), so the Mac side must be set up as below.
+Needs Xcode signed in to an Apple ID (Settings → Accounts) and Developer Mode on the device. With a free Apple ID the app must be reinstalled every 7 days; a paid developer account extends that to a year. The app talks to the Mac app's Phone access (or a standalone gateway), so the Mac side must be set up as below.
+
+**Sharing it with a few people.** With the paid Apple Developer Program, `ios/archive.sh` signs the app for distribution and uploads it to App Store Connect. Testers install it through TestFlight: *internal* testers (up to 100 people you add under Users and Access) get a build as soon as it finishes processing with no App Review, while *external* testers (an invite by email or public link) need a one-time Beta App Review per version. TestFlight builds expire after 90 days, so upload again before then. A one-time setup in App Store Connect is needed first: create the app with bundle ID `me.surendrabalu.EC2Remote`. `INTERNAL_ONLY=1 ios/archive.sh` locks a build to internal testers. Every tester also needs a Mac running EC2 Remote Access (or a gateway) to pair with.
 
 Sessions survive switching apps: iOS pauses the app's connection within seconds, so the gateway keeps a disconnected page's SSH, SFTP and RDP sessions for 10 minutes and hands them back when the same page reconnects (output printed while away is not replayed).
 

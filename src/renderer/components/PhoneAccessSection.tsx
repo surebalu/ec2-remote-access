@@ -73,7 +73,7 @@ export default function PhoneAccessSection({ onPatch }: { onPatch: (p: Patch) =>
         <div className="flex gap-3 rounded-md border p-2.5" style={{ borderColor: 'var(--border)', background: 'var(--panel-2)' }}>
           {qr ? <img src={qr} alt="QR code for the phone link" width={176} height={176} className="shrink-0 rounded bg-white p-1" /> : <div className="h-[176px] w-[176px] shrink-0" />}
           <div className="min-w-0 flex-1 space-y-1.5 text-[11px]">
-            <div className="font-medium">Scan with the iPhone camera, then add the page to the Home Screen.</div>
+            <div className="font-medium">Scan with the iPhone or iPad camera, then add the page to the Home Screen.</div>
             {st.urls.length > 1 && (
               <div className="seg max-w-xs">
                 {st.urls.map((u, i) => <button key={u} className={i === which ? 'on' : ''} onClick={() => setWhich(i)}>{label(u)}</button>)}

@@ -52,7 +52,7 @@ export default function MobileApp(): ReactElement {
   const fullSession = wide && listHidden && !!active
 
   useEffect(() => trackVisualViewport(), [])
-  // The iPhone app keeps the screen awake while sessions are open, so a terminal left running doesn't lock the phone.
+  // The iOS app keeps the screen awake while sessions are open, so a terminal left running doesn't lock the phone.
   useEffect(() => postNative({ type: 'sessions', count: s.tabs.length }), [s.tabs.length])
   useEffect(() => {
     document.documentElement.toggleAttribute('data-mobile-session', !!active)
@@ -213,7 +213,7 @@ function MobileMore(): ReactElement {
         {nativeApp() && (
           <button className="m-host" onClick={() => postNative({ type: 'settings' })}>
             <span className="m-host-os"><Icon.shield /></span>
-            <span className="min-w-0 flex-1 text-left"><span className="m-host-name">iPhone app</span><span className="m-host-meta">Paired computers, Face ID lock</span></span>
+            <span className="min-w-0 flex-1 text-left"><span className="m-host-name">App settings</span><span className="m-host-meta">Paired computers, app lock</span></span>
             <Icon.chevron className="muted" />
           </button>
         )}
@@ -232,7 +232,7 @@ function MobileMore(): ReactElement {
           <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Use desktop layout</span><span className="m-host-meta">For a tablet or large screen. Open this page with ?layout=auto to come back.</span></span>
         </button>}
       </div>
-      <p className="m-footnote muted">Sessions run on the computer hosting EC2 Remote Access. AWS credentials never leave it; this phone sends keystrokes and shows the screen.</p>
+      <p className="m-footnote muted">Sessions run on the computer hosting EC2 Remote Access. AWS credentials never leave it; this device sends keystrokes and shows the screen.</p>
     </div>
   )
 }

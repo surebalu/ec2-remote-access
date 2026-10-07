@@ -329,6 +329,34 @@ app.whenReady().then(async () => {
     await puntil(`!document.querySelector('.m-app').classList.contains('wide')`)
     assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeFold, 'folding must not reconnect the session')
     assert.equal(await pjs(`getComputedStyle(document.querySelector('.m-side')).display`), 'none', 'folded with a session open: session is full screen')
+
+    // iPad: every orientation and the Split View widths, with the terminal open. Sizes are the iPads' CSS pixels.
+    // The shell must pick list-beside-session from 700 wide and 500 high, keep the key bar on screen, and never reconnect.
+    const ipads = [
+      ['ipad-mini-portrait', 744, 1133, true], ['ipad-mini-landscape', 1133, 744, true],
+      ['ipad-11-portrait', 834, 1194, true], ['ipad-11-landscape', 1194, 834, true],
+      ['ipad-13-portrait', 1032, 1376, true], ['ipad-13-landscape', 1376, 1032, true],
+      ['ipad-split-half', 507, 1024, false], ['ipad-split-two-thirds', 678, 1024, false], ['ipad-split-wide', 802, 834, true]
+    ]
+    for (const [name, width, height, wide] of ipads) {
+      phone.setContentSize(width, height)
+      await puntil(`innerWidth === ${width} && innerHeight === ${height} && document.querySelector('.m-app').classList.contains('wide') === ${wide}`)
+      await new Promise((r) => setTimeout(r, 250))
+      assert.equal(await noSideScroll(), true, `${name}: no sideways scrolling`)
+      assert.equal(await pjs(`(() => { const k = document.querySelector('.m-keybar')?.getBoundingClientRect(); return !!k && k.bottom <= innerHeight + 1 && k.right <= innerWidth + 1 })()`), true, `${name}: terminal key bar stays on screen`)
+      assert.equal(await pjs(`(() => { const r = document.querySelector('.m-stage').getBoundingClientRect(); return r.width >= 300 && r.height >= 300 })()`), true, `${name}: the session has room`)
+      assert.equal(await pjs(`getComputedStyle(document.querySelector('.m-side')).display !== 'none'`), wide, `${name}: host list ${wide ? 'beside' : 'hidden behind'} the session`)
+      assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeFold, `${name}: resizing must not reconnect the session`)
+      if (name === 'ipad-11-landscape' || name === 'ipad-13-portrait') await pshot(`${name}.png`)
+    }
+    // A dialog on a tablet floats centred instead of sliding up from the bottom.
+    phone.setContentSize(1194, 834)
+    await puntil(`innerWidth === 1194`)
+    await pjs(`document.querySelector('.m-header-btn[aria-label="Switch session"]').click()`)
+    await puntil(`!!document.querySelector('.m-sheet')`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.m-sheet').getBoundingClientRect(); return r.width <= 520 && r.left > 100 && r.right < innerWidth - 100 })()`), true, 'tablet sheets are centred, not full width')
+    await pshot('ipad-sheet.png')
+    await ptap('Cancel')
     phone.destroy()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)

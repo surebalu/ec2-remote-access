@@ -99,9 +99,9 @@ final class WebController: NSObject, ObservableObject {
         switch (e.domain, e.code) {
         case (NSURLErrorDomain, NSURLErrorTimedOut), (NSURLErrorDomain, NSURLErrorCannotConnectToHost), (NSURLErrorDomain, NSURLErrorCannotFindHost),
              (NSURLErrorDomain, NSURLErrorNetworkConnectionLost), (NSURLErrorDomain, NSURLErrorDNSLookupFailed):
-            return "The computer didn't answer. Make sure EC2 Remote Access is running and the Mac is awake, and that Tailscale is connected on this iPhone."
+            return "The computer didn't answer. Make sure EC2 Remote Access is running and the Mac is awake, and that Tailscale is connected on this \(Device.name)."
         case (NSURLErrorDomain, NSURLErrorNotConnectedToInternet):
-            return "This iPhone is offline."
+            return "This \(Device.name) is offline."
         case (NSURLErrorDomain, NSURLErrorSecureConnectionFailed), (NSURLErrorDomain, NSURLErrorServerCertificateUntrusted):
             return "The secure connection failed. In the Mac app, check Settings → Phone access shows an https:// link."
         default:
