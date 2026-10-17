@@ -39,18 +39,16 @@ test('detached shells exclude attached ones, the tab\'s own and foreign sessions
 })
 
 test('attach commands create only when needed, configure only a new server, and fall back to a plain shell', () => {
-  const plan = { name: 'ec2ra-a', create: true, startServer: true, history: false, cols: 120, rows: 32 }
+  const plan = { name: 'ec2ra-a', create: true, startServer: true, cols: 120, rows: 32 }
   // What sh -c receives once the login shell has removed the quoting.
   const fresh = sh(`printf %s ${attachCommand(plan).replace(/^sh -c /, '')}`)
   assert.equal(attachCommand(plan).startsWith('sh -c '), true)
   for (const part of ['start-server', 'set -g default-terminal', 'new-session -d -s \'ec2ra-a\' -x 120 -y 32', 'set -g mouse off', 'set -g prefix None', 'smcup@:rmcup@', "attach-session -d -t 'ec2ra-a'", 'exec "${SHELL:-/bin/sh}" -l']) {
     assert.ok(fresh.includes(part), `fresh server script has ${part}`)
   }
-  assert.equal(fresh.includes('capture-pane'), false)
-  const resume = attachCommand({ ...plan, create: false, startServer: false, history: true })
+  const resume = attachCommand({ ...plan, create: false, startServer: false })
   assert.equal(resume.includes('new-session'), false)
   assert.equal(resume.includes('set -g'), false)
-  assert.ok(resume.includes('capture-pane'))
   assert.ok(killCommand('ec2ra-a').includes('kill-session'))
   assert.ok(probeCommand().includes('-L ec2ra'))
 })

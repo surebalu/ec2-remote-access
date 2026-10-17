@@ -119,12 +119,11 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const snippetBtn = useRef<HTMLButtonElement>(null)
   const splitBtn = useRef<HTMLButtonElement>(null)
   const reconnectRef = useRef<() => void>(() => undefined)
-  const adoptRef = useRef<(name: string) => void>(() => undefined)
   /**
-   * The tmux shell this tab shows (undefined = its own, named after the tab) and whether it has shown it yet: a
-   * reconnect then resumes it, and taking over another one prints that shell's earlier output first.
+   * The tmux shell this tab shows (undefined = its own, named after the tab) and whether it has shown it yet, so a
+   * reconnect resumes that shell and can say when it has ended.
    */
-  const shellRef = useRef<{ name?: string; shown: boolean; history: boolean }>({ shown: false, history: false })
+  const shellRef = useRef<{ name?: string; shown: boolean }>({ shown: false })
   const [detached, setDetached] = useState<DetachedShell[]>([])
   const [findOpen, setFindOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -221,29 +220,27 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     })
     ro.observe(el)
 
-    /** 'retry' reconnects (to the same shell when it is persistent); 'adopt' swaps in a shell left running on the host. */
-    const connect = async (mode: 'open' | 'retry' | 'adopt' = 'open'): Promise<void> => {
+    /** `retry` reconnects, to the same shell when it is persistent. */
+    const connect = async (retry = false): Promise<void> => {
       if (opening || disposed) return
-      const retry = mode !== 'open'
       opening = true
       opened = false
       updateTab(id, { status: 'connecting', message: retry ? 'Reconnecting…' : 'Connecting…' })
       try {
         if (retry) {
           closingForRetry = true
-          // Taking over another shell ends the one this tab just started; a plain reconnect leaves it to be resumed.
-          await window.api.invoke('ssh:close', id, { endShell: mode === 'adopt' })
+          await window.api.invoke('ssh:close', id)
           closingForRetry = false
           if (disposed) return
-          term.writeln(mode === 'adopt' ? '\r\n\x1b[90m──── Switching to the shell left running on the host ────\x1b[0m' : '\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
+          term.writeln('\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
         }
         // A reused connection belongs to the tab that lent it; a reconnect logs in on its own.
         const request = retry ? { ...tab.request!, reuseSessionId: undefined } : tab.request!
         const sh = shellRef.current
-        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown, shellHistory: sh.history })
+        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown })
         if (disposed) return
         opened = true
-        if (info.persistent) shellRef.current = { name: sh.name, shown: true, history: false }
+        if (info.persistent) shellRef.current = { name: sh.name, shown: true }
         setDetached(info.detached ?? [])
         updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent })
         if (useStore.getState().activeTab === id) term.focus()
@@ -256,12 +253,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         toast('error', e.message)
       } finally { opening = false; closingForRetry = false }
     }
-    reconnectRef.current = () => void connect('retry')
-    adoptRef.current = (name) => {
-      setDetached([])
-      shellRef.current = { name, shown: false, history: true }
-      void connect('adopt')
-    }
+    reconnectRef.current = () => void connect(true)
     void connect()
 
     return () => {
@@ -407,10 +399,22 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       (e: Error) => toast('error', e.message)
     )
   }
+  /** The banner's Resume: switch to the shell left running, in place, and end the new one this tab had just started. */
+  const resumeShell = (name: string): void => {
+    setDetached([])
+    window.api.invoke('ssh:switchShell', tab.id, name, { endPrevious: true }).then(
+      (r) => {
+        shellRef.current = { name: r.name, shown: true }
+        termRef.current?.focus()
+      },
+      (e: Error) => toast('error', e.message)
+    )
+  }
   const shellsBar = detached.length > 0 && (
-    <DetachedShells shells={detached} mobile={mobile} onResume={(name) => adoptRef.current(name)} onEnd={endShell} onDismiss={() => setDetached([])} />
+    <DetachedShells shells={detached} mobile={mobile} onResume={resumeShell} onEnd={endShell} onDismiss={() => setDetached([])} />
   )
-  const canDetach = !!tab.persistent && !disconnected
+  // Only once connected: while a reconnect is under way the host's shells cannot be reached yet.
+  const canDetach = !!tab.persistent && tab.status === 'connected'
   const loadShells = (): void => {
     setShells(null)
     window.api.invoke('ssh:listShells', tab.id).then(setShells, (e: Error) => {
@@ -427,7 +431,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     setShellSheet(false)
     window.api.invoke('ssh:switchShell', tab.id, sh?.name ?? null).then(
       (r) => {
-        shellRef.current = { name: r.name, shown: true, history: false }
+        shellRef.current = { name: r.name, shown: true }
         setDetached([])
         termRef.current?.focus()
       },

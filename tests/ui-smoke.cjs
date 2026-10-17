@@ -174,13 +174,13 @@ app.whenReady().then(async () => {
     assert.match(await js(`document.querySelector('.shells-bar').textContent`), /bash.*\/etc\/systemd\/system.*idle 2 h/)
     await until(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Detach' && b.getClientRects().length)`)
     await screenshot('ssh-detached-shells.png')
+    const switches = () => calls.filter((c) => c.channel === 'ssh:switchShell')
+    const opensBeforeResume = calls.filter((c) => c.channel === 'ssh:open').length
     await click('Resume')
     await until(`!document.querySelector('.shells-bar')`)
-    for (let n = 0; n < 50 && !calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].shellName; n++) await new Promise((r) => setTimeout(r, 30))
-    const adoptClose = calls.filter((c) => c.channel === 'ssh:close' && c.args[0] === shellTab).at(-1)
-    assert.deepEqual(adoptClose.args[1], { endShell: true }, 'Resume ends the shell the tab had just started')
-    const adoptOpen = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0]
-    assert.deepEqual([adoptOpen.sessionId, adoptOpen.shellName, adoptOpen.shellHistory, adoptOpen.shellResume], [shellTab, 'ec2ra-old1', true, false])
+    for (let n = 0; n < 50 && !switches().length; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(switches().at(-1).args, [shellTab, 'ec2ra-old1', { endPrevious: true }], 'Resume switches in place and ends the shell the tab had just started')
+    assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeResume, 'Resume does not reconnect')
     // Sessions list: shells on the host, switch this tab between them or start a new one.
     await click('Sessions')
     await until(`!!document.querySelector('.popover .shell-row') && document.querySelectorAll('.popover .shell-row').length === 2`)
@@ -188,13 +188,19 @@ app.whenReady().then(async () => {
     await screenshot('ssh-sessions-list.png')
     await js(`document.querySelectorAll('.popover .shell-row button.menu-item')[1].click()`)
     await until(`!document.querySelector('.popover')`)
-    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'ssh:switchShell'); n++) await new Promise((r) => setTimeout(r, 30))
-    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:switchShell').at(-1).args, [shellTab, 'ec2ra-other'])
+    for (let n = 0; n < 50 && switches().length < 2; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(switches().at(-1).args, [shellTab, 'ec2ra-other'])
     await click('Sessions')
     await until(`!!document.querySelector('.popover .shell-row')`)
     await click('New session in this tab')
-    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'ssh:switchShell').length < 2; n++) await new Promise((r) => setTimeout(r, 30))
-    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:switchShell').at(-1).args, [shellTab, null])
+    for (let n = 0; n < 50 && switches().length < 3; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(switches().at(-1).args, [shellTab, null])
+    // A dropped tab cannot reach its host's shells, so Sessions waits until the connection is back.
+    const sessionsShown = `[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Sessions' && b.getClientRects().length)`
+    win.webContents.send('ssh:event', { sessionId: shellTab, type: 'closed', message: 'Disconnected' })
+    await until(`!${sessionsShown}`)
+    await click('Reconnect')
+    await until(sessionsShown)
     const callsBeforeClose = calls.length
     await click('Disconnect')
     await until(`document.querySelectorAll('.tab').length === ${tabsBeforeShell}`)

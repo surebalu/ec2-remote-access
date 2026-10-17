@@ -281,12 +281,10 @@ export interface SshOpenRequest {
   reuseSessionId?: string
   /** Keep the shell running in tmux on the host; undefined = host override, then the global setting. */
   persistent?: boolean
-  /** A tmux shell left running on the host to attach instead of this tab's own (see DetachedShell). */
+  /** The tmux shell to attach instead of the tab's own: the one it switched to (Sessions list, Resume) before reconnecting. */
   shellName?: string
   /** The tab showed its shell before (a reconnect), so a missing one is reported as ended. */
   shellResume?: boolean
-  /** Print the shell's earlier output before attaching, because this tab has not shown it. */
-  shellHistory?: boolean
   cols: number
   rows: number
 }

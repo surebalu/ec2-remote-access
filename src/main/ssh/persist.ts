@@ -135,8 +135,6 @@ export interface AttachPlan {
   create: boolean
   /** No server on the socket yet: start it with our options before the first window exists. */
   startServer: boolean
-  /** Print the session's earlier output first (the tab has not shown it). */
-  history: boolean
   cols: number
   rows: number
 }
@@ -156,11 +154,6 @@ export function attachCommand(p: AttachPlan): string {
     lines.push(`${TMUX} new-session -d -s ${n} ${size}`)
   }
   lines.push(`if ${TMUX} has-session -t ${n} 2>/dev/null; then`)
-  if (p.history) {
-    lines.push(`  ${TMUX} capture-pane -p -J -e -t ${n} -S -10000 -E -1 2>/dev/null`)
-    // tmux clears the screen when it attaches; push the replayed lines up into the scrollback first.
-    lines.push(`  i=0; while [ $i -lt ${Math.max(5, p.rows | 0)} ]; do echo; i=$((i+1)); done`)
-  }
   // -d detaches a client left over from the dropped connection, which sshd may not have noticed yet.
   lines.push(`  exec ${TMUX} attach-session -d -t ${n}`)
   lines.push('fi')

@@ -36,8 +36,8 @@ export interface IpcApi {
   'ssh:endShell': (sessionId: string, name: string) => Promise<void>
   /** The persistent shells on this session's host. */
   'ssh:listShells': (sessionId: string) => Promise<HostShell[]>
-  /** Shows another of the host's shells in this tab (null = a new one); the one it leaves keeps running. */
-  'ssh:switchShell': (sessionId: string, name: string | null) => Promise<{ name: string }>
+  /** Shows another of the host's shells in this tab (null = a new one); the one it leaves keeps running unless endPrevious. */
+  'ssh:switchShell': (sessionId: string, name: string | null, opts?: { endPrevious?: boolean }) => Promise<{ name: string }>
   'ssh:external': (req: SshOpenRequest) => Promise<void>
   'sftp:open': (req: SftpOpenRequest) => Promise<SftpSessionInfo>
   'sftp:list': (sessionId: string, path: string) => Promise<SftpEntry[]>

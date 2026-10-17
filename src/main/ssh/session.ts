@@ -235,7 +235,7 @@ async function planShell(live: Live, req: SshOpenRequest): Promise<AttachPlan | 
   live.info.persistent = true
   live.info.resumed = !!own
   live.info.detached = own ? [] : detachedShells(probe, name)
-  return { name, create: !own, startServer: probe.sessions.length === 0, history: !!own && !!req.shellHistory, cols: req.cols, rows: req.rows }
+  return { name, create: !own, startServer: probe.sessions.length === 0, cols: req.cols, rows: req.rows }
 }
 
 /** Opens the interactive shell channel on a ready client and wires its output to the renderer. */
@@ -289,21 +289,27 @@ function typedLine(cmd: string): string {
 
 /** The persistent shells on this session's host, for the tab's session list. */
 export async function listShells(sessionId: string): Promise<HostShell[]> {
-  const live = sessions.get(sessionId)
-  if (!live?.shell) throw new Error('This tab is not running a persistent shell.')
+  const live = requireShell(sessionId)
   const probe = parseProbe((await execOutput(live.client, probeCommand(), 10_000)) ?? '')
   if (!probe?.available) throw new Error('Could not list the shells on this host.')
   return hostShells(probe, live.shell)
 }
 
+function requireShell(sessionId: string): Live & { shell: string } {
+  const live = sessions.get(sessionId)
+  if (!live) throw new Error('This tab is not connected. Reconnect it first.')
+  if (!live.shell) throw new Error(live.channel ? 'This tab is not running a persistent shell.' : 'This tab is still connecting. Try again in a moment.')
+  return live as Live & { shell: string }
+}
+
 /**
  * Shows another of the host's shells in this tab, or a new one (`target` null), by moving the tab's tmux client on the
- * connection it already has: instant, and the shell it leaves keeps running. The terminal is cleared and refilled with
- * the target's earlier output first, so its scrollback always belongs to the shell on screen.
+ * connection it already has: instant, and the shell it leaves keeps running (unless `endPrevious`, which the
+ * Resume banner uses to drop the new shell a tab started before it was offered the old one). The terminal is cleared
+ * and refilled with the target's earlier output first, so its scrollback always belongs to the shell on screen.
  */
-export async function switchShell(sessionId: string, target: string | null): Promise<{ name: string }> {
-  const live = sessions.get(sessionId)
-  if (!live?.shell) throw new Error('This tab is not running a persistent shell.')
+export async function switchShell(sessionId: string, target: string | null, opts: { endPrevious?: boolean } = {}): Promise<{ name: string }> {
+  const live = requireShell(sessionId)
   const to = target ?? newShellName(sessionId)
   if (!isShellName(to)) throw new Error('Unknown shell.')
   if (to === live.shell) return { name: to }
@@ -316,8 +322,10 @@ export async function switchShell(sessionId: string, target: string | null): Pro
   if (!out.includes('ec2ra:switched')) {
     throw new Error(out.includes('ec2ra:gone') ? 'That session has ended on the host.' : 'Could not switch sessions. Reconnect the tab and try again.')
   }
+  const previous = live.shell
   live.shell = to
   if (!target && live.init) live.channel?.write(typedLine(live.init))
+  if (opts.endPrevious) await execOutput(live.client, killCommand(previous), 5000)
   return { name: to }
 }
 
