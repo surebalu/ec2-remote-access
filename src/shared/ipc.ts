@@ -4,7 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth
+  PortForwardRequest, HostHealth, HostShell
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -34,6 +34,10 @@ export interface IpcApi {
   'ssh:close': (sessionId: string, opts?: { endShell?: boolean }) => Promise<void>
   /** Ends a persistent shell another tab left running on this session's host. */
   'ssh:endShell': (sessionId: string, name: string) => Promise<void>
+  /** The persistent shells on this session's host. */
+  'ssh:listShells': (sessionId: string) => Promise<HostShell[]>
+  /** Shows another of the host's shells in this tab (null = a new one); the one it leaves keeps running. */
+  'ssh:switchShell': (sessionId: string, name: string | null) => Promise<{ name: string }>
   'ssh:external': (req: SshOpenRequest) => Promise<void>
   'sftp:open': (req: SftpOpenRequest) => Promise<SftpSessionInfo>
   'sftp:list': (sessionId: string, path: string) => Promise<SftpEntry[]>

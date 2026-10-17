@@ -7,7 +7,7 @@
  * it on by default) and no alternate screen, so wheel scrolling, selection, Find and Save output keep working on the
  * app's own scrollback. Kept free of ssh2 and Electron so tests can load it.
  */
-import type { DetachedShell } from '@shared/types'
+import type { DetachedShell, HostShell } from '@shared/types'
 
 export const SHELL_PREFIX = 'ec2ra-'
 const TMUX = 'tmux -L ec2ra -f /dev/null'
@@ -42,7 +42,7 @@ export function isShellName(name: string): boolean {
   return name.startsWith(SHELL_PREFIX) && /^[A-Za-z0-9-]+$/.test(name)
 }
 
-export interface ProbeSession { name: string; attached: boolean; activity: number | null; command: string; path: string }
+export interface ProbeSession { name: string; attached: boolean; activity: number | null; command: string; path: string; created: number | null }
 export interface TmuxProbe { available: boolean; now: number | null; sessions: ProbeSession[] }
 
 /** Lists the shells on the private socket, or reports that tmux is missing. */
@@ -51,7 +51,7 @@ export function probeCommand(): string {
     [
       'command -v tmux >/dev/null 2>&1 || { echo ec2ra:none; exit 0; }',
       'echo "ec2ra:now $(date +%s)"',
-      `${TMUX} list-sessions -F 'ec2ra:s #{session_name}\t#{session_attached}\t#{session_activity}\t#{pane_current_command}\t#{pane_current_path}' 2>/dev/null`,
+      `${TMUX} list-sessions -F 'ec2ra:s #{session_name}\t#{session_attached}\t#{session_activity}\t#{pane_current_command}\t#{pane_current_path}\t#{session_created}' 2>/dev/null`,
       'exit 0'
     ].join('\n')
   )
@@ -67,9 +67,9 @@ export function parseProbe(out: string): TmuxProbe | null {
   const sessions: ProbeSession[] = []
   for (const l of out.split(/\r?\n/)) {
     if (!l.startsWith('ec2ra:s ')) continue
-    const [name, attached, activity, command = '', path = ''] = l.slice('ec2ra:s '.length).replace(/\r$/, '').split('\t')
+    const [name, attached, activity, command = '', path = '', created] = l.slice('ec2ra:s '.length).replace(/\r$/, '').split('\t')
     if (!name) continue
-    sessions.push({ name, attached: Number(attached) > 0, activity: Number(activity) || null, command, path })
+    sessions.push({ name, attached: Number(attached) > 0, activity: Number(activity) || null, command, path, created: Number(created) || null })
   }
   return { available: true, now, sessions }
 }
@@ -80,6 +80,53 @@ export function detachedShells(probe: TmuxProbe, except: string): DetachedShell[
     .filter((s) => !s.attached && s.name !== except && isShellName(s.name))
     .sort((a, b) => (b.activity ?? 0) - (a.activity ?? 0))
     .map((s) => ({ name: s.name, command: s.command, path: s.path, idleSec: probe.now && s.activity ? Math.max(0, probe.now - s.activity) : null }))
+}
+
+/** Every shell of ours on the host, oldest first, for a tab's session list. */
+export function hostShells(probe: TmuxProbe, current: string): HostShell[] {
+  const ago = (t: number | null): number | null => (probe.now && t ? Math.max(0, probe.now - t) : null)
+  return probe.sessions
+    .filter((s) => isShellName(s.name))
+    .sort((a, b) => (a.created ?? 0) - (b.created ?? 0))
+    .map((s) => ({ name: s.name, command: s.command, path: s.path, idleSec: ago(s.activity), ageSec: ago(s.created), current: s.name === current, attached: s.attached }))
+}
+
+/** A further shell started from a tab: the tab's own name plus a suffix, unique on the host. */
+export function newShellName(sessionId: string): string {
+  return `${shellNameFor(sessionId)}-${Date.now().toString(36)}`
+}
+
+/** The earlier output of a shell (above its screen), replayed into the terminal before switching to it. */
+export function historyCommand(name: string): string {
+  return viaSh(`${TMUX} capture-pane -p -J -e -t ${shq(name)} -S -10000 -E -1 2>/dev/null; exit 0`)
+}
+
+export interface SwitchPlan {
+  /** The shell the tab's tmux client shows now. */
+  from: string
+  to: string
+  create: boolean
+  cols: number
+  rows: number
+}
+
+/**
+ * Moves the tab's tmux client from one shell to another (tmux switch-client, on the connection the tab already has,
+ * so nothing reconnects and the shell it leaves keeps running). A client showing `to` elsewhere is detached first, so
+ * a shell is never shown in two tabs at once. Prints ec2ra:switched, or why not.
+ */
+export function switchCommand(p: SwitchPlan): string {
+  const to = shq(p.to)
+  const lines = [
+    `C=$(${TMUX} list-clients -t ${shq(p.from)} -F '#{client_tty}' 2>/dev/null | head -n 1)`,
+    '[ -n "$C" ] || { echo ec2ra:noclient; exit 0; }'
+  ]
+  if (p.create) lines.push(`${TMUX} new-session -d -s ${to} -x ${Math.max(20, p.cols | 0)} -y ${Math.max(5, p.rows | 0)} || { echo ec2ra:failed; exit 0; }`)
+  // A shell that ended meanwhile: redraw the current one over the replayed history and say so.
+  lines.push(`${TMUX} has-session -t ${to} 2>/dev/null || { ${TMUX} refresh-client -t "$C"; echo ec2ra:gone; exit 0; }`)
+  lines.push(`${TMUX} detach-client -s ${to} 2>/dev/null`)
+  lines.push(`${TMUX} switch-client -c "$C" -t ${to} && echo ec2ra:switched`)
+  return viaSh(lines.join('\n'))
 }
 
 export interface AttachPlan {
@@ -109,7 +156,11 @@ export function attachCommand(p: AttachPlan): string {
     lines.push(`${TMUX} new-session -d -s ${n} ${size}`)
   }
   lines.push(`if ${TMUX} has-session -t ${n} 2>/dev/null; then`)
-  if (p.history) lines.push(`  ${TMUX} capture-pane -p -J -e -t ${n} -S -10000 -E -1 2>/dev/null`)
+  if (p.history) {
+    lines.push(`  ${TMUX} capture-pane -p -J -e -t ${n} -S -10000 -E -1 2>/dev/null`)
+    // tmux clears the screen when it attaches; push the replayed lines up into the scrollback first.
+    lines.push(`  i=0; while [ $i -lt ${Math.max(5, p.rows | 0)} ]; do echo; i=$((i+1)); done`)
+  }
   // -d detaches a client left over from the dropped connection, which sshd may not have noticed yet.
   lines.push(`  exec ${TMUX} attach-session -d -t ${n}`)
   lines.push('fi')

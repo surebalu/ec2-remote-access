@@ -64,6 +64,11 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       }
       return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu' }
     case 'ec2:health': return { instanceStatus: 'ok', systemStatus: 'ok', events: [], cpu: Array.from({ length: 36 }, (_, n) => ({ t: now - (36 - n) * 300000, v: 20 + 15 * Math.sin(n / 4) })), ssmLastPing: new Date(now - 90000).toISOString(), fetchedAt: now, errors: [] }
+    case 'ssh:listShells': return [
+      { name: 'ec2ra-old1', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
+      { name: 'ec2ra-other', command: 'top', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
+    ]
+    case 'ssh:switchShell': return { name: args[1] ?? 'ec2ra-new' }
     case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
@@ -176,6 +181,20 @@ app.whenReady().then(async () => {
     assert.deepEqual(adoptClose.args[1], { endShell: true }, 'Resume ends the shell the tab had just started')
     const adoptOpen = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0]
     assert.deepEqual([adoptOpen.sessionId, adoptOpen.shellName, adoptOpen.shellHistory, adoptOpen.shellResume], [shellTab, 'ec2ra-old1', true, false])
+    // Sessions list: shells on the host, switch this tab between them or start a new one.
+    await click('Sessions')
+    await until(`!!document.querySelector('.popover .shell-row') && document.querySelectorAll('.popover .shell-row').length === 2`)
+    assert.match(await js(`document.querySelector('.popover').textContent`), /This tab.*top in \/root.*Running in the background/)
+    await screenshot('ssh-sessions-list.png')
+    await js(`document.querySelectorAll('.popover .shell-row button.menu-item')[1].click()`)
+    await until(`!document.querySelector('.popover')`)
+    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'ssh:switchShell'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:switchShell').at(-1).args, [shellTab, 'ec2ra-other'])
+    await click('Sessions')
+    await until(`!!document.querySelector('.popover .shell-row')`)
+    await click('New session in this tab')
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'ssh:switchShell').length < 2; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:switchShell').at(-1).args, [shellTab, null])
     const callsBeforeClose = calls.length
     await click('Disconnect')
     await until(`document.querySelectorAll('.tab').length === ${tabsBeforeShell}`)

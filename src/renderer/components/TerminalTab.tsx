@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
-import type { DetachedShell, Snippet } from '@shared/types'
+import type { DetachedShell, HostShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
 import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
@@ -65,12 +65,23 @@ function bufferText(term: Terminal): string {
   return lines.join('\n')
 }
 
+function ago(sec: number): string {
+  if (sec < 90) return 'just now'
+  if (sec < 5400) return `${Math.round(sec / 60)} min`
+  if (sec < 172_800) return `${Math.round(sec / 3600)} h`
+  return `${Math.round(sec / 86_400)} days`
+}
+
 function idleText(sec: number | null): string {
-  if (sec === null) return ''
-  if (sec < 90) return 'idle just now'
-  if (sec < 5400) return `idle ${Math.round(sec / 60)} min`
-  if (sec < 172_800) return `idle ${Math.round(sec / 3600)} h`
-  return `idle ${Math.round(sec / 86_400)} days`
+  return sec === null ? '' : `idle ${ago(sec)}`
+}
+
+/** One line about a shell in the session list: where it is shown and how long it has run. */
+function shellStatus(sh: HostShell): string {
+  const age = sh.ageSec !== null ? ` · started ${ago(sh.ageSec)}${sh.ageSec < 90 ? '' : ' ago'}` : ''
+  if (sh.current) return `This tab${age}`
+  if (sh.attached) return `Open in another tab or device${age}`
+  return `Running in the background${sh.idleSec !== null ? ` · ${idleText(sh.idleSec)}` : ''}${age}`
 }
 
 /** Persistent shells on the host that no tab shows (the app quit, a phone page was lost, a Detach), offered to resume. */
@@ -119,7 +130,11 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [hits, setHits] = useState<{ index: number; count: number } | null>(null)
-  const [menu, setMenu] = useState<'snippets' | 'split' | null>(null)
+  const [menu, setMenu] = useState<'snippets' | 'split' | 'shells' | null>(null)
+  const shellsBtn = useRef<HTMLButtonElement>(null)
+  /** The host's persistent shells for the session list (null while loading). */
+  const [shells, setShells] = useState<HostShell[] | null>(null)
+  const [shellSheet, setShellSheet] = useState(false)
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
   const themeId = useStore((s) => s.settings?.terminalTheme)
@@ -396,6 +411,35 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     <DetachedShells shells={detached} mobile={mobile} onResume={(name) => adoptRef.current(name)} onEnd={endShell} onDismiss={() => setDetached([])} />
   )
   const canDetach = !!tab.persistent && !disconnected
+  const loadShells = (): void => {
+    setShells(null)
+    window.api.invoke('ssh:listShells', tab.id).then(setShells, (e: Error) => {
+      toast('error', e.message)
+      setMenu(null)
+      setShellSheet(false)
+    })
+  }
+  /** Shows another shell in this tab (null = a new one); the shell it leaves keeps running on the host. */
+  const switchShell = (sh: HostShell | null): void => {
+    if (sh?.current) return
+    if (sh?.attached && !window.confirm('That session is open in another tab or device. Show it here instead? It will close there.')) return
+    setMenu(null)
+    setShellSheet(false)
+    window.api.invoke('ssh:switchShell', tab.id, sh?.name ?? null).then(
+      (r) => {
+        shellRef.current = { name: r.name, shown: true, history: false }
+        setDetached([])
+        termRef.current?.focus()
+      },
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const endOtherShell = (name: string): void => {
+    window.api.invoke('ssh:endShell', tab.id, name).then(
+      () => setShells((list) => list?.filter((x) => x.name !== name) ?? null),
+      (e: Error) => toast('error', e.message)
+    )
+  }
   const detach = (): void => void useStore.getState().closeTab(tab.id, { detach: true })
 
   if (mobile) {
@@ -420,6 +464,24 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         />
         {pasteBox !== null && <PasteSheet initial={pasteBox} action="Paste" onSend={sendPasteBox} onClose={() => setPasteBox(null)} />}
         {copyText !== null && <CopySheet text={copyText} onClose={() => setCopyText(null)} />}
+        {shellSheet && (
+          <Sheet title="Sessions on this host" subtitle="Switch this tab to another session; the one you leave keeps running." onClose={() => setShellSheet(false)}>
+            {shells === null && <div className="m-sheet-item muted">Loading…</div>}
+            {shells?.map((sh, i) => (
+              <div key={sh.name} className="m-sheet-item as-row">
+                <button className="flex min-w-0 flex-1 items-center gap-3 text-left" disabled={sh.current} onClick={() => switchShell(sh)}>
+                  <span className="m-sheet-icon">{sh.current ? '✓' : <Icon.terminal />}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{i + 1} · <span className="mono">{sh.command || 'shell'}</span>{sh.path && <span className="muted"> in <span className="mono">{sh.path}</span></span>}</span>
+                    <span className="muted block truncate text-[12px]">{shellStatus(sh)}</span>
+                  </span>
+                </button>
+                {!sh.current && !sh.attached && <button className="btn" onClick={() => endOtherShell(sh.name)}>End</button>}
+              </div>
+            ))}
+            <SheetItem icon={<Icon.plus />} onClick={() => switchShell(null)}>New session in this tab</SheetItem>
+          </Sheet>
+        )}
         {mobileMenu && (
           <Sheet title={tab.title} subtitle={tab.message} onClose={() => setMobileMenu(false)}>
             <SheetItem icon={<Icon.clipboard />} onClick={() => { setMobileMenu(false); paste() }}>Paste</SheetItem>
@@ -437,6 +499,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
             </div>
             {disconnected && <SheetItem icon={<Icon.refresh />} onClick={() => { setMobileMenu(false); reconnectRef.current() }}>Reconnect</SheetItem>}
             <SheetItem icon={<Icon.download />} onClick={() => { setMobileMenu(false); saveOutput() }}>Save output as text</SheetItem>
+            {canDetach && <SheetItem icon={<Icon.layers />} onClick={() => { setMobileMenu(false); setShellSheet(true); loadShells() }}>Sessions on this host…</SheetItem>}
             {canDetach && <SheetItem icon={<Icon.layers />} onClick={() => { setMobileMenu(false); detach() }}>Detach (leave the shell running)</SheetItem>}
             <SheetItem icon={<Icon.x />} danger onClick={() => { setMobileMenu(false); void useStore.getState().closeTab(tab.id) }}>{disconnected ? 'Close' : canDetach ? 'Disconnect and end the shell' : 'Disconnect'}</SheetItem>
           </Sheet>
@@ -484,6 +547,11 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <Icon.panelRight filled={paneOpen} />
         </button>
         {canDetach && (
+          <button ref={shellsBtn} className={`btn btn-sm ${menu === 'shells' ? 'on' : ''}`} title="Sessions kept running on this host (tmux): switch this tab between them; the others keep running" onMouseDown={(e) => e.preventDefault()} onClick={() => { if (menu === 'shells') setMenu(null); else { setMenu('shells'); loadShells() } }}>
+            <Icon.layers /> Sessions
+          </button>
+        )}
+        {canDetach && (
           <button className="btn btn-sm" title="Close this tab but leave the shell running on the host; opening the host again offers to resume it" onClick={detach}>
             Detach
           </button>
@@ -505,6 +573,26 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           {!snippets.length && <div className="muted px-3 py-2">No snippets yet.</div>}
           <MenuSep />
           <MenuItem onClick={() => { setMenu(null); useStore.getState().set({ snippetsOpen: { hostKey: tab.instanceKey } }) }}>Edit snippets…</MenuItem>
+        </Popover>
+      )}
+      {menu === 'shells' && (
+        <Popover anchor={shellsBtn.current} align="right" width={360} onClose={() => { setMenu(null); termRef.current?.focus() }}>
+          <MenuLabel>Sessions on this host</MenuLabel>
+          {shells === null && <div className="muted px-3 py-2">Loading…</div>}
+          {shells?.map((sh, i) => (
+            <div key={sh.name} className="shell-row flex items-center">
+              <button className={`menu-item min-w-0 flex-1 ${sh.current ? 'on' : ''}`} disabled={sh.current} title={sh.attached && !sh.current ? 'Open elsewhere: switching shows it here and closes it there' : undefined} onClick={() => switchShell(sh)}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{i + 1} · <span className="mono">{sh.command || 'shell'}</span>{sh.path && <span className="muted"> in <span className="mono">{sh.path}</span></span>}</span>
+                  <span className="muted block truncate text-[10px]">{shellStatus(sh)}</span>
+                </span>
+              </button>
+              {!sh.current && !sh.attached && <button className="btn btn-ghost btn-sm mr-1" title="End this session on the host" onClick={() => endOtherShell(sh.name)}>End</button>}
+            </div>
+          ))}
+          <MenuSep />
+          <MenuItem onClick={() => switchShell(null)}>New session in this tab</MenuItem>
+          <div className="muted px-3 pb-1 pt-0.5 text-[10px]">The session you switch away from keeps running.</div>
         </Popover>
       )}
       {menu === 'split' && (

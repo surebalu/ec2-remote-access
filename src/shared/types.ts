@@ -301,6 +301,16 @@ export interface DetachedShell {
   idleSec: number | null
 }
 
+/** A persistent shell on a host, as listed in a terminal tab's session list. */
+export interface HostShell extends DetachedShell {
+  /** Seconds since it was started. */
+  ageSec: number | null
+  /** Shown in the tab asking. */
+  current: boolean
+  /** Shown by some client: this tab, another tab, or another device. */
+  attached: boolean
+}
+
 export interface SshSessionInfo {
   sessionId: string
   instanceKey: string
