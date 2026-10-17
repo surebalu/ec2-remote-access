@@ -14,6 +14,7 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘K', label: 'Quick switcher (hosts, sessions, commands)' },
   { keys: '⌘T', label: 'New session (pick a host)' },
   { keys: '⌘⇧P', label: 'Command list' },
+  { keys: '⌘0', label: 'All sessions on one page' },
   { keys: '⌘1', label: 'Hosts' },
   { keys: '⌘2 … ⌘8', label: 'Session tab 1 … 7' },
   { keys: '⌘9', label: 'Last session tab' },
@@ -50,7 +51,7 @@ export function isAppShortcut(e: KeyboardEvent): boolean {
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') return true
   if (!e.metaKey || e.altKey || e.ctrlKey) return false
   const k = e.key.toLowerCase()
-  return /^[1-9]$/.test(k) || ['w', 't', 'd', 'f', 'b', '/', '[', ']', '{', '}', 'p', 'i'].includes(k)
+  return /^[0-9]$/.test(k) || ['w', 't', 'd', 'f', 'b', '/', '[', ']', '{', '}', 'p', 'i'].includes(k)
 }
 
 /** Returns true when the event was a shortcut and has been handled. */
@@ -67,6 +68,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   }
   if (modalOpen()) return false
   const order = ['hosts', ...st.tabs.map((t) => t.id)]
+  if (k === '0' && !e.shiftKey) return go(() => st.showGrid(!st.gridView))
   if (/^[1-9]$/.test(k) && !e.shiftKey) {
     const n = Number(k)
     const target = n === 9 ? order.at(-1) : order[n - 1]

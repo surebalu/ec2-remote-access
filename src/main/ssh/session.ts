@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { SshOpenRequest, SshSessionInfo, SshEvent } from '@shared/types'
 import { findInstance } from '../aws/inventory'
-import { decideRoute, defaultSshUser, defaultIdentityFile, defaultInitCommand } from '../connect/route'
+import { decideRoute, defaultSshUser, defaultIdentityFile, defaultInitCommand, persistentShell } from '../connect/route'
 import type { Instance } from '@shared/types'
 import { startSshStream, type SsmHandle } from '../ssm/session'
 import { getSettings } from '../store'
@@ -18,6 +18,7 @@ import { findBinary, shellQuote, uid } from '../util'
 import { getCredential } from '../creds'
 import { lookupClient, registerClient, unregisterClient } from './clients'
 import { startRecorder, type Recorder } from './recorder'
+import { attachCommand, detachedShells, isShellName, killCommand, parseProbe, probeCommand, shellNameFor, type AttachPlan } from './persist'
 
 interface Live {
   info: SshSessionInfo
@@ -27,6 +28,8 @@ interface Live {
   /** True when the client belongs to another session (SFTP tab) and must not be ended here. */
   shared?: boolean
   recorder?: Recorder | null
+  /** The tmux shell this session shows, when the shell is persistent (./persist). */
+  shell?: string
 }
 
 const sessions = new Map<string, Live>()
@@ -183,40 +186,94 @@ export async function openSsh(req: SshOpenRequest): Promise<SshSessionInfo> {
   return info
 }
 
-/** Opens the interactive shell channel on a ready client and wires its output to the renderer. */
-function openShell(live: Live, req: SshOpenRequest): Promise<void> {
-  const { sessionId } = live.info
-  return new Promise((resolve, reject) => {
-    live.client.shell({ term: 'xterm-256color', cols: req.cols, rows: req.rows }, (err, channel) => {
-      if (err) return reject(err)
-      if (sessions.get(sessionId) !== live) { channel.close(); reject(new Error('cancelled')); return }
-      live.channel = channel
-      try {
-        live.recorder = startRecorder(findInstance(req.instanceKey).name, live.info.user)
-        if (live.recorder) live.info.logFile = live.recorder.file
-      } catch (e) {
-        emit({ sessionId, type: 'status', message: `Session log not written: ${(e as Error).message}` })
-      }
-      const dec = new StringDecoder('utf8')
-      const out = (data: string): void => {
-        if (sessions.get(sessionId) !== live) return
-        live.recorder?.write(data)
-        emit({ sessionId, type: 'data', data })
-      }
-      channel.on('data', (d: Buffer) => out(dec.write(d)))
-      channel.stderr.on('data', (d: Buffer) => out(d.toString()))
-      channel.on('close', () => {
-        if (sessions.get(sessionId) === live) {
-          emit({ sessionId, type: 'closed', message: 'Connection closed' })
-          void closeSsh(sessionId)
-        }
+/** Runs a command on a channel of its own and returns its stdout; null when it fails or takes longer than `ms`. */
+function execOutput(client: Client, cmd: string, ms: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    let out = ''
+    let channel: ClientChannel | undefined
+    const timer = setTimeout(() => {
+      channel?.close()
+      resolve(null)
+    }, ms)
+    const finish = (v: string | null): void => {
+      clearTimeout(timer)
+      resolve(v)
+    }
+    try {
+      client.exec(cmd, (err, ch) => {
+        if (err) return finish(null)
+        channel = ch
+        ch.on('data', (d: Buffer) => (out += d.toString()))
+        ch.stderr.on('data', () => undefined)
+        ch.on('close', () => finish(out))
       })
-      // sshd queues stdin until the shell reads it, so this runs as the first command of the session.
-      const init = defaultInitCommand(findInstance(req.instanceKey), req.initCommand)
-      if (init) channel.write(init.replace(/\r?\n/g, '\n').replace(/\n?$/, '\n'))
-      resolve()
-    })
+    } catch {
+      finish(null) // the connection is already gone
+    }
   })
+}
+
+/** Looks at what already runs on the host and decides how to open this tab's persistent shell; null = plain shell. */
+async function planShell(live: Live, req: SshOpenRequest): Promise<AttachPlan | null> {
+  const { sessionId } = live.info
+  const name = req.shellName && isShellName(req.shellName) ? req.shellName : shellNameFor(sessionId)
+  const probe = parseProbe((await execOutput(live.client, probeCommand(), 10_000)) ?? '')
+  if (!probe) return null // not a POSIX shell on the far side (Windows OpenSSH), or the probe failed
+  if (!probe.available) {
+    emit({ sessionId, type: 'status', message: 'tmux is not installed on this host, so this shell ends if the connection drops. Install it (sudo dnf install -y tmux, or sudo apt-get install -y tmux) to keep shells running across disconnects.' })
+    return null
+  }
+  const own = probe.sessions.find((x) => x.name === name)
+  if (own) emit({ sessionId, type: 'status', message: 'Resuming the shell that kept running on the host' })
+  else if (req.shellResume) emit({ sessionId, type: 'status', message: 'The earlier shell has ended on the host (it exited or the host restarted); starting a new one' })
+  live.shell = name
+  live.info.persistent = true
+  live.info.resumed = !!own
+  live.info.detached = own ? [] : detachedShells(probe, name)
+  return { name, create: !own, startServer: probe.sessions.length === 0, history: !!own && !!req.shellHistory, cols: req.cols, rows: req.rows }
+}
+
+/** Opens the interactive shell channel on a ready client and wires its output to the renderer. */
+async function openShell(live: Live, req: SshOpenRequest): Promise<void> {
+  const { sessionId } = live.info
+  const inst = findInstance(req.instanceKey)
+  const plan = persistentShell(inst, req.persistent) ? await planShell(live, req) : null
+  if (sessions.get(sessionId) !== live) throw new Error('cancelled')
+  const pty = { term: 'xterm-256color', cols: req.cols, rows: req.rows }
+  const channel = await new Promise<ClientChannel>((resolve, reject) => {
+    const done = (err: Error | undefined, ch: ClientChannel): void => (err ? reject(err) : resolve(ch))
+    if (plan) live.client.exec(attachCommand(plan), { pty }, done)
+    else live.client.shell(pty, done)
+  })
+  if (sessions.get(sessionId) !== live) {
+    channel.close()
+    throw new Error('cancelled')
+  }
+  live.channel = channel
+  try {
+    live.recorder = startRecorder(inst.name, live.info.user)
+    if (live.recorder) live.info.logFile = live.recorder.file
+  } catch (e) {
+    emit({ sessionId, type: 'status', message: `Session log not written: ${(e as Error).message}` })
+  }
+  const dec = new StringDecoder('utf8')
+  const out = (data: string): void => {
+    if (sessions.get(sessionId) !== live) return
+    live.recorder?.write(data)
+    emit({ sessionId, type: 'data', data })
+  }
+  channel.on('data', (d: Buffer) => out(dec.write(d)))
+  channel.stderr.on('data', (d: Buffer) => out(d.toString()))
+  channel.on('close', () => {
+    if (sessions.get(sessionId) === live) {
+      emit({ sessionId, type: 'closed', message: 'Connection closed' })
+      void closeSsh(sessionId)
+    }
+  })
+  // sshd (or tmux) queues stdin until the shell reads it, so this runs as the first command of the session. A resumed
+  // shell already had it, and typing it again could land in whatever program is running there now.
+  const init = !plan || plan.create ? defaultInitCommand(inst, req.initCommand) : ''
+  if (init) channel.write(init.replace(/\r?\n/g, '\n').replace(/\n?$/, '\n'))
 }
 
 export function writeSsh(sessionId: string, data: string): void {
@@ -227,11 +284,14 @@ export function resizeSsh(sessionId: string, cols: number, rows: number): void {
   sessions.get(sessionId)?.channel?.setWindow(rows, cols, 0, 0)
 }
 
-export async function closeSsh(sessionId: string): Promise<void> {
+export async function closeSsh(sessionId: string, opts: { endShell?: boolean } = {}): Promise<void> {
   const live = sessions.get(sessionId)
   if (!live) return
   sessions.delete(sessionId)
   live.recorder?.close()
+  // Closing the tab ends its shell. A dropped connection, a reconnect, a phone that went away or quitting the app
+  // leave it running on the host to be resumed.
+  if (opts.endShell && live.shell) await execOutput(live.client, killCommand(live.shell), 3000)
   try {
     live.channel?.close()
   } catch {
@@ -242,6 +302,13 @@ export async function closeSsh(sessionId: string): Promise<void> {
   live.client.end()
   live.client.destroy()
   await live.ssm?.terminate()
+}
+
+/** Ends a persistent shell left running on this session's host (the detached-shells banner's End button). */
+export async function endDetachedShell(sessionId: string, name: string): Promise<void> {
+  const live = sessions.get(sessionId)
+  if (!live || !isShellName(name) || name === live.shell) throw new Error('That shell can no longer be ended from this tab.')
+  if ((await execOutput(live.client, killCommand(name), 5000)) === null) throw new Error('Could not reach the host to end that shell.')
 }
 
 export async function closeAllSsh(): Promise<void> {

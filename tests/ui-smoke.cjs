@@ -30,6 +30,8 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+// Persistent-shell scenario: the host reports a shell left running by an earlier session.
+let shellScenario = false
 // Sign-in scenario: one SSO profile whose token the "Mac" writes on demand, without ever pushing profiles:status.
 let ssoScenario = false
 let ssoTokenWritten = false
@@ -56,6 +58,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'phone:status': return { enabled: true, running: true, port: 8321, bind: 'https', tailscaleAvailable: true, tailscaleHostname: 'fixture-mac.tail1234.ts.net', tailscaleHttps: true, urls: ['https://fixture-mac.tail1234.ts.net/#token=fixture-token'], token: 'fixture-token', clients: [{ address: '100.101.102.5', since: Date.now() - 120000 }] }
     case 'ssh:open':
       if (failSsh) throw new Error('Fixture: authentication failed')
+      if (shellScenario) {
+        const adopted = !!args[0].shellName
+        return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu', persistent: true, resumed: adopted, detached: adopted ? [] : [{ name: 'ec2ra-old1', command: 'bash', path: '/etc/systemd/system', idleSec: 7200 }] }
+      }
       return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu' }
     case 'ec2:health': return { instanceStatus: 'ok', systemStatus: 'ok', events: [], cpu: Array.from({ length: 36 }, (_, n) => ({ t: now - (36 - n) * 300000, v: 20 + 15 * Math.sin(n / 4) })), ssmLastPing: new Date(now - 90000).toISOString(), fetchedAt: now, errors: [] }
     case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
@@ -153,6 +159,29 @@ app.whenReady().then(async () => {
     await until(`!document.querySelector('[role="dialog"]')`)
     await screenshot('ssh-reconnected.png')
 
+    // Persistent shells: a new tab offers the shell an earlier session left running; Resume ends the new shell and
+    // attaches the old one with its earlier output; closing the tab ends its shell.
+    shellScenario = true
+    const tabsBeforeShell = await js(`document.querySelectorAll('.tab').length`)
+    await js(`document.querySelector('[data-host-key="${running.key}"] .btn-ssh').click()`)
+    await until(`document.querySelectorAll('.tab').length === ${tabsBeforeShell + 1} && !!document.querySelector('.shells-bar')`)
+    const shellTab = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].sessionId
+    assert.match(await js(`document.querySelector('.shells-bar').textContent`), /bash.*\/etc\/systemd\/system.*idle 2 h/)
+    await until(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Detach' && b.getClientRects().length)`)
+    await screenshot('ssh-detached-shells.png')
+    await click('Resume')
+    await until(`!document.querySelector('.shells-bar')`)
+    for (let n = 0; n < 50 && !calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].shellName; n++) await new Promise((r) => setTimeout(r, 30))
+    const adoptClose = calls.filter((c) => c.channel === 'ssh:close' && c.args[0] === shellTab).at(-1)
+    assert.deepEqual(adoptClose.args[1], { endShell: true }, 'Resume ends the shell the tab had just started')
+    const adoptOpen = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0]
+    assert.deepEqual([adoptOpen.sessionId, adoptOpen.shellName, adoptOpen.shellHistory, adoptOpen.shellResume], [shellTab, 'ec2ra-old1', true, false])
+    const callsBeforeClose = calls.length
+    await click('Disconnect')
+    await until(`document.querySelectorAll('.tab').length === ${tabsBeforeShell}`)
+    assert.ok(calls.slice(callsBeforeClose).some((c) => c.channel === 'ssh:close' && c.args[0] === shellTab && c.args[1]?.endShell === true), 'closing the tab ends its shell')
+    shellScenario = false
+
     // Terminal colour scheme applies live to the open SSH tab and persists through settings:set.
     await js(`document.querySelector('button[title="Settings"]').click()`)
     await until(`!!document.querySelector('[role="dialog"] select option[value="dracula"]')`)
@@ -225,6 +254,30 @@ app.whenReady().then(async () => {
     await new Promise((r) => setTimeout(r, 200))
     assert.equal(await js(`document.documentElement.hasAttribute('data-tabs-crowded')`), true)
     await screenshot('many-tabs.png')
+
+    // All sessions on one page: every tab becomes a live tile, the clicked tile takes the typing, ⌘0 toggles it, and
+    // nothing reconnects on the way in or out.
+    const opensBeforeGrid = calls.filter((c) => c.channel === 'ssh:open').length
+    await js(`document.querySelector('button[title^="All sessions"]').click()`)
+    await until(`document.querySelectorAll('.session-grid > .session-pane').length === 5`)
+    assert.equal(await js(`[...document.querySelectorAll('.session-grid .tile-head')].every((h) => h.getBoundingClientRect().height > 20)`), true, 'every tile has a header')
+    await until(`[...document.querySelectorAll('.session-grid .xterm')].every((x) => x.getBoundingClientRect().width > 200 && x.getBoundingClientRect().height > 150)`)
+    assert.equal(await js(`getComputedStyle(document.querySelector('.hosts-workspace')).display`), 'none', 'the host list gives way to the grid')
+    assert.equal(await js(`[...document.querySelectorAll('.session-grid .term-toolbar')].every((t) => !t.getClientRects().length)`), true, 'tiles show a header, not each terminal toolbar')
+    const secondTile = await js(`document.querySelectorAll('.session-grid > .session-pane')[1].dataset.tabId`)
+    await js(`document.querySelector('[data-tab-id="${secondTile}"] .xterm').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+    await until(`document.querySelector('[data-tab-id="${secondTile}"]').classList.contains('focused') && document.activeElement === document.querySelector('[data-tab-id="${secondTile}"] .xterm-helper-textarea')`)
+    await js(`(() => { const t = document.activeElement; t.value = 'z'; t.dispatchEvent(new InputEvent('input', { data: 'z', inputType: 'insertText', bubbles: true })) })()`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'ssh:write').at(-1)?.args[0] !== secondTile; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:write').at(-1).args, [secondTile, 'z'], 'typing goes to the focused tile')
+    await screenshot('all-sessions.png')
+    await key('0', { metaKey: true })
+    await until(`!document.querySelector('.session-grid') && document.querySelector('[data-tab-id="${secondTile}"]').getClientRects().length > 0`)
+    await key('0', { metaKey: true })
+    await until(`!!document.querySelector('.session-grid')`)
+    await js(`document.querySelectorAll('.session-grid .tile-head button[aria-label^="Open"]')[2].click()`)
+    await until(`!document.querySelector('.session-grid') && document.querySelectorAll('.session-panes > .session-pane:not(.hidden)').length === 1`)
+    assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeGrid, 'showing and leaving the grid must not reconnect anything')
     for (let n = 0; n < 4; n++) {
       await key('w', { metaKey: true })
       await until(`document.querySelectorAll('.session-panes > div').length === ${5 - n - 1}`)
@@ -287,6 +340,44 @@ app.whenReady().then(async () => {
     for (let n = 0; n < 50 && lastWrite() !== '\x03'; n++) await new Promise((r) => setTimeout(r, 30))
     assert.equal(lastWrite(), '\x03', 'sticky Ctrl turns the next letter into a control code')
     assert.equal(await pjs(`document.querySelector('.m-key[aria-label^="Control"]').getAttribute('aria-pressed')`), 'false', 'Ctrl releases after one key')
+    // Paste key. A refused clipboard read (WebKit's Paste bubble dismissed) opens the paste box; one line from the
+    // clipboard goes straight in; several lines are shown in the box first.
+    const waitWrite = async (want) => { for (let n = 0; n < 50 && lastWrite() !== want; n++) await new Promise((r) => setTimeout(r, 30)) }
+    await pjs(`void (navigator.clipboard.readText = () => Promise.reject(new DOMException('dismissed', 'NotAllowedError')))`)
+    await pjs(`document.querySelector('.m-key[aria-label="Paste"]').click()`)
+    await puntil(`!!document.querySelector('.m-paste-input')`)
+    await pshot('phone-paste-box.png')
+    await pjs(`(() => { const t = document.querySelector('.m-paste-input'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, 'uptime'); t.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await ptap('Paste')
+    await waitWrite('uptime')
+    assert.equal(lastWrite(), 'uptime', 'the paste box sends its text')
+    await puntil(`!document.querySelector('.m-paste-input')`)
+    await pjs(`void (navigator.clipboard.readText = () => Promise.resolve('whoami'))`)
+    await pjs(`document.querySelector('.m-key[aria-label="Paste"]').click()`)
+    await waitWrite('whoami')
+    assert.equal(lastWrite(), 'whoami', 'a single clipboard line pastes straight into the terminal')
+    await pjs(`void (navigator.clipboard.readText = () => Promise.resolve('echo one\\necho two'))`)
+    await pjs(`document.querySelector('.m-key[aria-label="Paste"]').click()`)
+    await puntil(`document.querySelector('.m-paste-input')?.value === 'echo one\\necho two'`)
+    assert.equal(lastWrite(), 'whoami', 'multi-line clipboard text is not sent before review')
+    assert.equal(await pjs(`[...document.querySelectorAll('.m-sheet button')].some((b) => b.textContent === 'Paste 2 lines')`), true, 'the paste box counts lines')
+    await ptap('Cancel')
+    await puntil(`!document.querySelector('.m-paste-input')`)
+    // Select text: the scrollback in a selectable field, soft-wrapped rows joined back into one line.
+    const longLine = 'x'.repeat(60) + 'END'
+    phone.webContents.send('ssh:event', { sessionId: phoneSession, type: 'data', data: `hello from the fixture\r\n${longLine}\r\n` })
+    await pjs(`document.querySelector('.m-key[aria-label="More actions"]').click()`)
+    await ptap('Select text to copy')
+    await puntil(`!!document.querySelector('.m-copy-text')`)
+    const copied = await pjs(`document.querySelector('.m-copy-text').value`)
+    assert.ok(copied.includes('hello from the fixture'), 'Select text shows the terminal output')
+    assert.ok(copied.split('\n').includes(longLine), 'wrapped rows are joined back into the printed line')
+    await pshot('phone-select-text.png')
+    await ptap('Copy all')
+    await puntil(`!document.querySelector('.m-copy-text')`)
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0], copied, 'Copy all copies the whole text')
+    // Toasts share the .modal class, so later "no dialog open" checks wait for the "Copied" toast to go.
+    for (let n = 0; n < 100 && (await pjs(`!!document.querySelector('.toasts .modal')`)); n++) await new Promise((r) => setTimeout(r, 60))
     assert.equal(await noSideScroll(), true, 'terminal view fits the phone width')
     await pshot('phone-terminal.png')
     await pjs(`document.querySelector('.m-key[aria-label="More actions"]').click()`)
@@ -368,6 +459,29 @@ app.whenReady().then(async () => {
     assert.equal(await pjs(`(() => { const r = document.querySelector('.m-sheet').getBoundingClientRect(); return r.width <= 520 && r.left > 100 && r.right < innerWidth - 100 })()`), true, 'tablet sheets are centred, not full width')
     await pshot('ipad-sheet.png')
     await ptap('Cancel')
+    // Tablet: all sessions tiled on one screen; a tap on a tile opens that session.
+    const ipadOpens = calls.filter((c) => c.channel === 'ssh:open').length
+    await pjs(`document.querySelectorAll('.m-tabbar button')[0].click()`)
+    await puntil(`!!document.querySelector('[data-host-key="${running.key}"]')`)
+    await pjs(`document.querySelector('[data-host-key="${running.key}"]').click()`)
+    await puntil(`!!document.querySelector('.m-sheet')`)
+    await ptap('SSH terminal')
+    await puntil(`!!document.querySelector('.m-header-btn[aria-label="All sessions on one screen"]')`)
+    await pjs(`document.querySelector('.m-header-btn[aria-label="All sessions on one screen"]').click()`)
+    await puntil(`document.querySelectorAll('.session-grid > .session-pane').length === 2 && [...document.querySelectorAll('.session-grid .xterm')].every((x) => x.getBoundingClientRect().height > 150)`)
+    assert.equal(await pjs(`[...document.querySelectorAll('.session-grid .m-keybar')].every((k) => !k.getClientRects().length)`), true, 'tiles hide the key bar')
+    assert.equal(await noSideScroll(), true, 'the tablet grid fits the width')
+    await pshot('ipad-all-sessions.png')
+    const ipadFirst = await pjs(`document.querySelectorAll('.session-grid > .session-pane')[0].dataset.tabId`)
+    await pjs(`document.querySelector('[data-tab-id="${ipadFirst}"] .tile-shield').click()`)
+    await puntil(`!document.querySelector('.session-grid') && document.querySelector('[data-tab-id="${ipadFirst}"]').getClientRects().length > 0`)
+    assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, ipadOpens + 1, 'only the new terminal connected')
+    await pjs(`document.querySelector('.m-header-btn[aria-label="All sessions on one screen"]').click()`)
+    await puntil(`!!document.querySelector('.session-grid')`)
+    await pjs(`document.querySelectorAll('.session-grid .tile-head button[aria-label^="Close"]')[1].click()`)
+    await puntil(`document.querySelectorAll('.session-grid > .session-pane').length === 1`)
+    await ptap('Done')
+    await puntil(`!document.querySelector('.session-grid')`)
 
     // Signing in from a phone: the approval happens in Safari, iOS suspends the page and drops its socket, and the
     // "signed in" push is sent to nobody. The dialog must still finish by asking the computer what token it holds.

@@ -55,6 +55,13 @@ export function defaultInitCommand(inst: Instance, explicit?: string): string {
   return (explicit ?? s.overrides[inst.key]?.initCommand ?? s.sshInitCommand ?? '').trim()
 }
 
+/** Whether SSH shells run in tmux on the host (ssh/persist.ts): explicit > host override > global. Never on Windows. */
+export function persistentShell(inst: Instance, explicit?: boolean): boolean {
+  if (inst.platform === 'windows') return false
+  const s = getSettings()
+  return explicit ?? s.overrides[inst.key]?.persistentShell ?? s.persistentShells ?? true
+}
+
 /** Identity file precedence: explicit > host override > account default > global default. */
 export function defaultIdentityFile(inst: Instance, explicit?: string): string | undefined {
   const s = getSettings()

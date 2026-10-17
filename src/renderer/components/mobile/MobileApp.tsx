@@ -50,6 +50,8 @@ export default function MobileApp(): ReactElement {
     try { localStorage.setItem(LIST_HIDDEN_KEY, next ? '1' : '0') } catch { /* storage unavailable */ }
   }
   const fullSession = wide && listHidden && !!active
+  // All sessions tiled on one screen: only where there is room for tiles (tablets, unfolded foldables).
+  const grid = wide && s.gridView && s.tabs.length > 0
 
   useEffect(() => trackVisualViewport(), [])
   // The iOS app keeps the screen awake while sessions are open, so a terminal left running doesn't lock the phone.
@@ -74,7 +76,7 @@ export default function MobileApp(): ReactElement {
         <AuthBanner />
         <div className="m-scroll">
           {view === 'hosts' && <MobileHosts />}
-          {view === 'sessions' && <MobileSessions />}
+          {view === 'sessions' && <MobileSessions wide={wide} />}
           {view === 'more' && <MobileMore />}
         </div>
         <nav className="m-tabbar" aria-label="Sections">
@@ -86,7 +88,15 @@ export default function MobileApp(): ReactElement {
         </nav>
       </aside>
       <section className="m-stage">
-        {active ? (
+        {grid ? (
+          <header className="m-header m-session-header">
+            <button className="m-header-btn" aria-label={fullSession ? 'Show host list' : 'Full screen session'} aria-pressed={fullSession} onClick={toggleList}>
+              <Icon.panelRight filled={!fullSession} className="-scale-x-100" />
+            </button>
+            <div className="m-session-title"><Icon.grid /><span className="truncate">All sessions</span><span className="mono muted">{s.tabs.length}</span></div>
+            <button className="m-header-btn" onClick={() => s.showGrid(false)}>Done</button>
+          </header>
+        ) : active ? (
           <header className="m-header m-session-header">
             {wide && (
               <button className="m-header-btn" aria-label={fullSession ? 'Show host list' : 'Full screen session'} aria-pressed={fullSession} onClick={toggleList}>
@@ -103,6 +113,9 @@ export default function MobileApp(): ReactElement {
               <span className="truncate">{active.title.replace(/ @ .*/, '')}</span>
               {active.status === 'connected' && active.route && <span className={`m-route ${active.route}`}>{active.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
             </div>
+            {wide && s.tabs.length > 1 && (
+              <button className="m-header-btn" aria-label="All sessions on one screen" onClick={() => s.showGrid(true)}><Icon.grid /></button>
+            )}
             <button className="m-header-btn" aria-label="Switch session" onClick={() => setSwitcher(true)}>
               <Icon.layers /><span className="mono">{s.tabs.length}</span>
             </button>
@@ -114,7 +127,7 @@ export default function MobileApp(): ReactElement {
           </div>
         )}
         <main className="m-main">
-          <SessionPanes />
+          <SessionPanes grid={grid} touch />
           {wide && active && (
             <button className="m-divider-toggle" aria-label={fullSession ? 'Show host list' : 'Hide host list'} onClick={toggleList}>
               <Icon.chevron className={fullSession ? '' : 'rotate-180'} />
@@ -136,7 +149,7 @@ export default function MobileApp(): ReactElement {
   )
 }
 
-function MobileSessions(): ReactElement {
+function MobileSessions({ wide }: { wide: boolean }): ReactElement {
   const s = useStore()
   if (!s.tabs.length && !s.tunnels.length) {
     return <div className="m-empty"><p>No open sessions. Pick a host to start a terminal, desktop or file browser.</p></div>
@@ -144,6 +157,17 @@ function MobileSessions(): ReactElement {
   return (
     <div className="m-list-page">
       {s.tabs.length > 0 && <h3 className="m-group-title">Open sessions</h3>}
+      {wide && s.tabs.length > 1 && (
+        <div className="m-card-list mb-3">
+          <button className={`m-host ${s.gridView ? 'on' : ''}`} onClick={() => s.showGrid(true)}>
+            <span className="m-host-os"><Icon.grid /></span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="m-host-name">All sessions on one screen</span>
+              <span className="m-host-meta">Every terminal and desktop live, side by side. Tap one to open it.</span>
+            </span>
+          </button>
+        </div>
+      )}
       <div className="m-card-list">
         {s.tabs.map((t) => (
           <div key={t.id} className={`m-host ${s.activeTab === t.id ? 'on' : ''}`} role="button" tabIndex={0} onClick={() => s.setActive(t.id)}>

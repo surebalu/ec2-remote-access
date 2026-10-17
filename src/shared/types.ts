@@ -118,6 +118,8 @@ export interface HostOverride {
   useAgent?: boolean
   /** Shell input sent right after an SSH session opens. Empty string disables the global default for this host. */
   initCommand?: string
+  /** Keep SSH shells running in tmux on this host; undefined follows Settings.persistentShells. */
+  persistentShell?: boolean
 }
 
 /** Per-AWS-account SSH defaults. When set, the SSH button connects immediately without the dialog. */
@@ -153,6 +155,8 @@ export interface Settings {
   defaultWindowsUser: string
   /** Sent to every new SSH shell (e.g. a coloured PS1 and ls --color aliases). Per-host overrides.initCommand wins. */
   sshInitCommand: string
+  /** Run SSH shells inside tmux on Linux hosts so a dropped connection leaves them running and Reconnect resumes them. */
+  persistentShells: boolean
   /** In-app gateway for phone browsers: start with the app, TCP port, and whether to bind only the Tailscale address. */
   phoneAccessEnabled: boolean
   phoneAccessPort: number
@@ -275,8 +279,26 @@ export interface SshOpenRequest {
   initCommand?: string
   /** Open the shell on the connection of this existing SSH/SFTP session (same host and user) instead of logging in again. */
   reuseSessionId?: string
+  /** Keep the shell running in tmux on the host; undefined = host override, then the global setting. */
+  persistent?: boolean
+  /** A tmux shell left running on the host to attach instead of this tab's own (see DetachedShell). */
+  shellName?: string
+  /** The tab showed its shell before (a reconnect), so a missing one is reported as ended. */
+  shellResume?: boolean
+  /** Print the shell's earlier output before attaching, because this tab has not shown it. */
+  shellHistory?: boolean
   cols: number
   rows: number
+}
+
+/** A persistent shell on a host that no tab is showing (the app quit, a phone page was lost, the user detached). */
+export interface DetachedShell {
+  name: string
+  /** Foreground program of its pane, e.g. bash or top. */
+  command: string
+  /** Working directory of that program, when tmux can read it. */
+  path: string
+  idleSec: number | null
 }
 
 export interface SshSessionInfo {
@@ -288,6 +310,12 @@ export interface SshSessionInfo {
   user: string
   /** Where this session's output is being recorded, when session logging is on. */
   logFile?: string
+  /** The shell runs in tmux on the host and survives a dropped connection. */
+  persistent?: boolean
+  /** Attached to a shell that was already running rather than starting one. */
+  resumed?: boolean
+  /** Other persistent shells on the host that no tab is showing, offered for resuming when this tab started a new one. */
+  detached?: DetachedShell[]
 }
 
 export interface SshEvent {

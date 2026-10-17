@@ -83,7 +83,22 @@ export function trackVisualViewport(): () => void {
   }
 }
 
-type NativeMessage = { type: 'settings' } | { type: 'sessions'; count: number }
+/**
+ * The paste keys. WebKit gives a page the clipboard only after the user taps its own "Paste" bubble (dismissing it
+ * rejects), and a plain-http page has no async clipboard at all; both end in `review('')`, which opens the paste box
+ * where a long press → Paste always works. Must be called from the tap itself so the read carries the gesture.
+ */
+export function pasteFromClipboard(deliver: (text: string) => void, review: (text: string) => void): void {
+  let read: Promise<string>
+  try { read = navigator.clipboard.readText() } catch { review(''); return }
+  read.then((text) => {
+    // A line break would run whatever precedes it the moment it lands, so multi-line text is shown first.
+    if (text && !/[\r\n]/.test(text)) deliver(text)
+    else review(text)
+  }, () => review(''))
+}
+
+type NativeMessage ={ type: 'settings' } | { type: 'sessions'; count: number }
 type NativeBridge = { messageHandlers?: { ec2ra?: { postMessage: (m: NativeMessage) => void } } }
 
 /** True inside the EC2 Remote iPhone/iPad app (ios/), which injects a WKScriptMessageHandler named `ec2ra`. */
