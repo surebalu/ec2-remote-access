@@ -30,6 +30,8 @@ export interface Tab {
   connectedAt?: number
   /** Session transcript being written by the main process (Settings → Session logs). */
   logFile?: string
+  /** The SSH shell runs in tmux on the host, so it outlives this connection (see main/ssh/persist.ts). */
+  persistent?: boolean
 }
 
 export interface Toast {
@@ -54,6 +56,10 @@ interface State {
   tunnels: Tunnel[]
   tabs: Tab[]
   activeTab: string // 'hosts' or tab id
+  /** All sessions tiled on one page (SessionPanes); activeTab is then the tile that has the keyboard. */
+  gridView: boolean
+  /** Shows or leaves the all-sessions grid; showing it needs at least one session. */
+  showGrid: (on: boolean) => void
   toasts: Toast[]
   search: string
   osFilter: OsFilter
@@ -139,7 +145,8 @@ interface State {
   dismissToast: (id: number) => void
   addTab: (tab: Tab) => void
   updateTab: (id: string, patch: Partial<Tab>) => void
-  closeTab: (id: string) => Promise<void>
+  /** `detach` leaves a persistent SSH shell running on the host instead of ending it. */
+  closeTab: (id: string, opts?: { detach?: boolean }) => Promise<void>
   setActive: (id: string) => void
   set: (patch: Partial<State>) => void
   toggleSidebar: (collapsed?: boolean) => void
@@ -167,6 +174,11 @@ export const useStore = create<State>((set, get) => ({
   tunnels: [],
   tabs: [],
   activeTab: 'hosts',
+  gridView: false,
+  showGrid: (on) => set((s) => {
+    if (!on || !s.tabs.length) return { gridView: false }
+    return { gridView: true, activeTab: s.tabs.some((t) => t.id === s.activeTab) ? s.activeTab : s.tabs[0].id }
+  }),
   toasts: [],
   search: '',
   osFilter: 'all',
@@ -609,11 +621,11 @@ export const useStore = create<State>((set, get) => ({
     }
     return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)), recentHosts }
   }),
-  closeTab: async (id) => {
+  closeTab: async (id, opts) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else await window.api.invoke('ssh:close', id).catch(() => undefined)
+    else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
       const tabs = s.tabs.filter((t) => t.id !== id)
@@ -622,7 +634,7 @@ export const useStore = create<State>((set, get) => ({
       // Focus stays inside a split when a pane closes; otherwise the neighbour to the left takes over.
       const next = inSplit && splitGroup.length ? splitGroup[Math.max(0, s.splitGroup.indexOf(id) - 1)] : (tabs[Math.max(0, idx - 1)]?.id ?? 'hosts')
       const activeTab = s.activeTab === id ? next : s.activeTab
-      return { tabs, activeTab, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
+      return { tabs, activeTab, gridView: s.gridView && tabs.length > 0, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
     })
   },
   toggleTerminalPane: (open) => {
@@ -630,7 +642,8 @@ export const useStore = create<State>((set, get) => ({
     set({ terminalPaneOpen: next })
     try { localStorage.setItem(TERMINAL_PANE_KEY, next ? '1' : '0') } catch { /* storage unavailable */ }
   },
-  setActive: (id) => set({ activeTab: id })
+  // Picking a tab or Hosts shows it on its own; tiles in the grid take focus through set({ activeTab }).
+  setActive: (id) => set({ activeTab: id, gridView: false })
 }))
 
 

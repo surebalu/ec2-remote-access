@@ -178,6 +178,20 @@ export const Icon = {
       <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
     </svg>
   ),
+  /** Clipboard board: paste. */
+  clipboard: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" />
+      <rect x="9" y="2.5" width="6" height="3.5" rx="1" />
+    </svg>
+  ),
+  /** Two sheets: copy. */
+  copy: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+    </svg>
+  ),
   keyboard: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <rect x="2" y="6" width="20" height="12" rx="2" />

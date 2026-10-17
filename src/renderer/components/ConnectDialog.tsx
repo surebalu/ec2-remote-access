@@ -18,6 +18,8 @@ export default function ConnectDialog(): ReactElement | null {
   const [useAgent, setUseAgent] = useState(ov.useAgent ?? true)
   const globalInit = s.settings?.sshInitCommand ?? ''
   const [initCmd, setInitCmd] = useState(ov.initCommand ?? globalInit)
+  const globalPersist = s.settings?.persistentShells ?? true
+  const [persistShell, setPersistShell] = useState(ov.persistentShell ?? globalPersist)
   const [remember, setRemember] = useState(true)
   const [busy, setBusy] = useState(false)
   const [password, setPassword] = useState('')
@@ -75,6 +77,7 @@ export default function ConnectDialog(): ReactElement | null {
       patch.useAgent = useAgent
       // Store only a deviation from the global default; '' is a deliberate "nothing for this host".
       patch.initCommand = initCmd.trim() === globalInit.trim() ? undefined : initCmd
+      patch.persistentShell = persistShell === globalPersist ? undefined : persistShell
     } else {
       patch.rdpUser = user || undefined
       patch.rdpPort = Number(port) || undefined
@@ -129,6 +132,7 @@ export default function ConnectDialog(): ReactElement | null {
         useAgent,
         forceRoute: force,
         initCommand: initCmd,
+        persistent: persistShell,
         cols: 120,
         rows: 32
       }
@@ -223,6 +227,11 @@ export default function ConnectDialog(): ReactElement | null {
                     {globalInit && initCmd.trim() !== globalInit.trim() && <> <button className="underline" onClick={() => setInitCmd(globalInit)}>Reset to global</button></>}
                   </div>
                 </div>
+                <label className="muted">Keep running</label>
+                <label className="flex items-center gap-2" title="Runs the shell in tmux on the host, so a dropped connection leaves it running and Reconnect continues where you were">
+                  <input type="checkbox" checked={persistShell} onChange={(e) => setPersistShell(e.target.checked)} />
+                  <span className="text-[11px]">Keep the shell running on the host (tmux){persistShell !== globalPersist && <span className="muted"> · differs from Settings</span>}</span>
+                </label>
               </>
             )}
           </>

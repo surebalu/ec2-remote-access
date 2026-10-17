@@ -8,7 +8,7 @@
  */
 import { Backend } from '@devolutions/iron-remote-desktop-rdp'
 
-type Session = { applyInputs(t: InstanceType<typeof Backend.InputTransaction>): void; releaseAllInputs(): void }
+export type Session = { applyInputs(t: InstanceType<typeof Backend.InputTransaction>): void; releaseAllInputs(): void; free(): void }
 type DeviceEvent = ReturnType<typeof Backend.DeviceEvent.keyPressed>
 
 /** A copy of the backend whose sessions are reported to `onSession` as they connect (one per reconnect). */

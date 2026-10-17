@@ -30,7 +30,10 @@ export interface IpcApi {
   'ssh:open': (req: SshOpenRequest) => Promise<SshSessionInfo>
   'ssh:write': (sessionId: string, data: string) => Promise<void>
   'ssh:resize': (sessionId: string, cols: number, rows: number) => Promise<void>
-  'ssh:close': (sessionId: string) => Promise<void>
+  /** endShell also ends the tab's tmux shell on the host (closing the tab); otherwise it keeps running to resume. */
+  'ssh:close': (sessionId: string, opts?: { endShell?: boolean }) => Promise<void>
+  /** Ends a persistent shell another tab left running on this session's host. */
+  'ssh:endShell': (sessionId: string, name: string) => Promise<void>
   'ssh:external': (req: SshOpenRequest) => Promise<void>
   'sftp:open': (req: SftpOpenRequest) => Promise<SftpSessionInfo>
   'sftp:list': (sessionId: string, path: string) => Promise<SftpEntry[]>

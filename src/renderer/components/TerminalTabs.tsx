@@ -15,6 +15,16 @@ const OVERFLOW_W = 44
 const dotFor = (st: string): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
 const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : <Icon.terminal />)
 
+function useWindowWidth(): number {
+  const [w, setW] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const on = (): void => setW(window.innerWidth)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return w
+}
+
 function uptime(since?: number): string {
   if (!since) return ''
   const m = Math.floor((Date.now() - since) / 60_000)
@@ -32,6 +42,7 @@ export default function TerminalTabs(): ReactElement {
   const s = useStore()
   const stripRef = useRef<HTMLDivElement>(null)
   const hostsRef = useRef<HTMLButtonElement>(null)
+  const gridRef = useRef<HTMLButtonElement>(null)
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
   const [hidden, setHidden] = useState<string[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
@@ -66,7 +77,7 @@ export default function TerminalTabs(): ReactElement {
       }
       return out
     }
-    const total = strip.clientWidth - (hostsRef.current?.offsetWidth ?? 0) - GAP - 8
+    const total = strip.clientWidth - (hostsRef.current?.offsetWidth ?? 0) - (gridRef.current ? gridRef.current.offsetWidth + GAP : 0) - GAP - 8
     let visible = fit(total)
     if (visible.length < order.length) visible = fit(total - OVERFLOW_W)
     const next = order.filter((id) => !visible.includes(id))
@@ -113,7 +124,7 @@ export default function TerminalTabs(): ReactElement {
         if (el) tabRefs.current.set(t.id, el)
         else tabRefs.current.delete(t.id)
       }}
-      className={`tab no-drag cursor-default ${s.activeTab === t.id ? 'on' : ''} ${splitShown && s.splitGroup.includes(t.id) ? 'in-split' : ''} ${dragOver === t.id ? 'drag-over' : ''}`}
+      className={`tab no-drag cursor-default ${s.activeTab === t.id && !s.gridView ? 'on' : ''} ${splitShown && s.splitGroup.includes(t.id) ? 'in-split' : ''} ${dragOver === t.id ? 'drag-over' : ''}`}
       style={ghost ? { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' } : undefined}
       onClick={() => s.setActive(t.id)}
       onAuxClick={(e) => { if (e.button === 1) void s.closeTab(t.id) }}
@@ -148,6 +159,12 @@ export default function TerminalTabs(): ReactElement {
         <Icon.cloud />
         Hosts
       </button>
+      {s.tabs.length > 0 && (
+        <button ref={gridRef} className={`tab no-drag ${s.gridView ? 'on' : ''}`} title="All sessions on one page (⌘0)" aria-pressed={s.gridView} onClick={() => s.showGrid(!s.gridView)}>
+          <Icon.grid />
+          All <span className="mono text-[11px]">{s.tabs.length}</span>
+        </button>
+      )}
       {visibleTabs.map((t) => renderTab(t))}
       {/* Hidden tabs stay in the DOM (invisible) so their widths can be measured. */}
       {hiddenTabs.map((t) => renderTab(t, true))}
@@ -205,24 +222,60 @@ export default function TerminalTabs(): ReactElement {
 /**
  * Session content areas, kept mounted so terminals retain their buffers. While the focused tab belongs to the split
  * group, every tab of the group is laid out side by side and a press inside a pane focuses it.
+ *
+ * `grid` tiles every session on one page with a header each. It is the same elements in a different layout, so nothing
+ * reconnects; terminals refit to their tile, and desktops are letterboxed rather than resized (see RdpTab `tiled`).
+ * The focused tile (activeTab) has the keyboard, desktops included. On a touch screen tiles are view-only and open on
+ * tap, since the key bars and touch gestures need the full-size session.
  */
-export function SessionPanes(): ReactElement {
+export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; touch?: boolean }): ReactElement {
   const s = useStore()
-  const split = s.splitGroup.includes(s.activeTab) ? s.splitGroup : []
-  const shown = (id: string): boolean => id === s.activeTab || split.includes(id)
+  const width = useWindowWidth()
+  const tiled = grid && s.tabs.length > 0
+  const split = !tiled && s.splitGroup.includes(s.activeTab) ? s.splitGroup : []
+  const shown = (id: string): boolean => tiled || id === s.activeTab || split.includes(id)
   const anyShown = s.tabs.some((t) => shown(t.id))
+  const n = s.tabs.length
+  const cols = Math.max(1, Math.min(n <= 3 ? n : Math.ceil(Math.sqrt(n)), Math.floor(width / 380)))
+  const focus = (id: string): void => {
+    if (s.activeTab !== id) s.set({ activeTab: id })
+  }
   return (
-    <div className={`session-panes min-h-0 flex-1 ${anyShown ? 'flex' : 'hidden'}`}>
-      {s.tabs.map((t) => (
-        <div
-          key={t.id}
-          className={`min-h-0 min-w-0 flex-1 ${shown(t.id) ? '' : 'hidden'} ${split.includes(t.id) ? 'split-pane' : ''} ${split.length && s.activeTab === t.id ? 'focused' : ''}`}
-          style={split.length ? { order: split.indexOf(t.id) } : undefined}
-          onMouseDownCapture={() => { if (split.length && s.activeTab !== t.id) s.setActive(t.id) }}
-        >
-          {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
-        </div>
-      ))}
+    <div
+      className={tiled ? 'session-grid' : `session-panes min-h-0 flex-1 ${anyShown ? 'flex' : 'hidden'}`}
+      style={tiled ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } : undefined}
+    >
+      {s.tabs.map((t) => {
+        const shield = tiled && touch
+        return (
+          <div
+            key={t.id}
+            data-tab-id={t.id}
+            className={`session-pane min-h-0 min-w-0 flex-1 flex-col ${shown(t.id) ? 'flex' : 'hidden'} ${split.includes(t.id) ? 'split-pane' : ''} ${(split.length || tiled) && s.activeTab === t.id ? 'focused' : ''}`}
+            style={split.length ? { order: split.indexOf(t.id) } : undefined}
+            onMouseDownCapture={() => { if (split.length || tiled) focus(t.id) }}
+          >
+            <div className="tile-head" onDoubleClick={() => s.setActive(t.id)}>
+              <span className="dot" style={{ background: dotFor(t.status), animation: t.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
+              {iconFor(t)}
+              <span className="tile-title truncate">{t.title}</span>
+              {t.status === 'connected' && t.route && <span className={`route-chip ${t.route}`}>{t.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
+              <span className="muted min-w-0 flex-1 truncate">{t.message ?? t.status}</span>
+              <button className="btn btn-ghost btn-sm btn-icon" title="Open full size" aria-label={`Open ${t.title}`} onClick={() => s.setActive(t.id)}><Icon.maximize /></button>
+              <button className="btn btn-ghost btn-sm btn-icon" title="Close" aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id)}><Icon.x /></button>
+            </div>
+            <div className="tile-body relative flex min-h-0 flex-1 flex-col">
+              {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
+              {shield && (
+                <div
+                  className="tile-shield"
+                  onClick={() => s.setActive(t.id)}
+                />
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -366,8 +366,8 @@ html[data-tabs-crowded]:not([data-sidebar="collapsed"]) .titlebar .brand { width
 html[data-tabs-crowded]:not([data-sidebar="collapsed"]) .titlebar .brand > span:last-child { display: none; }
 
 /* Tabs */
-.tab .route-chip { font: 600 8.5px/1 'SF Mono', ui-monospace, monospace; letter-spacing: .04em; padding: 2px 4px; border-radius: 4px; background: var(--info-soft); color: var(--info); }
-.tab .route-chip.direct { background: var(--ok-soft); color: var(--ok); }
+.tab .route-chip, .tile-head .route-chip { font: 600 8.5px/1 'SF Mono', ui-monospace, monospace; letter-spacing: .04em; padding: 2px 4px; border-radius: 4px; background: var(--info-soft); color: var(--info); }
+.tab .route-chip.direct, .tile-head .route-chip.direct { background: var(--ok-soft); color: var(--ok); }
 .tab.in-split:not(.on) { box-shadow: inset 0 -2px 0 var(--accent-soft-2); color: var(--text); }
 .tab.drag-over { box-shadow: inset 2px 0 0 var(--accent); }
 .tab[draggable="true"] { -webkit-user-drag: element; }
@@ -378,6 +378,21 @@ html[data-tabs-crowded]:not([data-sidebar="collapsed"]) .titlebar .brand > span:
 .split-pane::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 2px 0 transparent; transition: box-shadow .12s; }
 .split-pane.focused::after { box-shadow: inset 0 2px 0 var(--accent); }
 .split-pane:not(.focused) .xterm { opacity: .82; }
+
+/* All-sessions grid (SessionPanes `grid`): the same session elements as tiles, each under a header. Per-session
+   toolbars give way to the header; the focused tile has the keyboard. */
+.tile-head { display: none; }
+.session-grid { display: grid; flex: 1; min-height: 0; gap: 8px; padding: 8px; overflow: auto; grid-auto-rows: minmax(240px, 1fr); background: var(--bg); }
+.session-grid > .session-pane { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.session-grid > .session-pane.focused { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.session-grid .tile-head { display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 10px; border-bottom: 1px solid var(--border); background: var(--bg-elev); font-size: 11px; cursor: default; user-select: none; }
+.session-grid .tile-title { flex-shrink: 0; max-width: 45%; font-weight: 600; }
+.session-grid .tile-head .btn-icon { width: 24px; height: 24px; }
+.session-grid .term-toolbar, .session-grid .rdp-toolbar, .session-grid .find-bar, .session-grid .appearance-pane,
+.session-grid .m-keybar, .session-grid .m-status-strip { display: none !important; }
+.session-grid .xterm { padding: 4px 6px; }
+.session-grid > .session-pane:not(.focused) .xterm { opacity: .88; }
+.tile-shield { position: absolute; inset: 0; z-index: 5; cursor: pointer; }
 
 /* Popover menus */
 .popover { border-radius: 10px; box-shadow: var(--shadow-lg); max-height: min(420px, calc(100vh - 32px)); overflow-y: auto; }
@@ -487,7 +502,25 @@ html[data-keyboard] .m-keybar { padding-bottom: 6px; }
 .m-key:active { background: var(--accent-soft-2); }
 
 /* Bottom sheets and dialogs */
-.m-sheet-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .42); backdrop-filter: none; }
+/* Pinned to the visual viewport like .m-app, so a sheet opened while the keyboard is up sits above it, not under it. */
+.m-sheet-backdrop { position: fixed; left: 0; right: 0; top: var(--vv-top, 0); height: var(--vv-h, 100%); z-index: 60; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .42); backdrop-filter: none; }
+html[data-keyboard] .m-sheet { padding-bottom: 10px; }
+.m-paste-input, .m-copy-text { display: block; width: 100%; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: 'SF Mono', ui-monospace, Menlo, monospace; line-height: 1.4; resize: none; outline: none; }
+.m-paste-input { height: 132px; }
+.m-paste-input:focus { border-color: var(--accent); }
+.m-copy-text { height: calc(var(--vv-h, 100vh) * .55); white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; -webkit-user-select: text; user-select: text; }
+/* Read-only, so iOS never zooms into it; terminal text needs to be small to fit. */
+html[data-mobile] textarea.m-copy-text { font-size: 12px !important; }
+.m-sheet-action { width: 100%; height: 46px; font-size: 16px; }
+.m-term { -webkit-touch-callout: none; }
+.m-shells { flex-shrink: 0; padding: 8px 12px; font-size: 13px; line-height: 1.35; background: var(--accent-soft); border-bottom: 1px solid var(--border); }
+.m-shells .btn-sm { height: 30px; padding-inline: 12px; font-size: 13px; }
+.m-shells svg { width: 16px; height: 16px; }
+.m-shells .shells-row, .shells-bar .shells-row { margin-top: 4px; }
+.m-clip-pill { position: absolute; top: 10px; left: 50%; z-index: 5; display: flex; align-items: center; max-width: calc(100% - 24px); transform: translateX(-50%); border-radius: 999px; background: var(--accent); color: #fff; box-shadow: var(--shadow-lg); }
+.m-clip-pill button { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.m-clip-pill button:first-child { padding-left: 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.m-clip-pill svg { width: 16px; height: 16px; flex-shrink: 0; }
 .m-sheet { width: 100%; max-height: calc(var(--vv-h, 100vh) - env(safe-area-inset-top) - 24px); overflow-y: auto; padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); border-radius: 16px 16px 0 0; border-top: 1px solid var(--border); box-shadow: var(--shadow-lg); animation: m-slide-up .18s ease-out; }
 @keyframes m-slide-up { from { transform: translateY(40px); } }
 .m-sheet-grip { width: 38px; height: 5px; margin: 2px auto 10px; border-radius: 999px; background: var(--border-strong); }

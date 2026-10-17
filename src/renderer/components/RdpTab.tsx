@@ -5,20 +5,28 @@ import type { UserInteraction, NewSessionInfo } from '@devolutions/iron-remote-d
 import { useStore, type Tab } from '../store'
 import HostActions from './HostActions'
 import { Icon } from './icons'
-import { isMobile, isKeyboardOpen, useKeyboardOpen } from '../mobile'
-import { attachTouchGestures, captureSessions, NAMED_KEYS, RdpInput, type NamedKey } from '../rdpInput'
+import { isMobile, isKeyboardOpen, pasteFromClipboard, useKeyboardOpen } from '../mobile'
+import { attachTouchGestures, captureSessions, NAMED_KEYS, RdpInput, type NamedKey, type Session as WasmSession } from '../rdpInput'
+import { noteConnect, noteFreed, noteMount, telemetryReport, trackTab, watchWasmMemory } from '../rdpTelemetry'
 import KeyBar from './mobile/KeyBar'
 import type { StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
+import { PasteSheet } from './mobile/ClipboardSheets'
 
 type IronElement = HTMLElement & { module?: unknown }
 
 /** The RDP backend is a wasm-bindgen module; instantiate it once before the component touches it. */
 let wasmReady: Promise<unknown> | null = null
 function ensureWasm(): Promise<unknown> {
-  if (!wasmReady) wasmReady = initWasm('WARN')
+  if (!wasmReady) {
+    watchWasmMemory()
+    wasmReady = initWasm('WARN')
+  }
   return wasmReady
 }
+
+/** Values of the component's `ScreenScale` enum, as `setScale` takes them. */
+const SCALE_CODES = { fit: 1, full: 2, real: 3 } as const
 
 /** Back-off between automatic reconnect attempts. After the last one we stop and offer a manual button. */
 const RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000]
@@ -45,7 +53,9 @@ type Phase = 'connecting' | 'connected' | 'waiting' | 'signin' | 'closed' | 'fai
 
 /**
  * HiDPI: request the desktop at the display's native pixel density and ask Windows for the matching DPI scale, so
- * text is crisp on Retina screens instead of one remote pixel being stretched over four. Costs ~4x the bandwidth.
+ * text is crisp on Retina screens instead of one remote pixel being stretched over four. Costs ~4x the bandwidth and
+ * ~4x the framebuffer the wasm client decodes and paints, which is why it is opt-in: with live sessions open the
+ * renderer sat at 80%+ CPU and gigabytes of memory after days of use.
  */
 const HIDPI_KEY = 'ui.rdpHiDpi'
 function readHiDpiPref(): boolean {
@@ -55,8 +65,8 @@ function readHiDpiPref(): boolean {
   } catch {
     /* storage unavailable */
   }
-  // Off by default on phones: see sessionScale in RdpTab for why a scale change mid-session is avoided.
-  return (window.devicePixelRatio || 1) > 1 && !isMobile()
+  // Off unless the user turned it on (phones additionally avoid a scale change mid-session: see sessionScale in RdpTab).
+  return false
 }
 /** Remote desktop size (even, within RDP limits) and Windows scale factor (percent) for a pane rectangle. */
 function remoteSize(rect: { width: number; height: number }, hiDpi: boolean): { width: number; height: number; scale: number } {
@@ -87,12 +97,15 @@ function desktopSizeFor(res: Resolution, rect: { width: number; height: number }
 
 /**
  * The component sizes its canvas from the window, assuming it reaches the window's bottom-right corner. On a phone
- * the key bar and the iOS keyboard sit below it, so the canvas is made to letterbox inside the pane instead.
+ * the key bar and the iOS keyboard sit below it, and a grid tile is a fraction of the window, so in both cases the
+ * canvas is fitted into its pane instead (while the element carries `data-contain`). The canvas box itself is sized
+ * to the fitted picture and centred (not object-fit, which letterboxes inside a full-size box): the component maps a
+ * click by scaling it across the canvas box, so the box must be exactly the picture for clicks to land where aimed.
  */
 const CONTAIN_CSS = `
-:host > div { width: 100%; height: 100%; }
-.screen-wrapper, .screen-viewer { width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; min-width: 0 !important; min-height: 0 !important; overflow: hidden !important; }
-canvas { width: 100% !important; height: 100% !important; object-fit: contain; touch-action: none; }
+:host([data-contain]) > div { width: 100%; height: 100%; }
+:host([data-contain]) .screen-wrapper, :host([data-contain]) .screen-viewer { position: relative !important; width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; min-width: 0 !important; min-height: 0 !important; overflow: hidden !important; }
+:host([data-contain]) canvas { position: absolute !important; inset: 0; margin: auto; width: auto !important; height: auto !important; max-width: 100% !important; max-height: 100% !important; touch-action: none; }
 `
 
 const RDP_KEYS = ['Esc', 'Tab', 'Win', 'Up', 'Down', 'Left', 'Right', 'Del', 'Home', 'End', 'PgUp', 'PgDn', 'F4', 'F5'] as const
@@ -107,10 +120,16 @@ interface Failure {
   authExpired?: boolean
 }
 
+/** Text of an error the component throws: a plain `{ kind, backtrace }` object rather than an Error. */
+function ironMessage(e: unknown): string {
+  const err = e as { backtrace?: () => string; message?: string }
+  return typeof err.backtrace === 'function' ? err.backtrace() : (err.message ?? String(e))
+}
+
 /** Turns an IronRDP error into a user-facing message, preferring the proxy's account of what the server did. */
 async function describeFailure(e: unknown, sessionId: string): Promise<Failure> {
-  const err = e as { backtrace?: () => string; kind?: () => number; message?: string }
-  const detail = typeof err.backtrace === 'function' ? err.backtrace() : (err.message ?? String(e))
+  const err = e as { kind?: () => number }
+  const detail = ironMessage(e)
   const kind = typeof err.kind === 'function' ? err.kind() : -1
   if (kind in FATAL_KINDS) return { message: FATAL_KINDS[kind], detail, fatal: true }
   if (TAKEN_OVER.test(detail)) return { message: TAKEN_OVER_MSG, detail, fatal: true }
@@ -158,13 +177,20 @@ interface Controller {
   cancel?: () => void
 }
 
-export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
+/**
+ * `tiled`: shown as a tile of the all-sessions grid. The desktop is then scaled down rather than resized, because a
+ * size change re-lays out Windows (and SolidWorks) every time the grid opens or closes; leaving the grid restores
+ * the pane's size. Mouse and keyboard keep working in the tile (see CONTAIN_CSS).
+ */
+export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; active: boolean; tiled?: boolean }): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null)
   const uiRef = useRef<UserInteraction | null>(null)
   const ctl = useRef<Controller>({ disposed: false, gen: 0, attempt: 0 })
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
   const [scale, setScale] = useState<'fit' | 'real' | 'full'>('fit')
+  // The element is rebuilt for every connection, so the chosen scale mode is re-applied to each new one.
+  const scaleRef = useRef(scale)
   const [log, setLog] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>('connecting')
   const [countdown, setCountdown] = useState(0)
@@ -187,6 +213,12 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
   const rightClickRef = useRef(false)
   const setRightClick = (on: boolean): void => { rightClickRef.current = on; setRightClickState(on) }
   const [mobileMenu, setMobileMenu] = useState(false)
+  /** Paste box contents while it is open (null = closed). */
+  const [pasteBox, setPasteBox] = useState<string | null>(null)
+  /** The remote side copied something that only a tap can put on the phone's clipboard. */
+  const [remoteClip, setRemoteClip] = useState(false)
+  /** Until when remote clipboard announcements are ignored: Windows announces its current clipboard on every connect. */
+  const clipQuietUntil = useRef(0)
 
   /**
    * The Windows display scale for this session, fixed when it connects. A resize that also changes the scale makes
@@ -196,9 +228,11 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
    */
   const sessionScale = useRef<number | null>(null)
 
+  const tiledRef = useRef(tiled)
+  tiledRef.current = tiled
   const pushSize = (): void => {
     const host = hostRef.current
-    if (!host || host.offsetParent === null) return
+    if (!host || host.offsetParent === null || tiledRef.current) return
     const { width, height, scale } = desktopSizeFor(resRef.current, host.getBoundingClientRect(), hiDpiRef.current)
     try {
       uiRef.current?.resize(width, height, sessionScale.current ?? scale)
@@ -217,7 +251,6 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
     c.disposed = false
     c.attempt = 0
     const dead = (): boolean => c.gen !== gen || c.disposed
-    let el: IronElement | null = null
     const id = tab.id
     const say = (m: string): void => setLog((l) => [...l.slice(-30), m])
     const clearTimers = (): void => {
@@ -225,8 +258,102 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
       clearInterval(c.ticker)
       c.timer = c.ticker = undefined
     }
+    const untrack = trackTab()
 
-    const scheduleRetry = (ui: UserInteraction, why: string): void => {
+    /** The element on screen, its UserInteraction, and the wasm Session it connected; all null between connections. */
+    let el: IronElement | null = null
+    let ui: UserInteraction | null = null
+    let wasmSession: WasmSession | null = null
+    let sessionEnded = false
+
+    /**
+     * Builds a fresh <iron-remote-desktop> and waits until it is usable. Every connection gets its own element, so the
+     * canvas, the wasm Session and its framebuffer from the previous connection are released when it ends instead of
+     * piling up across the dozens of reconnects a flaky network causes.
+     */
+    const mount = async (): Promise<UserInteraction> => {
+      const node = document.createElement('iron-remote-desktop') as IronElement
+      node.setAttribute('scale', 'fit')
+      node.setAttribute('verbose', 'false')
+      node.setAttribute('flexcentre', 'true')
+      node.style.width = '100%'
+      node.style.height = '100%'
+      node.style.display = 'block'
+      // A backend copy that hands us each connected Session, for touch and on-screen keyboard input and to free it later.
+      node.module = captureSessions((session) => {
+        wasmSession = session
+        sessionEnded = false
+        input.current.session = session
+      })
+      const ready = new Promise<UserInteraction>((resolve) => {
+        node.addEventListener(
+          'ready',
+          (ev: Event) => {
+            const detail = (ev as CustomEvent).detail as UserInteraction & { irgUserInteraction?: UserInteraction }
+            resolve(detail.irgUserInteraction ?? detail)
+          },
+          { once: true }
+        )
+      })
+      host.appendChild(node)
+      el = node
+      noteMount()
+      node.toggleAttribute('data-contain', mobile || tiledRef.current)
+      if (node.shadowRoot) {
+        const style = document.createElement('style')
+        style.textContent = CONTAIN_CSS
+        node.shadowRoot.appendChild(style)
+      }
+      const u = await ready
+      if (dead()) return u
+      u.onWarningCallback((w) => say(`warning: ${w}`))
+      u.setEnableClipboard(true)
+      // Automatic mode writes the remote clipboard locally the moment it changes, which WebKit refuses without a tap.
+      // Manual mode keeps it and reports it instead, and the phone shows a "copy here" prompt.
+      u.setEnableAutoClipboard(!mobile)
+      if (mobile) u.onClipboardRemoteUpdateCallback(() => { if (Date.now() > clipQuietUntil.current) setRemoteClip(true) })
+      if (scaleRef.current !== 'fit') {
+        try {
+          u.setScale(SCALE_CODES[scaleRef.current] as never)
+        } catch {
+          /* ignore */
+        }
+      }
+      ui = u
+      uiRef.current = u
+      await waitForClipboardInit()
+      return u
+    }
+
+    /** Removes the element and, once its session has finished running, frees the session's wasm memory right away. */
+    const unmount = (): void => {
+      const node = el
+      const u = ui
+      const s = wasmSession
+      const ended = sessionEnded
+      el = ui = wasmSession = null
+      uiRef.current = null
+      setRemoteClip(false)
+      if (input.current.session === s) input.current.session = null
+      try {
+        u?.shutdown()
+      } catch {
+        /* ignore */
+      }
+      node?.remove()
+      // Left to wasm-bindgen's FinalizationRegistry the framebuffer would stay allocated until V8 happened to collect the
+      // tiny JS wrapper, and V8 cannot see wasm memory to hurry. Never free while run() is pending: it borrows the session.
+      if (s && ended) {
+        try {
+          s.free()
+          noteFreed()
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+
+    const scheduleRetry = (why: string): void => {
       if (c.attempt >= MAX_ATTEMPTS) {
         setPhase('failed')
         say(`Gave up after ${MAX_ATTEMPTS} reconnect attempts.`)
@@ -250,7 +377,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
       }, 1000)
       c.timer = setTimeout(() => {
         clearTimers()
-        void connectOnce(ui)
+        void connectOnce()
       }, delay)
     }
 
@@ -258,7 +385,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
      * The SSO token expired mid-session. Don't burn reconnect attempts on it: show the sign-in prompt (noteOperationError
      * already raised the banner) and poll the store's auth state; the moment a fresh token lands, reconnect for free.
      */
-    const waitForSignIn = (ui: UserInteraction): void => {
+    const waitForSignIn = (): void => {
       clearTimers()
       c.attempt = 0
       setPhase('signin')
@@ -270,18 +397,21 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
         if (useStore.getState().authState().kind === 'ok') {
           clearTimers()
           say('Signed in; reconnecting…')
-          void connectOnce(ui)
+          void connectOnce()
         }
       }, 1500)
     }
 
     /** One full connection cycle: resolve the path, connect, then run until the session ends. */
-    const connectOnce = async (ui: UserInteraction): Promise<void> => {
+    const connectOnce = async (): Promise<void> => {
       const attempt = c.attempt
       setPhase('connecting')
       try {
         say(attempt ? `Reconnect attempt ${attempt}/${MAX_ATTEMPTS}: resolving network path…` : 'Resolving network path…')
         updateTab(id, { status: 'connecting', message: attempt ? `Reconnecting (${attempt}/${MAX_ATTEMPTS})…` : 'Connecting…' })
+        // The previous connection's element was torn down when it ended, so this normally builds a fresh one.
+        const u = ui ?? (await mount())
+        if (dead()) return
         const prep = await window.api.invoke('rdp:prepare', {
           sessionId: id,
           instanceKey: tab.instanceKey,
@@ -294,7 +424,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
         // Ask for a desktop matching the pane (at native density when HiDPI is on) so "1:1" is crisp.
         const initial = desktopSizeFor(resRef.current, host.getBoundingClientRect(), hiDpiRef.current)
         const desktopSize = { width: initial.width, height: initial.height }
-        const config = ui
+        const config = u
           .configBuilder()
           .withDesktopSize(desktopSize)
           .withDestination(prep.destination)
@@ -307,10 +437,12 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           // Registers the Display Control virtual channel; without it the server ignores every resize request.
           .withExtension(displayControl(true))
           .build()
-        const session: NewSessionInfo = await ui.connect(config)
+        const session: NewSessionInfo = await u.connect(config)
         if (dead()) return
+        noteConnect()
+        clipQuietUntil.current = Date.now() + 5000
         // The component keeps its screen wrapper hidden until told otherwise (and hides it again when a session ends).
-        ui.setVisibility(true)
+        u.setVisibility(true)
         c.attempt = 0
         setPhase('connected')
         // The initial size carries no DPI. Send size and scale once the Display Control channel is up; it comes up a
@@ -323,9 +455,16 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           route: prep.route,
           message: `${rdp.user}@${prep.destination} · ${session.initialDesktopSize.width}×${session.initialDesktopSize.height}`
         })
-        const term = await session.run()
+        let term: Awaited<ReturnType<NewSessionInfo['run']>>
+        try {
+          term = await session.run()
+        } finally {
+          sessionEnded = true
+        }
         if (dead()) return
         const reason = term.reason()
+        // Release this connection's canvas and wasm memory now, not after the back-off.
+        unmount()
         say(`Session ended: ${reason}`)
         if (INTENTIONAL_END.test(reason)) {
           setPhase('closed')
@@ -339,9 +478,11 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           toast('error', `RDP ${tab.title}: ${TAKEN_OVER_MSG}`)
           return
         }
-        scheduleRetry(ui, `Connection lost (${reason}).`)
+        scheduleRetry(`Connection lost (${reason}).`)
       } catch (e) {
         if (dead()) return
+        // Whatever failed (prepare, connect, or run), the next attempt starts from a clean element.
+        unmount()
         const f = await describeFailure(e, id)
         if (dead()) return
         useStore.getState().noteOperationError(f.detail)
@@ -353,9 +494,25 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           toast('error', `RDP: ${f.message}`)
           return
         }
-        if (f.authExpired) { waitForSignIn(ui); return }
-        scheduleRetry(ui, f.message)
+        if (f.authExpired) { waitForSignIn(); return }
+        scheduleRetry(f.message)
       }
+    }
+
+    c.retryNow = () => {
+      clearTimers()
+      void connectOnce()
+    }
+    c.reconnect = () => {
+      clearTimers()
+      c.attempt = 0
+      void connectOnce()
+    }
+    c.cancel = () => {
+      clearTimers()
+      setPhase('closed')
+      say('Reconnect cancelled.')
+      updateTab(id, { status: 'closed', message: 'Disconnected (reconnect cancelled)' })
     }
 
     const start = async (): Promise<void> => {
@@ -369,48 +526,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
         return
       }
       if (dead()) return
-      el = document.createElement('iron-remote-desktop') as IronElement
-      el.setAttribute('scale', 'fit')
-      el.setAttribute('verbose', 'false')
-      el.setAttribute('flexcentre', 'true')
-      el.style.width = '100%'
-      el.style.height = '100%'
-      el.style.display = 'block'
-      // A backend copy that hands us each connected Session, for touch and on-screen keyboard input.
-      el.module = captureSessions((session) => { input.current.session = session })
-      host.appendChild(el)
-      if (mobile && el.shadowRoot) {
-        const style = document.createElement('style')
-        style.textContent = CONTAIN_CSS
-        el.shadowRoot.appendChild(style)
-      }
-
-      el.addEventListener('ready', (ev: Event) => {
-        const detail = (ev as CustomEvent).detail as UserInteraction & { irgUserInteraction?: UserInteraction }
-        const ui = detail.irgUserInteraction ?? detail
-        uiRef.current = ui
-        ui.onWarningCallback((w) => say(`warning: ${w}`))
-        ui.setEnableClipboard(true)
-        ui.setEnableAutoClipboard(true)
-        c.retryNow = () => {
-          clearTimers()
-          void connectOnce(ui)
-        }
-        c.reconnect = () => {
-          clearTimers()
-          c.attempt = 0
-          void connectOnce(ui)
-        }
-        c.cancel = () => {
-          clearTimers()
-          setPhase('closed')
-          say('Reconnect cancelled.')
-          updateTab(id, { status: 'closed', message: 'Disconnected (reconnect cancelled)' })
-        }
-        void waitForClipboardInit().then(() => {
-          if (!dead()) void connectOnce(ui)
-        })
-      })
+      void connectOnce()
     }
     void start()
 
@@ -430,12 +546,8 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
       clearTimers()
       ro.disconnect()
       clearTimeout(resizeTimer)
-      try {
-        uiRef.current?.shutdown()
-      } catch {
-        /* ignore */
-      }
-      el?.remove()
+      unmount()
+      untrack()
       void window.api.invoke('rdp:release', id)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -443,6 +555,12 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
   useEffect(() => {
     if (active) pushSize()
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    hostRef.current?.querySelector('iron-remote-desktop')?.toggleAttribute('data-contain', mobile || tiled)
+    // Back to a full pane: give Windows the pane's size again once the layout has settled.
+    if (!tiled) setTimeout(pushSize, 300)
+  }, [tiled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleHiDpi = (on: boolean): void => {
     setHiDpi(on)
@@ -575,22 +693,35 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
       `Message: ${tab.message ?? ''}`,
       `Request: user=${rdp.user} port=${rdp.port} forceRoute=${rdp.forceRoute ?? 'auto'}`,
       `Log file: ${main.path ?? 'n/a'}`,
-      '', '--- Session events ---', ...log, '', '--- App log (rdp/ssm/tunnel) ---', main.text
+      '', ...telemetryReport(), '', '--- Session events ---', ...log, '', '--- App log (rdp/ssm/tunnel) ---', main.text
     ]
     await window.api.invoke('clipboard:write', head.join('\n'))
     toast('success', 'Diagnostics copied to the clipboard')
+  }
+  /** Types text on the remote desktop as Unicode key events, so it works anywhere input does, the sign-in screen included. */
+  const typeText = (text: string): void => input.current.text(text.replace(/\r\n?/g, '\n'))
+  const paste = (): void => pasteFromClipboard(typeText, setPasteBox)
+  const copyRemoteClipboard = (): void => {
+    setRemoteClip(false)
+    void uiRef.current
+      ?.saveRemoteClipboardData()
+      .then(() => toast('success', 'Copied to this phone.'))
+      .catch((e: unknown) => {
+        const m = ironMessage(e)
+        toast('error', /did not send/.test(m) ? 'Nothing new on the desktop clipboard. Copy something there first.' : `Copy failed: ${m}`)
+      })
   }
   const syncClipboard = (): void =>
     void uiRef.current
       ?.sendClipboardData()
       .then(() => toast('success', 'Clipboard sent to the remote desktop.'))
-      .catch((e: unknown) => toast('error', `Clipboard sync failed: ${(e as Error).message ?? String(e)}`))
+      .catch((e: unknown) => toast('error', `Clipboard sync failed: ${ironMessage(e)}`))
 
   const setScaleMode = (m: 'fit' | 'real' | 'full'): void => {
     setScale(m)
-    const map = { fit: 1, full: 2, real: 3 } as const
+    scaleRef.current = m
     try {
-      uiRef.current?.setScale(map[m] as never)
+      uiRef.current?.setScale(SCALE_CODES[m] as never)
     } catch {
       /* ignore */
     }
@@ -616,6 +747,13 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           onInput={onKbInput}
           onBlur={() => input.current.releaseAll()}
         />
+      )}
+      {/* Floats over the desktop: a strip that took space would resize the Windows session on every copy. */}
+      {touch && remoteClip && (
+        <div className="m-clip-pill" role="status">
+          <button type="button" onClick={copyRemoteClipboard}><Icon.copy /> Copy desktop clipboard here</button>
+          <button type="button" aria-label="Dismiss" onClick={() => setRemoteClip(false)}><Icon.x /></button>
+        </div>
       )}
     </div>
   )
@@ -651,6 +789,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
           keys={RDP_KEYS}
           keyboardOpen={keyboardOpen}
           onKeyboard={toggleKeyboard}
+          onPaste={paste}
           onMore={() => setMobileMenu(true)}
           leading={
             <button type="button" className={`m-key wide ${rightClick ? 'on' : ''}`} aria-pressed={rightClick} aria-label="Right-click on next tap" onPointerDown={(e) => e.preventDefault()} onClick={() => setRightClick(!rightClick)}>
@@ -658,11 +797,14 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
             </button>
           }
         />
+        {pasteBox !== null && <PasteSheet initial={pasteBox} action="Type" onSend={(t) => { setPasteBox(null); typeText(t) }} onClose={() => setPasteBox(null)} />}
         {mobileMenu && (
           <Sheet title={tab.title} subtitle={<>{tab.message}<br />Tap to click · hold to right-click · drag to select · two fingers to scroll</>} onClose={() => setMobileMenu(false)}>
             <SheetItem icon={<Icon.keyboard />} disabled={tab.status !== 'connected'} onClick={() => { setMobileMenu(false); uiRef.current?.ctrlAltDel() }}>Send Ctrl+Alt+Del</SheetItem>
             <SheetItem icon={<Icon.windows />} disabled={tab.status !== 'connected'} onClick={() => { setMobileMenu(false); uiRef.current?.metaKey() }}>Send Windows key</SheetItem>
-            <SheetItem icon={<Icon.snippet />} disabled={tab.status !== 'connected'} onClick={() => { setMobileMenu(false); syncClipboard() }}>Send this phone's clipboard</SheetItem>
+            <SheetItem icon={<Icon.clipboard />} disabled={tab.status !== 'connected'} onClick={() => { setMobileMenu(false); paste() }}>Paste (types the text)</SheetItem>
+            <SheetItem icon={<Icon.copy />} disabled={tab.status !== 'connected'} onClick={() => { setMobileMenu(false); copyRemoteClipboard() }}>Copy desktop clipboard to this phone</SheetItem>
+            <SheetItem icon={<Icon.snippet />} disabled={tab.status !== 'connected'} onClick={() => { setMobileMenu(false); syncClipboard() }}>Put this phone's clipboard on the desktop</SheetItem>
             <SheetItem icon={<Icon.monitor />} hint={hiDpi ? 'On' : 'Off'} onClick={() => toggleHiDpi(!hiDpi)}>
               Sharp text (Retina)
               <span className="muted block whitespace-normal text-[12px]">Changes Windows display scaling; apps already open may draw wrong until you sign out.</span>
@@ -679,7 +821,7 @@ export default function RdpTab({ tab, active }: { tab: Tab; active: boolean }): 
 
   return (
     <div className="flex h-full flex-col">
-      <div className="panel flex items-center gap-2 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
+      <div className="rdp-toolbar panel flex items-center gap-2 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
         <span className="muted">{tab.message ?? 'Connecting…'}</span>
         <span className="flex-1" />
         {phase === 'waiting' && (

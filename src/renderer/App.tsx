@@ -29,6 +29,7 @@ import MobileApp from './components/mobile/MobileApp'
 export default function App(): ReactElement {
   const init = useStore((s) => s.init)
   const activeTab = useStore((s) => s.activeTab)
+  const gridView = useStore((s) => s.gridView)
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)
@@ -77,6 +78,7 @@ export default function App(): ReactElement {
       const editable = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       const modalOpen = !!document.querySelector('.modal-backdrop')
       const st = useStore.getState()
+      // In the all-sessions grid activeTab is the focused tile, so a desktop tile gets keys once it has been clicked.
       const activeIsRdp = st.tabs.some((tab) => tab.id === st.activeTab && tab.kind === 'rdp')
       if (editable || modalOpen || !activeIsRdp) e.stopImmediatePropagation()
     }
@@ -122,8 +124,8 @@ export default function App(): ReactElement {
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />
-          <div className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
-          <SessionPanes />
+          <div className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
+          <SessionPanes grid={gridView} />
           <TunnelBar />
         </main>
       </div>

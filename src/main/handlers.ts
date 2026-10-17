@@ -7,7 +7,7 @@ import { enabledRegions, scanAll, setInstanceState, findInstance } from './aws/i
 import { windowsPassword } from './aws/passwords'
 import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
-import { openSsh, writeSsh, resizeSsh, closeSsh, openExternalSsh } from './ssh/session'
+import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
 import { localHome, localList, localRealpath, localMkdir, localRename, localTrash, localReveal } from './localfs'
@@ -71,7 +71,8 @@ export const handlers: Handlers = {
   'ssh:open': (req) => openSsh(req),
   'ssh:write': async (id, data) => writeSsh(id, data),
   'ssh:resize': async (id, cols, rows) => resizeSsh(id, cols, rows),
-  'ssh:close': (id) => closeSsh(id),
+  'ssh:close': (id, opts) => closeSsh(id, opts),
+  'ssh:endShell': (id, name) => endDetachedShell(id, name),
   'ssh:external': (req) => openExternalSsh(req),
   'sftp:open': (req) => openSftp(req),
   'sftp:list': (id, path) => listSftp(id, path),
@@ -127,5 +128,12 @@ export const handlers: Handlers = {
   'phone:status': async () => phoneStatus(),
   'phone:configure': (patch) => configurePhoneAccess(patch),
   'phone:rotateToken': () => rotatePhoneToken(),
-  'diag:log': async (opts) => recentLog(opts?.lines, opts?.filter)
+  'diag:log': async (opts) => {
+    const r = recentLog(opts?.lines, opts?.filter)
+    // Main-process memory next to the renderer's, to tell which process is growing when the app slows down.
+    const m = process.memoryUsage()
+    const mb = (n: number): number => Math.round(n / 1048576)
+    const mem = `[main] up ${Math.round(process.uptime() / 3600)} h · rss ${mb(m.rss)} MB · heap ${mb(m.heapUsed)}/${mb(m.heapTotal)} MB · arrayBuffers ${mb(m.arrayBuffers)} MB`
+    return { ...r, text: `${mem}\n${r.text}` }
+  }
 }

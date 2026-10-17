@@ -37,6 +37,7 @@ export const defaultSettings: Settings = {
   defaultLinuxUser: '',
   defaultWindowsUser: 'Administrator',
   sshInitCommand: '',
+  persistentShells: true,
   phoneAccessEnabled: false,
   phoneAccessPort: 8321,
   phoneAccessBind: 'tailscale',

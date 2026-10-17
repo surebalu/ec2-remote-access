@@ -97,6 +97,13 @@ export default function SettingsDialog(): ReactElement | null {
           <span className="muted">{s.settings?.snippets.length ?? 0} saved</span>
           <button className="btn" onClick={() => s.set({ snippetsOpen: {} })}>Manage snippets…</button>
         </div>
+        <label className="muted">Keep shells running</label>
+        <div>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={draft.persistentShells ?? true} onChange={(e) => upd('persistentShells', e.target.checked)} /> Run SSH shells in tmux on Linux hosts
+          </label>
+          <div className="muted mt-0.5 text-[10px]">A dropped connection leaves the shell running, so Reconnect continues where you were: same user after <span className="mono">sudo su</span>, same directory, jobs still running. Closing a tab ends its shell; Detach leaves it running. Hosts without tmux get a plain shell (install with <span className="mono">sudo dnf install -y tmux</span>). Override per host in the connect dialog.</div>
+        </div>
         <label className="muted">Session logs</label>
         <div>
           <label className="flex items-center gap-2">

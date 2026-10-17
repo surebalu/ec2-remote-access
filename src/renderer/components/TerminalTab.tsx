@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
-import type { Snippet } from '@shared/types'
+import type { DetachedShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
 import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
@@ -12,10 +12,11 @@ import HostActions from './HostActions'
 import TerminalAppearancePane from './TerminalAppearancePane'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 import { Icon } from './icons'
-import { isMobile, useKeyboardOpen } from '../mobile'
+import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../mobile'
 import KeyBar from './mobile/KeyBar'
 import { applyStickyMods, keySequence, type StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
+import { CopySheet, PasteSheet } from './mobile/ClipboardSheets'
 
 /** Sends keystrokes to this session, or to every connected SSH pane of the split while broadcasting. */
 function writeInput(fromId: string, data: string): void {
@@ -48,6 +49,54 @@ function readMobileFontSize(): number {
 }
 const NO_MODS: StickyMods = { ctrl: false, alt: false }
 
+/** The buffer as plain text, with soft-wrapped rows joined back into the lines the program printed. */
+function bufferText(term: Terminal): string {
+  const buf = term.buffer.active
+  const lines: string[] = []
+  for (let n = 0; n < buf.length; n++) {
+    const line = buf.getLine(n)
+    if (!line) continue
+    // A row that continues on the next one keeps its trailing blanks: they are part of the line.
+    const text = line.translateToString(!buf.getLine(n + 1)?.isWrapped)
+    if (line.isWrapped && lines.length) lines[lines.length - 1] += text
+    else lines.push(text)
+  }
+  while (lines.length && !lines.at(-1)) lines.pop()
+  return lines.join('\n')
+}
+
+function idleText(sec: number | null): string {
+  if (sec === null) return ''
+  if (sec < 90) return 'idle just now'
+  if (sec < 5400) return `idle ${Math.round(sec / 60)} min`
+  if (sec < 172_800) return `idle ${Math.round(sec / 3600)} h`
+  return `idle ${Math.round(sec / 86_400)} days`
+}
+
+/** Persistent shells on the host that no tab shows (the app quit, a phone page was lost, a Detach), offered to resume. */
+function DetachedShells({ shells, mobile, onResume, onEnd, onDismiss }: { shells: DetachedShell[]; mobile: boolean; onResume: (name: string) => void; onEnd: (name: string) => void; onDismiss: () => void }): ReactElement {
+  return (
+    <div className={mobile ? 'm-shells' : 'shells-bar panel border-b px-2 py-1 text-[11px]'} style={mobile ? undefined : { borderColor: 'var(--border)' }}>
+      <div className="flex items-center gap-1.5">
+        <Icon.layers className="muted shrink-0" />
+        <span className="min-w-0 flex-1">{shells.length === 1 ? 'A shell from an earlier session is still running on this host.' : `${shells.length} shells from earlier sessions are still running on this host.`} Resume replaces this new one.</span>
+        <button className="btn btn-ghost btn-sm btn-icon" aria-label="Dismiss" title="Dismiss" onClick={onDismiss}><Icon.x /></button>
+      </div>
+      {shells.slice(0, 5).map((d) => (
+        <div key={d.name} className="shells-row flex items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate">
+            <span className="mono">{d.command || 'shell'}</span>
+            {d.path && <span className="muted"> in <span className="mono">{d.path}</span></span>}
+            {d.idleSec !== null && <span className="muted"> · {idleText(d.idleSec)}</span>}
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={() => onResume(d.name)}>Resume</button>
+          <button className="btn btn-sm" title="End this shell on the host" onClick={() => onEnd(d.name)}>End</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const SEARCH_DECOR = { matchBackground: '#f5a62366', activeMatchBackground: '#f5a623', matchOverviewRuler: '#f5a623', activeMatchColorOverviewRuler: '#f5a623' }
 
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -59,6 +108,13 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const snippetBtn = useRef<HTMLButtonElement>(null)
   const splitBtn = useRef<HTMLButtonElement>(null)
   const reconnectRef = useRef<() => void>(() => undefined)
+  const adoptRef = useRef<(name: string) => void>(() => undefined)
+  /**
+   * The tmux shell this tab shows (undefined = its own, named after the tab) and whether it has shown it yet: a
+   * reconnect then resumes it, and taking over another one prints that shell's earlier output first.
+   */
+  const shellRef = useRef<{ name?: string; shown: boolean; history: boolean }>({ shown: false, history: false })
+  const [detached, setDetached] = useState<DetachedShell[]>([])
   const [findOpen, setFindOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
@@ -77,6 +133,10 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const modsRef = useRef<StickyMods>(NO_MODS)
   const setMods = (m: StickyMods): void => { modsRef.current = m; setModsState(m) }
   const [mobileMenu, setMobileMenu] = useState(false)
+  /** Paste box contents while it is open (null = closed). */
+  const [pasteBox, setPasteBox] = useState<string | null>(null)
+  /** Terminal text shown for selecting and copying (null = closed). */
+  const [copyText, setCopyText] = useState<string | null>(null)
   const appTheme = useStore((s) => s.settings?.theme)
   const paneOpen = useStore((s) => s.terminalPaneOpen)
   const togglePane = useStore((s) => s.toggleTerminalPane)
@@ -146,25 +206,31 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     })
     ro.observe(el)
 
-    const connect = async (retry = false): Promise<void> => {
+    /** 'retry' reconnects (to the same shell when it is persistent); 'adopt' swaps in a shell left running on the host. */
+    const connect = async (mode: 'open' | 'retry' | 'adopt' = 'open'): Promise<void> => {
       if (opening || disposed) return
+      const retry = mode !== 'open'
       opening = true
       opened = false
       updateTab(id, { status: 'connecting', message: retry ? 'Reconnecting…' : 'Connecting…' })
       try {
         if (retry) {
           closingForRetry = true
-          await window.api.invoke('ssh:close', id)
+          // Taking over another shell ends the one this tab just started; a plain reconnect leaves it to be resumed.
+          await window.api.invoke('ssh:close', id, { endShell: mode === 'adopt' })
           closingForRetry = false
           if (disposed) return
-          term.writeln('\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
+          term.writeln(mode === 'adopt' ? '\r\n\x1b[90m──── Switching to the shell left running on the host ────\x1b[0m' : '\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
         }
         // A reused connection belongs to the tab that lent it; a reconnect logs in on its own.
         const request = retry ? { ...tab.request!, reuseSessionId: undefined } : tab.request!
-        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows })
+        const sh = shellRef.current
+        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown, shellHistory: sh.history })
         if (disposed) return
         opened = true
-        updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile })
+        if (info.persistent) shellRef.current = { name: sh.name, shown: true, history: false }
+        setDetached(info.detached ?? [])
+        updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent })
         if (useStore.getState().activeTab === id) term.focus()
       } catch (error) {
         const e = error as Error
@@ -175,7 +241,12 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         toast('error', e.message)
       } finally { opening = false; closingForRetry = false }
     }
-    reconnectRef.current = () => void connect(true)
+    reconnectRef.current = () => void connect('retry')
+    adoptRef.current = (name) => {
+      setDetached([])
+      shellRef.current = { name, shown: false, history: true }
+      void connect('adopt')
+    }
     void connect()
 
     return () => {
@@ -246,15 +317,47 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     if (active && !findOpen) termRef.current?.focus()
   }, [themeId, fontSize, active]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // xterm.js has no touch selection or context menu, so a long press on a phone opens the session menu (Paste,
+  // Select text). The touchend is cancelled so the tap iOS would synthesize cannot land on the sheet's backdrop.
+  useEffect(() => {
+    const el = ref.current
+    if (!mobile || !el) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let start: { x: number; y: number } | null = null
+    let fired = false
+    const cancel = (): void => { clearTimeout(timer); start = null }
+    const down = (e: TouchEvent): void => {
+      cancel()
+      fired = false
+      if (e.touches.length !== 1) return
+      start = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      timer = setTimeout(() => { start = null; fired = true; setMobileMenu(true) }, 550)
+    }
+    const move = (e: TouchEvent): void => {
+      if (start && Math.hypot(e.touches[0].clientX - start.x, e.touches[0].clientY - start.y) > 10) cancel()
+    }
+    const up = (e: TouchEvent): void => {
+      cancel()
+      if (fired) { fired = false; e.preventDefault() }
+    }
+    el.addEventListener('touchstart', down, { passive: true })
+    el.addEventListener('touchmove', move, { passive: true })
+    el.addEventListener('touchend', up, { passive: false })
+    el.addEventListener('touchcancel', cancel)
+    return () => {
+      cancel()
+      el.removeEventListener('touchstart', down)
+      el.removeEventListener('touchmove', move)
+      el.removeEventListener('touchend', up)
+      el.removeEventListener('touchcancel', cancel)
+    }
+  }, [mobile])
+
   /** Whole scrollback as plain text, downloaded as a file (a Save dialog in the desktop app). */
   const saveOutput = (): void => {
     const term = termRef.current
     if (!term) return
-    const buf = term.buffer.active
-    const lines: string[] = []
-    for (let n = 0; n < buf.length; n++) lines.push(buf.getLine(n)?.translateToString(true) ?? '')
-    while (lines.length && !lines.at(-1)) lines.pop()
-    const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'text/plain' }))
+    const url = URL.createObjectURL(new Blob([bufferText(term) + '\n'], { type: 'text/plain' }))
     const a = document.createElement('a')
     a.href = url
     a.download = `${tab.title.replace(/[^\w.@-]+/g, '_')}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.txt`
@@ -275,12 +378,25 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     setMobileFontSize(v)
     try { localStorage.setItem(MOBILE_FONT_KEY, String(v)) } catch { /* storage unavailable */ }
   }
-  const paste = async (): Promise<void> => {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (text) termRef.current?.paste(text)
-    } catch { toast('error', 'Clipboard not available. Paste from the keyboard instead (tap and hold in the terminal).') }
+  // term.paste rather than a raw write: it honours bracketed paste, so a shell that asks for it won't run pasted lines.
+  const paste = (): void => pasteFromClipboard((text) => termRef.current?.paste(text), setPasteBox)
+  const sendPasteBox = (text: string): void => {
+    setPasteBox(null)
+    termRef.current?.paste(text)
+    termRef.current?.focus()
   }
+
+  const endShell = (name: string): void => {
+    window.api.invoke('ssh:endShell', tab.id, name).then(
+      () => setDetached((d) => d.filter((x) => x.name !== name)),
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const shellsBar = detached.length > 0 && (
+    <DetachedShells shells={detached} mobile={mobile} onResume={(name) => adoptRef.current(name)} onEnd={endShell} onDismiss={() => setDetached([])} />
+  )
+  const canDetach = !!tab.persistent && !disconnected
+  const detach = (): void => void useStore.getState().closeTab(tab.id, { detach: true })
 
   if (mobile) {
     return (
@@ -291,18 +407,23 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
             <button className="btn btn-primary btn-sm" onClick={() => reconnectRef.current()}>Reconnect</button>
           </div>
         )}
-        <div ref={ref} className="min-h-0 min-w-0 flex-1" style={{ background }} />
+        {shellsBar}
+        <div ref={ref} className="m-term min-h-0 min-w-0 flex-1" style={{ background }} />
         <KeyBar
           mods={mods}
           onMods={(m) => { setMods(m); termRef.current?.focus() }}
           onKey={sendKey}
           keyboardOpen={keyboardOpen}
           onKeyboard={() => { if (keyboardOpen) termRef.current?.blur(); else termRef.current?.focus() }}
+          onPaste={paste}
           onMore={() => setMobileMenu(true)}
         />
+        {pasteBox !== null && <PasteSheet initial={pasteBox} action="Paste" onSend={sendPasteBox} onClose={() => setPasteBox(null)} />}
+        {copyText !== null && <CopySheet text={copyText} onClose={() => setCopyText(null)} />}
         {mobileMenu && (
           <Sheet title={tab.title} subtitle={tab.message} onClose={() => setMobileMenu(false)}>
-            <SheetItem icon={<Icon.snippet />} onClick={() => { setMobileMenu(false); void paste() }}>Paste</SheetItem>
+            <SheetItem icon={<Icon.clipboard />} onClick={() => { setMobileMenu(false); paste() }}>Paste</SheetItem>
+            <SheetItem icon={<Icon.copy />} onClick={() => { setMobileMenu(false); setCopyText(termRef.current ? bufferText(termRef.current) : '') }}>Select text to copy</SheetItem>
             {snippets.map((sn) => (
               <SheetItem key={sn.id} icon={<Icon.play />} disabled={tab.status !== 'connected'} hint={sn.run ? '↵' : undefined} onClick={() => { setMobileMenu(false); runSnippet(tab.id, sn) }}>
                 {sn.name} <span className="mono muted text-[12px]">{sn.command.split('\n')[0]}</span>
@@ -316,7 +437,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
             </div>
             {disconnected && <SheetItem icon={<Icon.refresh />} onClick={() => { setMobileMenu(false); reconnectRef.current() }}>Reconnect</SheetItem>}
             <SheetItem icon={<Icon.download />} onClick={() => { setMobileMenu(false); saveOutput() }}>Save output as text</SheetItem>
-            <SheetItem icon={<Icon.x />} danger onClick={() => { setMobileMenu(false); void useStore.getState().closeTab(tab.id) }}>{disconnected ? 'Close' : 'Disconnect'}</SheetItem>
+            {canDetach && <SheetItem icon={<Icon.layers />} onClick={() => { setMobileMenu(false); detach() }}>Detach (leave the shell running)</SheetItem>}
+            <SheetItem icon={<Icon.x />} danger onClick={() => { setMobileMenu(false); void useStore.getState().closeTab(tab.id) }}>{disconnected ? 'Close' : canDetach ? 'Disconnect and end the shell' : 'Disconnect'}</SheetItem>
           </Sheet>
         )}
       </div>
@@ -361,7 +483,12 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         <button onMouseDown={(e) => e.preventDefault()} className={`btn btn-ghost btn-sm btn-icon${paneOpen ? ' on' : ''}`} title={paneOpen ? 'Hide appearance pane' : 'Themes and font'} aria-pressed={paneOpen} onClick={() => togglePane()}>
           <Icon.panelRight filled={paneOpen} />
         </button>
-        <button className="btn btn-sm" onClick={() => void useStore.getState().closeTab(tab.id)}>
+        {canDetach && (
+          <button className="btn btn-sm" title="Close this tab but leave the shell running on the host; opening the host again offers to resume it" onClick={detach}>
+            Detach
+          </button>
+        )}
+        <button className="btn btn-sm" title={canDetach ? 'Close this tab and end its shell on the host' : undefined} onClick={() => void useStore.getState().closeTab(tab.id)}>
           {disconnected ? 'Close tab' : 'Disconnect'}
         </button>
       </div>
@@ -392,6 +519,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           {inSplit && <><MenuSep /><MenuItem onClick={() => { setMenu(null); useStore.getState().unsplit(tab.id) }}>Move this pane to its own tab</MenuItem></>}
         </Popover>
       )}
+      {shellsBar}
       {findOpen && (
         <div className="find-bar panel flex items-center gap-1.5 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
           <Icon.search className="muted" />
