@@ -60,15 +60,16 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       if (failSsh) throw new Error('Fixture: authentication failed')
       if (shellScenario) {
         const adopted = !!args[0].shellName
-        return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu', persistent: true, resumed: adopted, detached: adopted ? [] : [{ name: 'ec2ra-old1', command: 'bash', path: '/etc/systemd/system', idleSec: 7200 }] }
+        return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu', persistent: true, resumed: adopted, shellName: adopted ? args[0].shellName : 'ec2ra-fresh', shellLabel: adopted ? 'debug' : '', detached: adopted ? [] : [{ name: 'ec2ra-old1', label: 'debug', user: '3dxadmin', args: 'bash', preview: '3dxadmin@ip-10-1-2-144:/etc/systemd/system$', command: 'bash', path: '/etc/systemd/system', idleSec: 7200 }] }
       }
       return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu' }
     case 'ec2:health': return { instanceStatus: 'ok', systemStatus: 'ok', events: [], cpu: Array.from({ length: 36 }, (_, n) => ({ t: now - (36 - n) * 300000, v: 20 + 15 * Math.sin(n / 4) })), ssmLastPing: new Date(now - 90000).toISOString(), fetchedAt: now, errors: [] }
     case 'ssh:listShells': return [
-      { name: 'ec2ra-old1', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
-      { name: 'ec2ra-other', command: 'top', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
+      { name: 'ec2ra-old1', label: 'debug', user: '3dxadmin', args: 'bash', preview: '3dxadmin@ip-10-1-2-144:/etc/systemd/system$', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
+      { name: 'ec2ra-other', label: '', user: 'root', args: 'tail -f /var/log/messages', preview: 'Oct 17 21:40:01 ip-10-1-2-144 systemd[1]: Started Session 42.', command: 'tail', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
     ]
-    case 'ssh:switchShell': return { name: args[1] ?? 'ec2ra-new' }
+    case 'ssh:switchShell': return { name: args[1] ?? 'ec2ra-new', label: args[2]?.label ?? (args[1] === 'ec2ra-old1' ? 'debug' : '') }
+    case 'ssh:renameShell': return String(args[2]).trim()
     case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
@@ -171,9 +172,15 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('[data-host-key="${running.key}"] .btn-ssh').click()`)
     await until(`document.querySelectorAll('.tab').length === ${tabsBeforeShell + 1} && !!document.querySelector('.shells-bar')`)
     const shellTab = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].sessionId
-    assert.match(await js(`document.querySelector('.shells-bar').textContent`), /bash.*\/etc\/systemd\/system.*idle 2 h/)
+    assert.match(await js(`document.querySelector('.shells-bar').textContent`), /debug.*3dxadmin · bash.*idle 2 h.*3dxadmin@ip-10-1-2-144:\/etc\/systemd\/system\$/)
     await until(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Detach' && b.getClientRects().length)`)
     await screenshot('ssh-detached-shells.png')
+    // A brand-new unnamed shell offers a name field, which never takes the terminal's focus.
+    await until(`!!document.querySelector('.name-bar')`)
+    assert.notEqual(await js(`document.activeElement?.getAttribute('aria-label')`), 'Name this session', 'the name field does not steal focus from the terminal')
+    await js(`(() => { const t = document.querySelector('.name-bar input'); t.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(t, 'build'); t.dispatchEvent(new Event('input', { bubbles: true })); t.form.requestSubmit() })()`)
+    await until(`!document.querySelector('.name-bar') && document.querySelector('.tab.on .shell-chip')?.textContent === 'build'`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:renameShell').at(-1).args, [shellTab, 'ec2ra-fresh', 'build'])
     const switches = () => calls.filter((c) => c.channel === 'ssh:switchShell')
     const opensBeforeResume = calls.filter((c) => c.channel === 'ssh:open').length
     await click('Resume')
@@ -181,20 +188,45 @@ app.whenReady().then(async () => {
     for (let n = 0; n < 50 && !switches().length; n++) await new Promise((r) => setTimeout(r, 30))
     assert.deepEqual(switches().at(-1).args, [shellTab, 'ec2ra-old1', { endPrevious: true }], 'Resume switches in place and ends the shell the tab had just started')
     assert.equal(calls.filter((c) => c.channel === 'ssh:open').length, opensBeforeResume, 'Resume does not reconnect')
-    // Sessions list: shells on the host, switch this tab between them or start a new one.
+    // The resumed shell's name shows on its tab.
+    await until(`document.querySelector('.tab.on .shell-chip')?.textContent === 'debug'`)
+    // Sessions list: each shell by name, or by who and what runs in it and its last screen line.
     await click('Sessions')
-    await until(`!!document.querySelector('.popover .shell-row') && document.querySelectorAll('.popover .shell-row').length === 2`)
-    assert.match(await js(`document.querySelector('.popover').textContent`), /This tab.*top in \/root.*Running in the background/)
+    await until(`document.querySelectorAll('.popover .shell-item').length === 2`)
+    const rowText = (i) => js(`document.querySelectorAll('.popover .shell-item')[${i}].textContent`)
+    assert.match(await rowText(0), /debug.*this tab.*3dxadmin · bash.*3dxadmin@ip-10-1-2-144:\/etc\/systemd\/system\$/)
+    assert.match(await rowText(1), /Unnamed session.*root · tail -f \/var\/log\/messages.*idle just now.*systemd\[1\]: Started Session 42\./)
     await screenshot('ssh-sessions-list.png')
-    await js(`document.querySelectorAll('.popover .shell-row button.menu-item')[1].click()`)
+    // Name the unnamed one from the list.
+    await js(`document.querySelector('.popover button[aria-label="Rename session 2"]').click()`)
+    await until(`document.activeElement?.getAttribute('aria-label') === 'Session name'`)
+    await js(`(() => { const t = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(t, 'indexing'); t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
+    await until(`[...document.querySelectorAll('.popover .shell-name')].some((n) => n.textContent === 'indexing')`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:renameShell').at(-1).args, [shellTab, 'ec2ra-other', 'indexing'])
+    // A row switches this tab to that shell.
+    await js(`document.querySelectorAll('.popover .shell-item')[1].click()`)
     await until(`!document.querySelector('.popover')`)
     for (let n = 0; n < 50 && switches().length < 2; n++) await new Promise((r) => setTimeout(r, 30))
-    assert.deepEqual(switches().at(-1).args, [shellTab, 'ec2ra-other'])
+    assert.deepEqual(switches().at(-1).args.slice(0, 2), [shellTab, 'ec2ra-other'])
+    // A new session can be named as it starts.
     await click('Sessions')
-    await until(`!!document.querySelector('.popover .shell-row')`)
-    await click('New session in this tab')
+    await until(`!!document.querySelector('.popover .shell-new-btn')`)
+    await js(`document.querySelector('.popover .shell-new-btn').click()`)
+    await until(`document.activeElement?.getAttribute('aria-label') === 'New session name'`)
+    await js(`(() => { const t = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(t, 'third'); t.dispatchEvent(new Event('input', { bubbles: true })); t.form.requestSubmit() })()`)
     for (let n = 0; n < 50 && switches().length < 3; n++) await new Promise((r) => setTimeout(r, 30))
-    assert.deepEqual(switches().at(-1).args, [shellTab, null])
+    assert.deepEqual(switches().at(-1).args, [shellTab, null, { label: 'third' }])
+    await until(`document.querySelector('.tab.on .shell-chip')?.textContent === 'third'`)
+    // Open in a new tab: a tab of its own attached to that shell, on this tab's connection, replaying its history.
+    const tabsBeforeOpen = await js(`document.querySelectorAll('.tab').length`)
+    await click('Sessions')
+    await until(`document.querySelectorAll('.popover .shell-item').length === 2`)
+    await js(`document.querySelector('.popover button[aria-label^="Open"][aria-label$="in a new tab"]').click()`)
+    await until(`document.querySelectorAll('.tab').length === ${tabsBeforeOpen + 1}`)
+    const openedReq = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0]
+    assert.deepEqual([openedReq.shellName, openedReq.shellHistory, openedReq.reuseSessionId], ['ec2ra-other', true, shellTab])
+    await key('w', { metaKey: true })
+    await until(`document.querySelectorAll('.tab').length === ${tabsBeforeOpen}`)
     // A dropped tab cannot reach its host's shells, so Sessions waits until the connection is back.
     const sessionsShown = `[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Sessions' && b.getClientRects().length)`
     win.webContents.send('ssh:event', { sessionId: shellTab, type: 'closed', message: 'Disconnected' })

@@ -34,7 +34,7 @@ function uptime(since?: number): string {
 function tabTooltip(t: Tab): string {
   const route = t.route === 'ssm' ? 'SSM Session Manager' : t.route === 'direct' ? 'direct' : undefined
   const head = t.status === 'connected' ? `Connected ${uptime(t.connectedAt)}${route ? ` via ${route}` : ''}` : t.status
-  return [t.title, head, t.message].filter(Boolean).join('\n')
+  return [t.shellLabel ? `${t.title} · session "${t.shellLabel}"` : t.title, head, t.message].filter(Boolean).join('\n')
 }
 
 /** Tab strip rendered inside the title bar. Tabs that do not fit collapse into a "»" menu; the active tab always stays visible. */
@@ -139,6 +139,7 @@ export default function TerminalTabs(): ReactElement {
       <span className="dot" style={{ background: dotFor(t.status), animation: t.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
       {iconFor(t)}
       <span className="max-w-48 truncate">{t.title}</span>
+      {t.shellLabel && <span className="shell-chip">{t.shellLabel}</span>}
       {t.status === 'connected' && t.route && <span className={`route-chip ${t.route}`}>{t.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
       <button
         className="close"
@@ -259,6 +260,7 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
               <span className="dot" style={{ background: dotFor(t.status), animation: t.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
               {iconFor(t)}
               <span className="tile-title truncate">{t.title}</span>
+              {t.shellLabel && <span className="shell-chip">{t.shellLabel}</span>}
               {t.status === 'connected' && t.route && <span className={`route-chip ${t.route}`}>{t.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
               <span className="muted min-w-0 flex-1 truncate">{t.message ?? t.status}</span>
               <button className="btn btn-ghost btn-sm btn-icon" title="Open full size" aria-label={`Open ${t.title}`} onClick={() => s.setActive(t.id)}><Icon.maximize /></button>

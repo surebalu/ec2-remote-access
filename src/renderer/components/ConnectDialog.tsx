@@ -20,6 +20,7 @@ export default function ConnectDialog(): ReactElement | null {
   const [initCmd, setInitCmd] = useState(ov.initCommand ?? globalInit)
   const globalPersist = s.settings?.persistentShells ?? true
   const [persistShell, setPersistShell] = useState(ov.persistentShell ?? globalPersist)
+  const [shellLabel, setShellLabel] = useState('')
   const [remember, setRemember] = useState(true)
   const [busy, setBusy] = useState(false)
   const [password, setPassword] = useState('')
@@ -133,6 +134,7 @@ export default function ConnectDialog(): ReactElement | null {
         forceRoute: force,
         initCommand: initCmd,
         persistent: persistShell,
+        shellLabel: persistShell ? shellLabel.trim() || undefined : undefined,
         cols: 120,
         rows: 32
       }
@@ -232,6 +234,12 @@ export default function ConnectDialog(): ReactElement | null {
                   <input type="checkbox" checked={persistShell} onChange={(e) => setPersistShell(e.target.checked)} />
                   <span className="text-[11px]">Keep the shell running on the host (tmux){persistShell !== globalPersist && <span className="muted"> · differs from Settings</span>}</span>
                 </label>
+                {persistShell && (
+                  <>
+                    <label className="muted">Session name</label>
+                    <input className="input" maxLength={40} placeholder="optional, e.g. debug or indexing" title="Shown in the tab and in the Sessions list, and saved on the host with the shell" value={shellLabel} onChange={(e) => setShellLabel(e.target.value)} />
+                  </>
+                )}
               </>
             )}
           </>

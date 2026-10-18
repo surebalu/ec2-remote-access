@@ -285,6 +285,10 @@ export interface SshOpenRequest {
   shellName?: string
   /** The tab showed its shell before (a reconnect), so a missing one is reported as ended. */
   shellResume?: boolean
+  /** Name for the shell this tab creates (connect dialog). */
+  shellLabel?: string
+  /** Print the shell's earlier output before attaching: a new tab opening a shell that is already running. */
+  shellHistory?: boolean
   cols: number
   rows: number
 }
@@ -292,6 +296,13 @@ export interface SshOpenRequest {
 /** A persistent shell on a host that no tab is showing (the app quit, a phone page was lost, the user detached). */
 export interface DetachedShell {
   name: string
+  /** The name the user gave it, e.g. "debug" ('' = unnamed). Stored on the host with the shell. */
+  label: string
+  /** Owner and command line of what runs in the foreground, e.g. "3dxadmin" and "tail -f catalina.out". */
+  user: string
+  args: string
+  /** Last non-blank line on its screen: usually the prompt (user@host:dir) or the latest output. */
+  preview: string
   /** Foreground program of its pane, e.g. bash or top. */
   command: string
   /** Working directory of that program, when tmux can read it. */
@@ -322,6 +333,10 @@ export interface SshSessionInfo {
   persistent?: boolean
   /** Attached to a shell that was already running rather than starting one. */
   resumed?: boolean
+  /** The name of the shell this session shows ('' = unnamed). */
+  shellLabel?: string
+  /** tmux session id of that shell, for naming or switching it later. */
+  shellName?: string
   /** Other persistent shells on the host that no tab is showing, offered for resuming when this tab started a new one. */
   detached?: DetachedShell[]
 }

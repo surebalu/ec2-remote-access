@@ -17,6 +17,7 @@ import KeyBar from './mobile/KeyBar'
 import { applyStickyMods, keySequence, type StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
 import { CopySheet, PasteSheet } from './mobile/ClipboardSheets'
+import { DetachedShells, NameBar, ShellList } from './Shells'
 
 /** Sends keystrokes to this session, or to every connected SSH pane of the split while broadcasting. */
 function writeInput(fromId: string, data: string): void {
@@ -65,49 +66,6 @@ function bufferText(term: Terminal): string {
   return lines.join('\n')
 }
 
-function ago(sec: number): string {
-  if (sec < 90) return 'just now'
-  if (sec < 5400) return `${Math.round(sec / 60)} min`
-  if (sec < 172_800) return `${Math.round(sec / 3600)} h`
-  return `${Math.round(sec / 86_400)} days`
-}
-
-function idleText(sec: number | null): string {
-  return sec === null ? '' : `idle ${ago(sec)}`
-}
-
-/** One line about a shell in the session list: where it is shown and how long it has run. */
-function shellStatus(sh: HostShell): string {
-  const age = sh.ageSec !== null ? ` · started ${ago(sh.ageSec)}${sh.ageSec < 90 ? '' : ' ago'}` : ''
-  if (sh.current) return `This tab${age}`
-  if (sh.attached) return `Open in another tab or device${age}`
-  return `Running in the background${sh.idleSec !== null ? ` · ${idleText(sh.idleSec)}` : ''}${age}`
-}
-
-/** Persistent shells on the host that no tab shows (the app quit, a phone page was lost, a Detach), offered to resume. */
-function DetachedShells({ shells, mobile, onResume, onEnd, onDismiss }: { shells: DetachedShell[]; mobile: boolean; onResume: (name: string) => void; onEnd: (name: string) => void; onDismiss: () => void }): ReactElement {
-  return (
-    <div className={mobile ? 'm-shells' : 'shells-bar panel border-b px-2 py-1 text-[11px]'} style={mobile ? undefined : { borderColor: 'var(--border)' }}>
-      <div className="flex items-center gap-1.5">
-        <Icon.layers className="muted shrink-0" />
-        <span className="min-w-0 flex-1">{shells.length === 1 ? 'A shell from an earlier session is still running on this host.' : `${shells.length} shells from earlier sessions are still running on this host.`} Resume replaces this new one.</span>
-        <button className="btn btn-ghost btn-sm btn-icon" aria-label="Dismiss" title="Dismiss" onClick={onDismiss}><Icon.x /></button>
-      </div>
-      {shells.slice(0, 5).map((d) => (
-        <div key={d.name} className="shells-row flex items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate">
-            <span className="mono">{d.command || 'shell'}</span>
-            {d.path && <span className="muted"> in <span className="mono">{d.path}</span></span>}
-            {d.idleSec !== null && <span className="muted"> · {idleText(d.idleSec)}</span>}
-          </span>
-          <button className="btn btn-primary btn-sm" onClick={() => onResume(d.name)}>Resume</button>
-          <button className="btn btn-sm" title="End this shell on the host" onClick={() => onEnd(d.name)}>End</button>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 const SEARCH_DECOR = { matchBackground: '#f5a62366', activeMatchBackground: '#f5a623', matchOverviewRuler: '#f5a623', activeMatchColorOverviewRuler: '#f5a623' }
 
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -123,8 +81,10 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
    * The tmux shell this tab shows (undefined = its own, named after the tab) and whether it has shown it yet, so a
    * reconnect resumes that shell and can say when it has ended.
    */
-  const shellRef = useRef<{ name?: string; shown: boolean }>({ shown: false })
+  const shellRef = useRef<{ name?: string; shown: boolean }>({ name: tab.request?.shellName, shown: false })
   const [detached, setDetached] = useState<DetachedShell[]>([])
+  /** The tab's shell is brand new and unnamed: offer the name field. */
+  const [namePrompt, setNamePrompt] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
@@ -237,12 +197,15 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         // A reused connection belongs to the tab that lent it; a reconnect logs in on its own.
         const request = retry ? { ...tab.request!, reuseSessionId: undefined } : tab.request!
         const sh = shellRef.current
-        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown })
+        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown,
+          // Only the first connect names a new shell or replays the history of one opened from the session list.
+          shellLabel: retry ? undefined : request.shellLabel, shellHistory: !retry && !!request.shellHistory })
         if (disposed) return
         opened = true
-        if (info.persistent) shellRef.current = { name: sh.name, shown: true }
+        if (info.persistent) shellRef.current = { name: info.shellName ?? sh.name, shown: true }
         setDetached(info.detached ?? [])
-        updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent })
+        setNamePrompt(!!info.persistent && !info.resumed && !info.shellLabel)
+        updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent, shellLabel: info.shellLabel || undefined })
         if (useStore.getState().activeTab === id) term.focus()
       } catch (error) {
         const e = error as Error
@@ -402,11 +365,23 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   /** The banner's Resume: switch to the shell left running, in place, and end the new one this tab had just started. */
   const resumeShell = (name: string): void => {
     setDetached([])
+    setNamePrompt(false)
     window.api.invoke('ssh:switchShell', tab.id, name, { endPrevious: true }).then(
       (r) => {
         shellRef.current = { name: r.name, shown: true }
+        updateTab(tab.id, { shellLabel: r.label || undefined })
         termRef.current?.focus()
       },
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const saveSessionName = (label: string): void => {
+    const name = shellRef.current.name
+    setNamePrompt(false)
+    termRef.current?.focus()
+    if (!name || !label.trim()) return
+    window.api.invoke('ssh:renameShell', tab.id, name, label).then(
+      (stored) => updateTab(tab.id, { shellLabel: stored || undefined }),
       (e: Error) => toast('error', e.message)
     )
   }
@@ -423,27 +398,52 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       setShellSheet(false)
     })
   }
-  /** Shows another shell in this tab (null = a new one); the shell it leaves keeps running on the host. */
-  const switchShell = (sh: HostShell | null): void => {
-    if (sh?.current) return
-    if (sh?.attached && !window.confirm('That session is open in another tab or device. Show it here instead? It will close there.')) return
+  const takeOver = (sh: HostShell): boolean =>
+    !sh.attached || sh.current || window.confirm(`"${sh.label || 'That session'}" is open in another tab or device. Show it here instead? It will close there.`)
+  /** Shows another shell in this tab (null = a new one, named `label`); the shell it leaves keeps running on the host. */
+  const switchShell = (sh: HostShell | null, label?: string): void => {
+    if (sh?.current || (sh && !takeOver(sh))) return
     setMenu(null)
     setShellSheet(false)
-    window.api.invoke('ssh:switchShell', tab.id, sh?.name ?? null).then(
+    setNamePrompt(false)
+    window.api.invoke('ssh:switchShell', tab.id, sh?.name ?? null, { label }).then(
       (r) => {
         shellRef.current = { name: r.name, shown: true }
+        updateTab(tab.id, { shellLabel: r.label || undefined })
         setDetached([])
         termRef.current?.focus()
       },
       (e: Error) => toast('error', e.message)
     )
   }
-  const endOtherShell = (name: string): void => {
-    window.api.invoke('ssh:endShell', tab.id, name).then(
-      () => setShells((list) => list?.filter((x) => x.name !== name) ?? null),
+  const renameShell = (sh: HostShell, label: string): void => {
+    window.api.invoke('ssh:renameShell', tab.id, sh.name, label).then(
+      (stored) => {
+        setShells((list) => list?.map((x) => (x.name === sh.name ? { ...x, label: stored } : x)) ?? null)
+        if (sh.current) {
+          updateTab(tab.id, { shellLabel: stored || undefined })
+          setNamePrompt(false)
+        }
+      },
       (e: Error) => toast('error', e.message)
     )
   }
+  /** Opens a shell in a tab of its own (on this tab's connection), e.g. to keep "debug" and "indexing" side by side. */
+  const openShellInTab = (sh: HostShell): void => {
+    if (!takeOver(sh)) return
+    setMenu(null)
+    setShellSheet(false)
+    useStore.getState().openShellTab(tab.id, sh)
+  }
+  const endOtherShell = (sh: HostShell): void => {
+    window.api.invoke('ssh:endShell', tab.id, sh.name).then(
+      () => setShells((list) => list?.filter((x) => x.name !== sh.name) ?? null),
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const shellList = (variant: 'menu' | 'sheet'): ReactElement => (
+    <ShellList shells={shells} variant={variant} onSwitch={(sh) => switchShell(sh)} onNew={(label) => switchShell(null, label)} onRename={renameShell} onOpenInTab={openShellInTab} onEnd={endOtherShell} />
+  )
   const detach = (): void => void useStore.getState().closeTab(tab.id, { detach: true })
 
   if (mobile) {
@@ -456,6 +456,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           </div>
         )}
         {shellsBar}
+        {namePrompt && canDetach && <NameBar mobile onSave={saveSessionName} onDismiss={() => setNamePrompt(false)} />}
         <div ref={ref} className="m-term min-h-0 min-w-0 flex-1" style={{ background }} />
         <KeyBar
           mods={mods}
@@ -469,21 +470,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         {pasteBox !== null && <PasteSheet initial={pasteBox} action="Paste" onSend={sendPasteBox} onClose={() => setPasteBox(null)} />}
         {copyText !== null && <CopySheet text={copyText} onClose={() => setCopyText(null)} />}
         {shellSheet && (
-          <Sheet title="Sessions on this host" subtitle="Switch this tab to another session; the one you leave keeps running." onClose={() => setShellSheet(false)}>
-            {shells === null && <div className="m-sheet-item muted">Loading…</div>}
-            {shells?.map((sh, i) => (
-              <div key={sh.name} className="m-sheet-item as-row">
-                <button className="flex min-w-0 flex-1 items-center gap-3 text-left" disabled={sh.current} onClick={() => switchShell(sh)}>
-                  <span className="m-sheet-icon">{sh.current ? '✓' : <Icon.terminal />}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{i + 1} · <span className="mono">{sh.command || 'shell'}</span>{sh.path && <span className="muted"> in <span className="mono">{sh.path}</span></span>}</span>
-                    <span className="muted block truncate text-[12px]">{shellStatus(sh)}</span>
-                  </span>
-                </button>
-                {!sh.current && !sh.attached && <button className="btn" onClick={() => endOtherShell(sh.name)}>End</button>}
-              </div>
-            ))}
-            <SheetItem icon={<Icon.plus />} onClick={() => switchShell(null)}>New session in this tab</SheetItem>
+          <Sheet title="Sessions on this host" onClose={() => setShellSheet(false)}>
+            {shellList('sheet')}
           </Sheet>
         )}
         {mobileMenu && (
@@ -580,23 +568,9 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         </Popover>
       )}
       {menu === 'shells' && (
-        <Popover anchor={shellsBtn.current} align="right" width={360} onClose={() => { setMenu(null); termRef.current?.focus() }}>
+        <Popover anchor={shellsBtn.current} align="right" width={420} onClose={() => { setMenu(null); termRef.current?.focus() }}>
           <MenuLabel>Sessions on this host</MenuLabel>
-          {shells === null && <div className="muted px-3 py-2">Loading…</div>}
-          {shells?.map((sh, i) => (
-            <div key={sh.name} className="shell-row flex items-center">
-              <button className={`menu-item min-w-0 flex-1 ${sh.current ? 'on' : ''}`} disabled={sh.current} title={sh.attached && !sh.current ? 'Open elsewhere: switching shows it here and closes it there' : undefined} onClick={() => switchShell(sh)}>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{i + 1} · <span className="mono">{sh.command || 'shell'}</span>{sh.path && <span className="muted"> in <span className="mono">{sh.path}</span></span>}</span>
-                  <span className="muted block truncate text-[10px]">{shellStatus(sh)}</span>
-                </span>
-              </button>
-              {!sh.current && !sh.attached && <button className="btn btn-ghost btn-sm mr-1" title="End this session on the host" onClick={() => endOtherShell(sh.name)}>End</button>}
-            </div>
-          ))}
-          <MenuSep />
-          <MenuItem onClick={() => switchShell(null)}>New session in this tab</MenuItem>
-          <div className="muted px-3 pb-1 pt-0.5 text-[10px]">The session you switch away from keeps running.</div>
+          {shellList('menu')}
         </Popover>
       )}
       {menu === 'split' && (
@@ -612,6 +586,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         </Popover>
       )}
       {shellsBar}
+      {namePrompt && canDetach && <NameBar mobile={false} onSave={saveSessionName} onDismiss={() => { setNamePrompt(false); termRef.current?.focus() }} />}
       {findOpen && (
         <div className="find-bar panel flex items-center gap-1.5 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
           <Icon.search className="muted" />

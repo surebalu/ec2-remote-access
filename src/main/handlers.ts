@@ -7,7 +7,7 @@ import { enabledRegions, scanAll, setInstanceState, findInstance } from './aws/i
 import { windowsPassword } from './aws/passwords'
 import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
-import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, openExternalSsh } from './ssh/session'
+import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
 import { localHome, localList, localRealpath, localMkdir, localRename, localTrash, localReveal } from './localfs'
@@ -75,6 +75,7 @@ export const handlers: Handlers = {
   'ssh:endShell': (id, name) => endDetachedShell(id, name),
   'ssh:listShells': (id) => listShells(id),
   'ssh:switchShell': (id, name, opts) => switchShell(id, name, opts),
+  'ssh:renameShell': (id, name, label) => renameShell(id, name, label),
   'ssh:external': (req) => openExternalSsh(req),
   'sftp:open': (req) => openSftp(req),
   'sftp:list': (id, path) => listSftp(id, path),
