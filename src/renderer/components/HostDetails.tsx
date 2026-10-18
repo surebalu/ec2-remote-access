@@ -124,6 +124,7 @@ export default function HostDetails(): ReactElement | null {
         <button className="btn" disabled={!available} onClick={() => openFilesFor(i.key)}><Icon.folder /> Files</button>
         <button className="btn" disabled={i.state !== 'running'} onClick={() => s.set({ connectFor: { kind: i.platform === 'windows' ? 'rdp' : 'ssh', key: i.key } })}>Connection options</button>
         {!i.manual && <button className="btn" disabled={!i.ssmOnline || i.state !== 'running'} title={i.ssmOnline ? 'Forward a local port through SSM' : 'Needs an online SSM agent'} onClick={() => s.set({ portForwardFor: { key: i.key } })}><Icon.plug /> Forward port</button>}
+        {!i.manual && <button className="btn" disabled={!i.ssmOnline || i.state !== 'running'} title={i.ssmOnline ? 'Run a shell command here through SSM Run Command' : 'Needs an online SSM agent'} onClick={() => s.set({ runCommandFor: { keys: [i.key] } })}><Icon.broadcast /> Run command</button>}
         {!i.manual && <button className="btn" title={`This instance in the ${i.profile} AWS console, signed in`} onClick={() => openInConsole(i)}><Icon.globe /> AWS console</button>}
         <button className="btn" onClick={() => void s.toggleFavorite(i.key)}><Icon.star filled={s.isFavorite(i.key)} />{s.isFavorite(i.key) ? 'Unfavorite' : 'Favorite'}</button>
       </div>

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome } from '@shared/browser'
 import type { Instance } from '@shared/types'
-import { routeOf, useStore, visibleInstances } from '../store'
+import { filteredInstances, routeOf, useStore, visibleInstances } from '../store'
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
@@ -48,6 +48,7 @@ function commands(): Command[] {
     { id: 'hosts', title: 'Go to hosts', hint: '⌘1', icon: Icon.cloud, run: () => s.setActive('hosts') },
     { id: 'notes', title: 'Open notes', keywords: 'obsidian markdown vault', hint: '⌘⇧N', icon: Icon.note, run: () => s.openNotes() },
     { id: 'notes-today', title: "Open today's note", keywords: 'daily journal obsidian', icon: Icon.note, run: () => void window.api.invoke('notes:daily').then((p) => s.openNotes(p)) },
+    { id: 'run-command', title: 'Run a command on hosts…', keywords: 'ssm run command send fleet bulk script shell powershell many all', icon: Icon.broadcast, run: () => s.set({ runCommandFor: { keys: filteredInstances(s).filter((i) => !i.manual && i.state === 'running' && i.ssmOnline).map((i) => i.key) } }) },
     { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
     { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', icon: Icon.board, run: () => s.openBoard() },
     { id: 'terminal', title: 'New terminal tab', keywords: 'local shell zsh warp console', hint: '⌃`', icon: Icon.console, run: () => s.openTerminal({ newTab: true }), when: hasBrowser() },

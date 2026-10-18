@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useEffect, type ReactElement } from 'react'
 import { useStore } from '../store'
 import { Icon } from './icons'
 
@@ -6,6 +6,19 @@ import { Icon } from './icons'
 export default function AuthBanner(): ReactElement | null {
   const s = useStore()
   const info = s.authState()
+  // While the app is in the background the banner goes unseen, so the Mac app also posts one notification per expiry.
+  const key = info.kind === 'ok' ? null : info.key
+  useEffect(() => {
+    if (!key || document.hasFocus() || !/\bElectron\//.test(navigator.userAgent) || typeof Notification === 'undefined' || Notification.permission === 'denied') return
+    const now = useStore.getState().authState()
+    if (now.kind === 'ok') return
+    const n = new Notification(now.kind === 'expired' ? 'AWS sign-in expired' : `AWS sign-in expires in ${now.minutesLeft} min`, {
+      body: 'Click to sign in again so scans and new connections keep working.',
+      silent: true
+    })
+    n.onclick = () => { window.focus(); void useStore.getState().refreshToken() }
+    return () => n.close()
+  }, [key])
   if (info.kind === 'ok' || s.authBannerDismissedFor === info.key) return null
   const expired = info.kind === 'expired'
   return (

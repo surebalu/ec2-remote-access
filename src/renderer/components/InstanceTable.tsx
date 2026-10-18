@@ -7,8 +7,11 @@ import { Icon } from './icons'
 import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
 import HostFilters, { ScanNotice } from './HostFilters'
+import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 
 type SortKey = 'name' | 'profile' | 'state' | 'osHint' | 'address' | 'instanceType'
+
+const GROUP_LABELS: Record<GroupBy, string> = { account: 'Account', os: 'OS', none: 'None' }
 
 function RouteBadge({ i }: { i: Instance }): ReactElement {
   const settings = useStore((s) => s.settings)
@@ -36,6 +39,8 @@ export default function InstanceTable(): ReactElement {
   const s = useStore()
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 })
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null)
+  const [groupMenu, setGroupMenu] = useState(false)
+  const groupBtn = useRef<HTMLButtonElement>(null)
   const tableRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const row = [...(tableRef.current?.querySelectorAll<HTMLElement>('[data-host-key]') ?? [])].find((el) => el.dataset.hostKey === s.selectedKey)
@@ -110,6 +115,10 @@ export default function InstanceTable(): ReactElement {
   /** Account-level SSH defaults make the SSH button connect immediately; shift-click always opens the dialog. */
   const quickSsh = (i: Instance, ev?: { shiftKey?: boolean }): void => openSshFor(i.key, !!ev?.shiftKey)
 
+  /** Hosts that can take a Run Command right now (running, SSM agent online). */
+  const canRunCmd = (i: Instance): boolean => !i.manual && i.state === 'running' && i.ssmOnline
+  const runOn = (list: Instance[]): void => s.set({ runCommandFor: { keys: list.filter(canRunCmd).map((i) => i.key) } })
+
   const canConnect = (i: Instance): boolean => {
     const r = routeOf(i, s.settings).route
     return r === 'direct' || r === 'ssm'
@@ -142,31 +151,26 @@ export default function InstanceTable(): ReactElement {
         </div>
         <HostFilters />
         <span className="flex-1" />
+        <button className="btn btn-sm" disabled={!rows.some(canRunCmd)} title="Run a shell command on the hosts listed here, through SSM Run Command" onClick={() => runOn(rows)}>
+          <Icon.broadcast /> Run command
+        </button>
         <span className="muted text-[11px]">
           <span className="mono text-2 font-semibold">{rows.length}</span> of {visibleInstances(s).length}
         </span>
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="muted text-[11px]">Group by</span>
-          <div className="seg">
-            {(
-              [
-                ['account', 'Environment'],
-                ['os', 'OS'],
-                ['none', 'None']
-              ] as [GroupBy, string][]
-            ).map(([v, l]) => (
-              <button key={v} className={groupBy === v ? 'on' : ''} onClick={() => void s.saveSettings({ groupBy: v })}>
-                {l}
-              </button>
+        <button ref={groupBtn} type="button" className="filter-chip" aria-haspopup="menu" aria-expanded={groupMenu} title="Group the hosts" onClick={() => setGroupMenu(!groupMenu)}>
+          <span className="muted">Group</span> {GROUP_LABELS[groupBy]} <Icon.caret />
+        </button>
+        {groupMenu && (
+          <Popover anchor={groupBtn.current} align="right" width={210} onClose={() => setGroupMenu(false)}>
+            <MenuLabel>Group by</MenuLabel>
+            {(Object.keys(GROUP_LABELS) as GroupBy[]).map((v) => (
+              <MenuItem key={v} on={groupBy === v} onClick={() => { setGroupMenu(false); void s.saveSettings({ groupBy: v }) }}>{GROUP_LABELS[v]}</MenuItem>
             ))}
-          </div>
-          <button className="btn btn-ghost btn-sm btn-icon" title="Collapse all groups" aria-label="Collapse all groups" disabled={groupBy === 'none'} onClick={() => void s.setAllGroups(groupKeys, true)}>
-            <Icon.chevron />
-          </button>
-          <button className="btn btn-ghost btn-sm btn-icon" title="Expand all groups" aria-label="Expand all groups" disabled={groupBy === 'none'} onClick={() => void s.setAllGroups(groupKeys, false)}>
-            <Icon.chevron open />
-          </button>
-        </div>
+            <MenuSep />
+            <MenuItem disabled={groupBy === 'none'} onClick={() => { setGroupMenu(false); void s.setAllGroups(groupKeys, true) }}>Collapse all groups</MenuItem>
+            <MenuItem disabled={groupBy === 'none'} onClick={() => { setGroupMenu(false); void s.setAllGroups(groupKeys, false) }}>Expand all groups</MenuItem>
+          </Popover>
+        )}
       </div>
       <ScanNotice />
       <div ref={tableRef} className="panel mx-4 mb-3 min-h-0 flex-1 overflow-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
@@ -211,6 +215,15 @@ export default function InstanceTable(): ReactElement {
                     )}
                     <span className="group-count">{g.rows.length} host{g.rows.length === 1 ? '' : 's'}</span>
                     <span className="flex-1" />
+                    {g.rows.some(canRunCmd) && (
+                      <button
+                        className="btn btn-ghost btn-sm group-run"
+                        title={`Run a command on the ${g.rows.filter(canRunCmd).length} host(s) here that can take one`}
+                        onClick={(e) => { e.stopPropagation(); runOn(g.rows) }}
+                      >
+                        <Icon.broadcast /> Run command
+                      </button>
+                    )}
                     <span className="muted text-[10.5px]" title="Hosts with a connection route right now (SSM or a reachable address)">
                       {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} reachable
                     </span>
@@ -439,6 +452,7 @@ function ContextMenu({
       {item('RDP with options…', () => s.set({ connectFor: { kind: 'rdp', key: i.key } }), i.state !== 'running')}
       {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), i.state !== 'running')}
       {!i.manual && item('Forward a port…', () => s.set({ portForwardFor: { key: i.key } }), !i.ssmOnline || i.state !== 'running')}
+      {!i.manual && item('Run a command…', () => s.set({ runCommandFor: { keys: [i.key] } }), !i.ssmOnline || i.state !== 'running')}
       {i.platform === 'windows' && !i.manual && item('Get Windows password', () => s.set({ passwordFor: i.key }))}
       {!i.manual && item('Open in AWS console', () => openInConsole(i))}
       {i.manual && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}

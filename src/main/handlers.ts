@@ -24,6 +24,7 @@ import { getCredential, setCredential, deleteCredential, credentialKeys } from '
 import { listTunnels, closeTunnel } from './tunnels'
 import { openPortForward } from './portForward'
 import { hostHealth } from './aws/health'
+import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
@@ -186,6 +187,10 @@ export const handlers: Handlers = {
     awsCli: getSettings().awsCliPath || findBinary('aws'),
     windowsApp: hasWindowsApp()
   }),
+  'run:start': (req) => startRun(req),
+  'run:status': async (id) => runStatus(id),
+  'run:cancel': (id) => cancelRun(id),
+  'run:list': async () => listRuns(),
   'app:about': async () => ({
     version: APP_VERSION,
     electron: process.versions.electron ?? null,

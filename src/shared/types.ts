@@ -159,6 +159,8 @@ export interface Settings {
   sshInitCommand: string
   /** Run SSH shells inside tmux on Linux hosts so a dropped connection leaves them running and Reconnect resumes them. */
   persistentShells: boolean
+  /** An icon in the macOS menu bar listing favorite hosts to connect to (Electron only). */
+  menuBarIcon: boolean
   /** Folder of Markdown notes ('' = the vault Obsidian has open, else ~/Documents/EC2 Remote Access/Notes). */
   notesDir: string
   /** Subfolder of the notes folder that holds one note per host. */
@@ -478,6 +480,48 @@ export interface BrowserState {
 }
 
 /** Where notes live (main/notes.ts) and how that was decided. */
+/** What the menu-bar icon asks the app window to do (sent to the Mac's own window only, never to paired phones). */
+export type AppCommand = { kind: 'connect'; key: string } | { kind: 'switcher' } | { kind: 'scan' }
+
+/* ---------- Run Command (SSM SendCommand on many hosts) ---------- */
+
+export type RunStatus = 'pending' | 'running' | 'success' | 'failed' | 'timed-out' | 'cancelled' | 'skipped' | 'error'
+
+export interface RunTarget {
+  key: string
+  name: string
+  profile: string
+  region: string
+  instanceId: string
+  platform: Platform
+  status: RunStatus
+  exitCode?: number
+  stdout?: string
+  stderr?: string
+  /** Why a host was skipped or the send failed, in words. */
+  message?: string
+  commandId?: string
+  startedAt?: number
+  endedAt?: number
+}
+
+export interface RunState {
+  id: string
+  command: string
+  timeoutSec: number
+  startedAt: number
+  /** Set once every host has finished (or been skipped). */
+  finishedAt?: number
+  targets: RunTarget[]
+}
+
+export interface RunCommandRequest {
+  keys: string[]
+  command: string
+  /** How long a host may run the command before SSM stops it (default 600). */
+  timeoutSec?: number
+}
+
 /** What Settings → About shows: the build and where the app keeps its data. */
 export interface AppAbout {
   version: string

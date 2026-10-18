@@ -23,8 +23,10 @@ import PortForwardDialog from './components/PortForwardDialog'
 import SnippetsDialog from './components/SnippetsDialog'
 import WorkspaceDialog from './components/WorkspaceDialog'
 import ShortcutsDialog from './components/ShortcutsDialog'
+import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
+import { openDefaultFor } from './quickConnect'
 import MobileApp from './components/mobile/MobileApp'
 
 export default function App(): ReactElement {
@@ -45,6 +47,7 @@ export default function App(): ReactElement {
   const snippetsOpen = useStore((s) => s.snippetsOpen)
   const workspaceSaveOpen = useStore((s) => s.workspaceSaveOpen)
   const shortcutsOpen = useStore((s) => s.shortcutsOpen)
+  const runCommandFor = useStore((s) => s.runCommandFor)
   const profiles = useStore((s) => s.profiles)
   const manualCount = useStore((s) => s.settings?.manualHosts.length ?? 0)
   const settingsLoaded = useStore((s) => !!s.settings)
@@ -72,6 +75,14 @@ export default function App(): ReactElement {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
+
+  // The menu-bar icon (src/main/tray.ts) asks the window to connect to a favorite, find a host or rescan.
+  useEffect(() => window.api.on('app:command', (c) => {
+    const st = useStore.getState()
+    if (c.kind === 'connect') openDefaultFor(c.key)
+    else if (c.kind === 'switcher') { if (!st.quickSwitcherOpen) st.openQuickSwitcher() }
+    else if (c.kind === 'scan') void st.scan()
+  }), [])
 
   // ⌘B shows or hides the hosts sidebar. Here rather than in the sidebar, which unmounts while hidden; on document so
   // the RDP key guard on window cannot swallow it, and never when an editor used the key (bold in Notes).
@@ -122,6 +133,7 @@ export default function App(): ReactElement {
       {snippetsOpen && <SnippetsDialog />}
       {workspaceSaveOpen && <WorkspaceDialog />}
       {shortcutsOpen && <ShortcutsDialog />}
+      {runCommandFor && <RunCommandDialog key={runCommandFor.runId ?? runCommandFor.keys.join('|')} />}
       <Toasts />
     </>
   )

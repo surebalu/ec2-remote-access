@@ -67,6 +67,15 @@ app.on('session-created', (ses) => {
 })
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
+// Run Command: runs the fixture "sent", and how they come back (the production host succeeds, the others fail).
+const runsSent = []
+const runState = (r) => {
+  const done = Date.now() - r.startedAt > 900
+  const targets = r.targets.map((t) => (!done ? { ...t, status: 'running' } : t.name === 'web-prod-01'
+    ? { ...t, status: 'success', exitCode: 0, stdout: ' 10:42:01 up 3 days,  2:11,  0 users,  load average: 0.08, 0.03, 0.01\n', startedAt: r.startedAt, endedAt: r.startedAt + 900 }
+    : { ...t, status: 'failed', exitCode: 1, stderr: 'df: /data: No such file or directory\n', startedAt: r.startedAt, endedAt: r.startedAt + 900 }))
+  return { ...r, targets, finishedAt: done ? r.startedAt + 900 : undefined }
+}
 // Whiteboards main has saved (boards:*), and the images added to notes.
 const boardsSaved = {}
 const noteImages = []
@@ -137,6 +146,14 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
     ]
     case 'browser:fill': return ['username', 'password']
+    case 'run:start': {
+      const r = { id: `run-${runsSent.length + 1}`, command: args[0].command, timeoutSec: args[0].timeoutSec ?? 600, startedAt: Date.now(), targets: args[0].keys.map((k) => { const i = [running, stopped, stale].find((x) => x.key === k); return { key: k, name: i.name, profile: i.profile, region: i.region, instanceId: i.instanceId, platform: 'linux', status: 'pending' } }) }
+      runsSent.push(r)
+      return r
+    }
+    case 'run:status': { const r = runsSent.find((x) => x.id === args[0]); return r ? runState(r) : null }
+    case 'run:list': return runsSent.map(runState).reverse()
+    case 'run:cancel': return
     case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
     case 'boards:load': return boardsSaved[args[0]] ? structuredClone(boardsSaved[args[0]]) : null
     case 'boards:save': boardsSaved[args[0].id] = structuredClone(args[0]); return
@@ -178,6 +195,9 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
 
 app.whenReady().then(async () => {
   app.dock?.hide()
+  // Nothing from a test run may reach the desktop: no notifications from the hidden windows.
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission !== 'notifications')
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, done) => done(permission !== 'notifications'))
   await new Promise((r) => webServer.listen(0, '127.0.0.1', r))
   webPort = webServer.address().port
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
@@ -1224,6 +1244,31 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'restored tabs')
     for (let n = 0; n < 60 && opens().length < opensBefore + 1; n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'restored shell starts in its folder')
+
+    // Run Command on the hosts listed: a confirmation for production, then each host's result and output; retry the failed.
+    await tjs(`document.querySelector('button[aria-label="Hosts"]').click()`)
+    await tuntil(`!!document.querySelector('[data-host-key]')`, 'hosts view')
+    await tjs(`[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Run command' && !b.closest('tr')).click()`)
+    await tuntil(`!!document.querySelector('.rc .rc-count')`, 'run command dialog')
+    const runnable = Number(await tjs(`document.querySelector('.rc .rc-count').textContent`))
+    assert.ok(runnable >= 1, 'the listed running hosts with SSM are targets')
+    await tjs(`(() => { const a = document.querySelector('.rc-command'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, 'uptime && df -h /data'); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tjs(`window.__confirmed = []; window.confirm = (m) => { window.__confirmed.push(m); return true }; 0`)
+    await tjs(`document.querySelector('.rc-foot .btn-primary').click()`)
+    await tuntil(`document.querySelectorAll('.rc-result').length === ${runnable} && !!document.querySelector('.rc-chip.ok')`, 'results list')
+    assert.match(await tjs(`window.__confirmed[0] ?? ''`), /including production/, 'production asks first')
+    assert.deepEqual(runsSent.at(-1).command, 'uptime && df -h /data')
+    await tuntil(`document.querySelector('.rc-chip.ok')?.textContent.includes('1 succeeded') && !document.querySelector('.rc-chip.run')`, 'run finishes')
+    await tjs(`[...document.querySelectorAll('.rc-result-head')].find((b) => b.textContent.includes('web-prod-01')).click()`)
+    await tuntil(`document.querySelector('.rc-pre')?.textContent.includes('load average')`, 'output shown')
+    await tshot('run-command.png')
+    if (runnable > 1) {
+      await tjs(`[...document.querySelectorAll('.rc-foot button')].find((b) => b.textContent.startsWith('Retry failed')).click()`)
+      await tuntil(`document.querySelectorAll('.rc-result').length === ${runnable - 1}`, 'retry runs only the failed hosts')
+      assert.equal(runsSent.at(-1).targets.length, runnable - 1)
+    }
+    await tjs(`[...document.querySelectorAll('.rc-foot button')].find((b) => b.textContent === 'Done').click()`)
+    await tuntil(`!document.querySelector('.rc')`, 'dialog closes')
 
     // The Whiteboard: pen, shapes, a sticky note, selecting, deleting, undo, saving, a second board, and a PNG into today's note.
     await tjs(`document.querySelector('button[aria-label="Whiteboard"]').click()`)

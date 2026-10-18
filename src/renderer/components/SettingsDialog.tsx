@@ -24,6 +24,8 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
 ]
 
 const LAST_SECTION = 'ui.settingsSection'
+/** The Mac app itself, not a browser on the gateway (the menu-bar icon belongs to the Mac). */
+const IN_ELECTRON = /\bElectron\//.test(navigator.userAgent)
 
 /** A group of rows on a card, as in System Settings. */
 function Group({ title, children }: { title?: string; children: ReactNode }): ReactElement {
@@ -112,6 +114,11 @@ export default function SettingsDialog(): ReactElement | null {
             ))}
           </div>
         </Row>
+        {IN_ELECTRON && (
+          <Row label="Show in the menu bar" hint="Your favorite hosts one click away, plus Find a host and Rescan.">
+            <Toggle label="Show in the menu bar" checked={draft.menuBarIcon !== false} onChange={(v) => upd('menuBarIcon', v)} />
+          </Row>
+        )}
         <Row label="Open SSH in" hint="For “SSH in …” from a host’s menu.">
           <select className="input w-40" value={draft.externalTerminal} onChange={(e) => upd('externalTerminal', e.target.value as Settings['externalTerminal'])}>
             <option>Warp</option>

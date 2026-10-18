@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
+import { updateTray } from './tray'
 import { setHost } from './host'
 import { electronHost } from './electronHost'
 import { closeAllSsh } from './ssh/session'
@@ -52,7 +53,7 @@ function createWindow(): void {
     title: 'EC2 Remote Access',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 16 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1115' : '#f6f7f9',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0a0b0f' : '#f3f4f7',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -80,9 +81,10 @@ app.whenReady().then(() => {
   initLog(electronHost.logsDir())
   console.log(`[app] EC2 Remote Access ${app.getVersion()} starting (packaged=${app.isPackaged})`)
   nativeTheme.themeSource = getSettings().theme
-  registerIpc()
+  registerIpc(updateTray)
   setMenu()
   createWindow()
+  updateTray()
   if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()
   app.on('activate', () => {
