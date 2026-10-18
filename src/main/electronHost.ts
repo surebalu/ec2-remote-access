@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, ShareMenu, shell } from 'electron'
 import type { Host } from './host'
 import { broadcastToPhones } from './phoneAccess'
 
@@ -14,6 +14,12 @@ export const electronHost: Host = {
   revealPath: (p) => shell.showItemInFolder(p),
   async trashPaths(paths) {
     for (const p of paths) await shell.trashItem(p)
+  },
+  shareUrl(url) {
+    if (process.platform !== 'darwin') return false
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    new ShareMenu({ urls: [url] }).popup(win ? { window: win } : {})
+    return true
   },
   clipboardWrite(text) {
     clipboard.writeText(text)

@@ -35,6 +35,8 @@ export interface Host {
   revealPath(path: string): void
   /** Move local paths to the trash. */
   trashPaths(paths: string[]): Promise<void>
+  /** Shows the system Share menu for a link (Messages, Notes, Anybox…) at the pointer. False when there is none. */
+  shareUrl(url: string): boolean
   /** Copy text to the clipboard. Returns false when the host has no clipboard (the UI then copies client-side). */
   clipboardWrite(text: string): boolean
   /** Apply the app-wide light/dark preference to native chrome; no-op without native windows. */

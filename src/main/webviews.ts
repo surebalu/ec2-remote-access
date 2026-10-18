@@ -100,6 +100,7 @@ app.on('web-contents-created', (_e, contents) => {
       { label: 'Reload', click: () => contents.reload() },
       { type: 'separator' },
       { label: 'Copy Page Address', click: () => clipboard.writeText(contents.getURL()) },
+      ...(process.platform === 'darwin' ? [{ role: 'shareMenu' as const, sharingItem: { urls: [contents.getURL()] } }] : []),
       { label: "Add Page to Today's Note", click: () => h?.send('web:menu', { webContentsId: contents.id, action: 'note', url: contents.getURL(), title: contents.getTitle() }) },
       { label: 'Open Page in Your Browser', click: () => void shell.openExternal(contents.getURL()) },
       { type: 'separator' },

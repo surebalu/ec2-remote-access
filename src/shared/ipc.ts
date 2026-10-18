@@ -105,6 +105,8 @@ export interface IpcApi {
   'browser:save': (state: BrowserState) => Promise<void>
   /** A one-time sign-in link to the AWS console of `profile` (SSO credentials), landing on `destination`. */
   'browser:consoleUrl': (profile: string, destination: string) => Promise<string>
+  /** The system Share menu for a page; false when the host has none (gateway). */
+  'browser:share': (url: string) => Promise<boolean>
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>

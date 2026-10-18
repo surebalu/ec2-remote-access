@@ -748,15 +748,25 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .web-service { display: flex; align-items: center; justify-content: center; height: 34px; border-radius: 9px; background: var(--glass-hover); transition: background .12s, transform .12s; }
 .web-service:hover { background: var(--glass-on); transform: translateY(-1px); }
 
-.web-pins { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; border-radius: 12px; transition: background .12s; }
-.web-pins.empty:not(.drop-on) { min-height: 0; }
-.web-pins.drop-on { background: var(--glass-hover); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 55%, transparent); }
-.web-pins-hint { grid-column: 1 / -1; padding: 9px; border: 1.5px dashed color-mix(in srgb, var(--c) 45%, transparent); border-radius: 11px; color: var(--text-2); font-size: 11px; text-align: center; }
-.web-pin { position: relative; display: flex; align-items: center; justify-content: center; height: 42px; border-radius: 11px; background: var(--glass-hover); transition: background .12s, box-shadow .12s; }
-.web-pin:hover { background: var(--glass); }
-.web-pin.on { background: var(--glass-on); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
-.web-pin.drop-before { box-shadow: inset 2px 0 0 var(--c); }
-.web-pin.drop-after { box-shadow: inset -2px 0 0 var(--c); }
+.web-favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 2px; border-radius: 12px; transition: background .12s, box-shadow .12s; }
+.web-favs.drop-on { background: var(--glass-hover); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 55%, transparent); }
+.web-favs-hint { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 5px; height: 34px; border: 1.5px dashed color-mix(in srgb, var(--c) 35%, var(--hair)); border-radius: 11px; color: var(--muted); font-size: 10.5px; }
+.web-favs.drop-on .web-favs-hint { border-color: var(--c); color: var(--text); }
+.web-favs-hint .web-kbd { margin-left: 0; }
+.web-fav { position: relative; display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 12px; background: var(--glass-hover); transition: background .12s, box-shadow .12s, transform .12s; }
+.web-fav:hover { background: var(--glass); transform: translateY(-1px); }
+.web-fav.on { background: var(--glass-on); box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 0 0 1.5px color-mix(in srgb, var(--c) 45%, transparent); }
+.web-fav.asleep > :first-child { opacity: .6; filter: saturate(.5); }
+.web-fav.drop-before { box-shadow: inset 2px 0 0 var(--c); }
+.web-fav.drop-after { box-shadow: inset -2px 0 0 var(--c); }
+/* Whose logins a favorite uses, when that is another space. */
+.web-fav-dot { position: absolute; right: 6px; bottom: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1.5px var(--bg-elev); }
+
+.web-pinned { display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; border-radius: 10px; }
+.web-pinned.drop-on { background: var(--glass-hover); }
+.web-pins-hint { padding: 8px; border: 1.5px dashed color-mix(in srgb, var(--c) 45%, transparent); border-radius: 10px; color: var(--text-2); font-size: 11px; text-align: center; }
+.web-divider { display: flex; align-items: center; gap: 8px; height: 18px; margin: 0 4px; }
+.web-divider > span { flex: 1; height: 1px; background: var(--hair); }
 
 .web-newtab { display: flex; align-items: center; gap: 9px; height: 32px; margin-top: 2px; padding: 0 8px 0 11px; border-radius: 9px; color: var(--text-2); font-size: 12.5px; }
 .web-newtab svg { width: 14px; height: 14px; }
@@ -779,7 +789,7 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .web-tab-x svg { width: 12px; height: 12px; }
 .web-tab:hover .web-tab-x, .web-tab.on .web-tab-x { opacity: 1; }
 .web-tab-x:hover { background: var(--glass-hover); color: var(--text); }
-.web-clear { align-self: flex-start; margin: 4px 0 0 11px; color: var(--muted); font-size: 11px; }
+.web-clear { color: var(--muted); font-size: 10.5px; font-weight: 600; }
 .web-clear:hover { color: var(--text); text-decoration: underline; }
 
 .web-spaces { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px; padding: 9px 0 2px; border-top: 1px solid var(--hair); }

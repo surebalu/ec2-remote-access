@@ -803,7 +803,7 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelectorAll('.web-tab').length === 2 && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page two'`, 'reopen closed tab')
     // Pin with ⌘D; find in page.
     await bkey('d')
-    await buntil(`document.querySelectorAll('.web-pin').length === 1 && document.querySelectorAll('.web-tab').length === 1`, 'pinned')
+    await buntil(`document.querySelectorAll('.web-pinned .web-tab').length === 1 && document.querySelectorAll('.web-tabs .web-tab').length === 1`, 'pinned')
     await bkey('f')
     await buntil(`document.activeElement?.getAttribute('aria-label') === 'Find in page'`, 'find bar')
     await typeIn('.web-find input', 'find me')
@@ -837,7 +837,7 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira' && !!document.querySelector('.start-page')`, 'new space')
     // Leaving the browser for another tab and coming back keeps its pages (no reload, same page process).
     await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
-    await buntil(`document.querySelector('.web-pin.on') !== null`, 'pinned tab active in General')
+    await buntil(`document.querySelector('.web-pinned .web-tab.on') !== null`, 'pinned tab active in General')
     g1 = guestAt('/two')
     const before = g1.id
     await bkey('1')
@@ -845,15 +845,38 @@ app.whenReady().then(async () => {
     await bjs(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('Browser')).click()`)
     await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
     assert.ok(guestAt('/two') && guestAt('/two').id === before, 'page survives switching app tabs')
+    // Favorites: page one becomes a favorite, shown in every space and keeping General's logins; ⌘W only unloads it.
+    await bjs(`[...document.querySelectorAll('.web-tabs .web-tab')].find((t) => t.textContent.includes('Fixture page one')).click()`)
+    await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page one'`, 'page one selected')
+    const oneId = guestAt('/one').id
+    await bkey('d', { shiftKey: true })
+    await buntil(`document.querySelectorAll('.web-fav').length === 1 && !document.querySelector('.web-tabs .web-tab') && !!document.querySelector('.web-fav.on')`, 'favorited')
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox' && !!document.querySelector('.web-fav .web-fav-dot')`, 'favorite shown in another space')
+    await bjs(`document.querySelector('.web-fav').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on') && document.querySelector('.web-space-name')?.textContent === 'sandbox' && document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`, 'favorite opens in the showing space')
+    assert.equal(guestAt('/one')?.id, oneId, 'the favorite is the same page, not reloaded')
+    await bshot('browser-favorites.png')
+    await bkey('w')
+    await buntil(`!!document.querySelector('.web-fav.asleep') && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'AWS Console fixture'`, '⌘W unloads the favorite')
+    for (let n = 0; n < 50 && guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(guestAt('/one'), undefined, 'unloaded favorite releases its page')
+    // General was showing the favorite: it loads again there (unloading is not closing).
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on:not(.asleep)') && document.querySelector('.web-space-name')?.textContent === 'General'`, 'back in General')
+    await buntil(`document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`)
+    for (let n = 0; n < 60 && !guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(guestAt('/one'), 'the favorite loads again where it was showing')
     // State is saved (never with a sign-in link) and comes back after a reload.
-    for (let n = 0; n < 60 && !(browserSaved?.spaces.some((x) => x.name === 'Jira') && browserSaved.tabs.length === 4); n++) await new Promise((r) => setTimeout(r, 50))
+    for (let n = 0; n < 60 && !(browserSaved?.spaces.some((x) => x.name === 'Jira') && browserSaved.tabs.length === 4 && browserSaved.activeSpace === 'general' && browserSaved.tabs.some((t) => t.favorite)); n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(browserSaved.tabs.length, 4)
+    assert.deepEqual(browserSaved.tabs.filter((t) => t.favorite).map((t) => [t.spaceId, t.homeUrl]), [['general', page('/one')]])
     assert.ok(browserSaved.tabs.every((t) => !t.url.includes('/fed')), 'no sign-in links saved')
     assert.ok(browserSaved.history.length >= 3)
     await bwin.reload()
     await buntil(`document.querySelectorAll('[data-host-key]').length > 0`)
     await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
-    await buntil(`document.querySelectorAll('.web-pin').length === 1 && document.querySelector('.web-space-name')?.textContent === 'General'`, 'restored')
+    await buntil(`document.querySelectorAll('.web-pinned .web-tab').length === 1 && document.querySelectorAll('.web-fav.on').length === 1 && document.querySelector('.web-space-name')?.textContent === 'General'`, 'restored')
     await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
     await buntil(`document.querySelectorAll('.web-tab').length === 2`, 'restored AWS tabs')
     // ⌘S hides the sidebar; the page fills the window.

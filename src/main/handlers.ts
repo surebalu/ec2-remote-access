@@ -137,6 +137,7 @@ export const handlers: Handlers = {
   'browser:load': async () => loadBrowserState(),
   'browser:save': (state) => saveBrowserState(state),
   'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
+  'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
   'clipboard:write': async (text) => {
     if (!host().clipboardWrite(text)) throw new Error('No clipboard on this host')
   },

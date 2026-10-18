@@ -185,6 +185,24 @@ export const Icon = {
       <rect x="9" y="2.5" width="6" height="3.5" rx="1" />
     </svg>
   ),
+  minus: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M6 12h12" />
+    </svg>
+  ),
+  /** Curved arrow back: return a pinned tab to its saved page. */
+  undo: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </svg>
+  ),
+  share: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 3v12M8 7l4-4 4 4" />
+      <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
+    </svg>
+  ),
   /** Globe: the built-in browser. */
   globe: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

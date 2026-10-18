@@ -29,6 +29,7 @@ export function createGatewayHost(dataDir: string, broadcast: (channel: string, 
       mkdirSync(trash, { recursive: true })
       for (const p of paths) renameSync(p, join(trash, `${Date.now()}-${basename(p)}`))
     },
+    shareUrl: () => false,
     clipboardWrite: () => false,
     setThemeSource: () => undefined,
     pickPaths: async () => null,

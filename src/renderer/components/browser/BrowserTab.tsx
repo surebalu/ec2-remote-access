@@ -65,6 +65,8 @@ interface Runtime {
   zoom?: number
 }
 
+type Zone = 'favorite' | 'pinned' | 'today'
+
 type MenuState =
   | { kind: 'tab'; id: string; anchor: HTMLElement }
   | { kind: 'space'; id: string; anchor: HTMLElement }
@@ -148,10 +150,12 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     }), [profiles, settings, statuses])
   const spaces = useMemo<Space[]>(() => [...(st?.spaces ?? [GENERAL]), ...awsSpaces], [st?.spaces, awsSpaces])
   const space = spaces.find((x) => x.id === st?.activeSpace) ?? spaces[0]
-  const spaceTabs = st ? st.tabs.filter((t) => t.spaceId === space.id) : []
+  const favorites = st ? st.tabs.filter((t) => t.favorite) : []
+  const spaceTabs = st ? st.tabs.filter((t) => t.spaceId === space.id && !t.favorite) : []
   const pinned = spaceTabs.filter((t) => t.pinned)
   const today = spaceTabs.filter((t) => !t.pinned)
-  const current = spaceTabs.find((t) => t.id === st?.activeTab[space.id])
+  // The tab on screen: one of this space's, or a favorite (favorites open in whichever space is showing).
+  const current = st ? [...spaceTabs, ...favorites].find((t) => t.id === st.activeTab[space.id]) : undefined
   const cur = current ? rt[current.id] ?? {} : {}
   const showStart = !current || (!current.url && !cur.signingIn && !cur.auth)
 
@@ -250,8 +254,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     update((s) => {
       const tabs = s.tabs.slice()
       // Like Arc, new tabs go to the top of the space's list; tabs a page opens go right below it.
-      let at = opts.after ? tabs.findIndex((x) => x.id === opts.after) + 1 : tabs.findIndex((x) => x.spaceId === spaceId && !x.pinned)
-      if (at <= 0 && !opts.after) at = tabs.findIndex((x) => x.spaceId === spaceId && !x.pinned)
+      const firstToday = tabs.findIndex((x) => x.spaceId === spaceId && !x.pinned && !x.favorite)
+      let at = opts.after ? tabs.findIndex((x) => x.id === opts.after) + 1 : firstToday
+      if (at <= 0 && !opts.after) at = firstToday
       tabs.splice(at < 0 ? tabs.length : at, 0, t)
       return { ...s, tabs, ...(opts.background ? {} : { activeSpace: spaceId, activeTab: { ...s.activeTab, [spaceId]: id } }) }
     })
@@ -273,7 +278,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const activate = (id: string): void => {
     const t = findTab(id)
     if (!t) return
-    update((s) => ({ ...s, activeSpace: t.spaceId, activeTab: { ...s.activeTab, [t.spaceId]: id }, tabs: s.tabs.map((x) => (x.id === id ? { ...x, lastActive: Date.now() } : x)) }))
+    // A favorite opens in the space that is showing; any other tab takes you to its space.
+    const sid = t.favorite ? stRef.current!.activeSpace : t.spaceId
+    update((s) => ({ ...s, activeSpace: sid, activeTab: { ...s.activeTab, [sid]: id }, tabs: s.tabs.map((x) => (x.id === id ? { ...x, lastActive: Date.now() } : x)) }))
     setFind(null)
   }
   const switchSpace = (id: string): void => {
@@ -288,28 +295,53 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const cycleTab = (step: number): void => {
     const s = stRef.current
     if (!s) return
-    const list = [...s.tabs.filter((t) => t.spaceId === s.activeSpace && t.pinned), ...s.tabs.filter((t) => t.spaceId === s.activeSpace && !t.pinned)]
+    const mine = s.tabs.filter((t) => t.spaceId === s.activeSpace && !t.favorite)
+    const list = [...s.tabs.filter((t) => t.favorite), ...mine.filter((t) => t.pinned), ...mine.filter((t) => !t.pinned)]
     if (!list.length) return
     const at = list.findIndex((t) => t.id === s.activeTab[s.activeSpace])
     activate(list[(at + step + list.length) % list.length].id)
   }
 
-  const closeWebTab = (id: string): void => {
-    const s = stRef.current
-    const t = findTab(id)
-    if (!s || !t) return
-    const list = s.tabs.filter((x) => x.spaceId === t.spaceId && !x.pinned)
-    const idx = list.findIndex((x) => x.id === id)
-    let next = s.activeTab[t.spaceId]
-    if (next === id) next = (list[idx + 1] ?? list[idx - 1])?.id ?? ''
-    if (next === id) next = ''
-    closed.current = [...closed.current, { tab: t, index: s.tabs.indexOf(t) }].slice(-25)
+  /** What the showing space selects once `id` goes away: the tab below it in Today, else the one above, else none. */
+  const nextAfter = (s: BrowserState, id: string): string => {
+    const list = s.tabs.filter((x) => x.spaceId === s.activeSpace && !x.pinned && !x.favorite && x.id !== id)
+    const all = s.tabs.filter((x) => x.spaceId === s.activeSpace && !x.pinned && !x.favorite)
+    const idx = all.findIndex((x) => x.id === id)
+    return (idx >= 0 ? all[idx + 1] ?? all[idx - 1] : list[0])?.id ?? ''
+  }
+  /** The selection with `id` gone: the showing space moves to `next`, other spaces that showed it go back to their start. */
+  const deselect = (activeTab: Record<string, string>, id: string, sid: string, next: string): Record<string, string> =>
+    Object.fromEntries(Object.entries(activeTab).map(([k, v]) => [k, v === id ? (k === sid ? next : '') : v]))
+  const forget = (id: string): void => {
     setLive((l) => l.filter((x) => x !== id))
     setRt((r) => {
       const { [id]: _gone, ...rest } = r
       return rest
     })
-    update((x) => ({ ...x, tabs: x.tabs.filter((y) => y.id !== id), activeTab: { ...x.activeTab, [t.spaceId]: next } }))
+  }
+  const closeWebTab = (id: string): void => {
+    const s = stRef.current
+    const t = findTab(id)
+    if (!s || !t) return
+    const next = s.activeTab[s.activeSpace] === id ? nextAfter(s, id) : s.activeTab[s.activeSpace]
+    closed.current = [...closed.current, { tab: t, index: s.tabs.indexOf(t) }].slice(-25)
+    forget(id)
+    update((x) => ({ ...x, tabs: x.tabs.filter((y) => y.id !== id), activeTab: deselect(x.activeTab, id, x.activeSpace, next) }))
+  }
+  /** ⌘W on a favorite or pinned tab, as in Arc: it stays in the sidebar, unloaded and back on its saved page. */
+  const unloadTab = (id: string): void => {
+    const s = stRef.current
+    const t = findTab(id)
+    if (!s || !t) return
+    const next = s.activeTab[s.activeSpace] === id ? nextAfter(s, id) : s.activeTab[s.activeSpace]
+    forget(id)
+    // Other spaces showing it keep it selected; it loads again there when they are next shown.
+    update((x) => ({ ...x, tabs: x.tabs.map((y) => (y.id === id ? { ...y, url: y.homeUrl || y.url } : y)), activeTab: { ...x.activeTab, [x.activeSpace]: next } }))
+  }
+  const closeOrUnload = (id: string): void => {
+    const t = findTab(id)
+    if (t?.pinned || t?.favorite) unloadTab(id)
+    else closeWebTab(id)
   }
   const reopenClosed = (): void => {
     const last = closed.current.pop()
@@ -323,7 +355,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const closeOthers = (id: string): void => {
     const t = findTab(id)
     if (!t) return
-    for (const x of stRef.current!.tabs) if (x.spaceId === t.spaceId && !x.pinned && x.id !== id) closeWebTab(x.id)
+    for (const x of stRef.current!.tabs) if (x.spaceId === t.spaceId && !x.pinned && !x.favorite && x.id !== id) closeWebTab(x.id)
     activate(id)
   }
   const duplicate = (id: string): void => {
@@ -335,24 +367,30 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     if (!t || t.spaceId === spaceId) return
     update((s) => ({
       ...s,
-      tabs: s.tabs.map((x) => (x.id === id ? { ...x, spaceId, pinned: false } : x)),
+      tabs: s.tabs.map((x) => (x.id === id ? { ...x, spaceId, pinned: false, favorite: false, homeUrl: undefined } : x)),
       activeTab: { ...s.activeTab, ...(s.activeTab[t.spaceId] === id ? { [t.spaceId]: '' } : {}) }
     }))
     toast('info', `Moved to ${spaceOf(spaceId)?.name ?? 'the space'}; it uses that space's logins.`)
   }
-  /** Drag and drop: put `id` before or after `targetId` (or at the end of the list when null), pinned or not. */
-  const placeTab = (id: string, targetId: string | null, where: 'before' | 'after', pin: boolean): void => {
-    if (id === targetId) return
+  /**
+   * Drag and drop: put `id` before or after `targetId` (at the end of the section when null) in Favorites, this
+   * space's Pinned, or its Today. A tab dropped into another space's list takes that space's logins.
+   */
+  const placeTab = (id: string, targetId: string | null, where: 'before' | 'after', zone: Zone): void => {
+    const t = findTab(id)
+    const sid = stRef.current?.activeSpace
+    if (id === targetId || !t || !sid) return
+    const spaceId = zone === 'favorite' ? t.spaceId : sid
+    if (spaceId !== t.spaceId) toast('info', `Moved to ${spaceOf(spaceId)?.name ?? 'this space'}; it uses this space's logins.`)
+    const keeps = zone !== 'today'
+    const moved: WebTab = { ...t, spaceId, favorite: zone === 'favorite', pinned: zone === 'pinned', homeUrl: keeps ? (t.pinned || t.favorite ? t.homeUrl : undefined) ?? t.url : undefined }
     update((s) => {
-      const t = s.tabs.find((x) => x.id === id)
-      if (!t) return s
-      const moved = { ...t, pinned: pin }
       const tabs = s.tabs.filter((x) => x.id !== id)
       let at = targetId ? tabs.findIndex((x) => x.id === targetId) : -1
       if (at < 0) at = tabs.length
       else if (where === 'after') at++
       tabs.splice(at, 0, moved)
-      return { ...s, tabs }
+      return { ...s, tabs, activeTab: zone === 'favorite' || spaceId === t.spaceId ? s.activeTab : deselect(s.activeTab, id, sid, s.activeTab[sid] === id ? id : s.activeTab[sid]) }
     })
   }
 
@@ -408,7 +446,33 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   }
   const togglePin = (id: string): void => {
     const t = findTab(id)
-    if (t) patchTab(id, { pinned: !t.pinned })
+    if (!t) return
+    if (t.pinned) patchTab(id, { pinned: false, homeUrl: undefined })
+    else {
+      // A favorite pinned goes to its own space's list (the space whose logins it uses).
+      patchTab(id, { pinned: true, favorite: false, homeUrl: t.favorite ? t.homeUrl : t.url })
+      if (t.favorite) setTimeout(() => activate(id), 0)
+    }
+  }
+  const toggleFavorite = (id: string): void => {
+    const t = findTab(id)
+    if (!t) return
+    if (t.favorite) {
+      patchTab(id, { favorite: false, homeUrl: undefined })
+      if (t.spaceId !== stRef.current?.activeSpace) setTimeout(() => activate(id), 0)
+      toast('info', `Removed from Favorites; it is back in ${spaceOf(t.spaceId)?.name ?? 'its space'}'s tabs.`)
+      return
+    }
+    // New favorites go to the end of the grid.
+    update((s) => ({ ...s, tabs: [...s.tabs.filter((x) => x.id !== id), { ...t, favorite: true, pinned: false, homeUrl: t.pinned ? t.homeUrl : t.url }] }))
+  }
+  const resetToHome = (id: string): void => {
+    const t = findTab(id)
+    if (t?.homeUrl) void loadInto(id, t.spaceId, t.homeUrl)
+  }
+  const sharePage = (url?: string): void => {
+    const u = url ?? currentRef.current?.url
+    if (u) void window.api.invoke('browser:share', u).then((shown) => { if (!shown) toast('info', 'Sharing needs the Mac app.') })
   }
 
   // ----- keyboard -----
@@ -432,7 +496,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         return true
       case 'w':
         if (!c || k.shift) return false
-        closeWebTab(c.id)
+        closeOrUnload(c.id)
         return true
       case 'r':
         if (k.alt) return false
@@ -452,8 +516,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         toggleSidebar()
         return true
       case 'd':
-        if (k.shift || !c) return !!c
-        togglePin(c.id)
+        if (!c) return false
+        if (k.shift) toggleFavorite(c.id)
+        else togglePin(c.id)
         return true
       case '=':
       case '+':
@@ -646,6 +711,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         { title: 'Reopen closed tab', words: 'reopen undo closed tab', when: closed.current.length > 0, run: reopenClosed },
         { title: "Add page to today's note", words: 'note notes obsidian daily journal', when: !!c?.url, run: () => addToNote() },
         { title: 'Copy link', words: 'copy link url address', when: !!c?.url, run: copyLink },
+        { title: c?.favorite ? 'Remove from Favorites' : 'Add page to Favorites', words: 'favorite favourite star bookmark', when: !!c?.url, run: () => c && toggleFavorite(c.id) },
+        { title: 'Share page', words: 'share anybox airdrop messages send', when: !!c?.url, run: () => sharePage() },
         { title: 'Open in your browser', words: 'external safari chrome default browser open', when: !!c?.url, run: openExternal },
         { title: 'Find in page', words: 'find search page text', when: !!c?.url, run: openFind },
         { title: 'Show or hide the sidebar', words: 'sidebar hide show toggle', when: true, run: toggleSidebar },
@@ -683,7 +750,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     })
   }
 
-  const dragProps = (t: WebTab, pin: boolean) => ({
+  const dragProps = (t: WebTab, zone: Zone) => ({
     draggable: true,
     onDragStart: (e: DragEvent) => {
       dragId.current = t.id
@@ -696,12 +763,12 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       if (!dragId.current || dragId.current === t.id) return
       e.preventDefault()
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      const where = pin ? (e.clientX < r.left + r.width / 2 ? 'before' : 'after') : e.clientY < r.top + r.height / 2 ? 'before' : 'after'
+      const where = zone === 'favorite' ? (e.clientX < r.left + r.width / 2 ? 'before' : 'after') : e.clientY < r.top + r.height / 2 ? 'before' : 'after'
       if (drop?.target !== t.id || drop.where !== where) setDrop({ target: t.id, where })
     },
     onDrop: (e: DragEvent) => {
       e.preventDefault()
-      if (dragId.current && drop) placeTab(dragId.current, t.id, drop.where === 'on' ? 'after' : drop.where, pin)
+      if (dragId.current && drop) placeTab(dragId.current, t.id, drop.where === 'on' ? 'after' : drop.where, zone)
       setDrop(null)
     }
   })
@@ -722,23 +789,28 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   })
   const dropCls = (id: string): string => (drop?.target === id ? `drop-${drop.where}` : '')
 
-  const tabRow = (t: WebTab): ReactElement => {
+  const tabRow = (t: WebTab, zone: Zone): ReactElement => {
     const r = rt[t.id] ?? {}
+    const loaded = live.includes(t.id)
+    const drifted = zone === 'pinned' && !!t.homeUrl && !!t.url && t.url !== t.homeUrl
     return (
       <div
         key={t.id}
         role="tab"
         aria-selected={t.id === current?.id}
-        className={`web-tab ${t.id === current?.id ? 'on' : ''} ${live.includes(t.id) ? '' : 'asleep'} ${dropCls(t.id)}`}
+        className={`web-tab ${t.id === current?.id ? 'on' : ''} ${loaded ? '' : 'asleep'} ${dropCls(t.id)}`}
         title={t.url ? `${t.title}\n${t.url}` : t.title}
         onClick={() => activate(t.id)}
-        onAuxClick={(e) => { if (e.button === 1) closeWebTab(t.id) }}
+        onAuxClick={(e) => { if (e.button === 1) closeOrUnload(t.id) }}
         onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
-        {...dragProps(t, false)}
+        {...dragProps(t, zone)}
       >
-        <span className="web-tab-icon">{r.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url} />}</span>
+        <span className="web-tab-icon">{r.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url || t.homeUrl || ''} />}</span>
         <span className="web-tab-title">{t.title || hostOf(t.url) || 'New Tab'}</span>
-        <button type="button" className="web-tab-x" aria-label={`Close ${t.title}`} onClick={(e) => { e.stopPropagation(); closeWebTab(t.id) }}><Icon.x /></button>
+        {drifted && <button type="button" className="web-tab-x" title={`Back to ${hostOf(t.homeUrl!)}`} aria-label={`Back to the pinned page of ${t.title}`} onClick={(e) => { e.stopPropagation(); resetToHome(t.id) }}><Icon.undo /></button>}
+        {zone === 'pinned'
+          ? loaded && <button type="button" className="web-tab-x" title="Unload (stays pinned)" aria-label={`Unload ${t.title}`} onClick={(e) => { e.stopPropagation(); unloadTab(t.id) }}><Icon.minus /></button>
+          : <button type="button" className="web-tab-x" aria-label={`Close ${t.title}`} onClick={(e) => { e.stopPropagation(); closeWebTab(t.id) }}><Icon.x /></button>}
       </div>
     )
   }
@@ -769,6 +841,28 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         )}
       </div>
 
+      <div className={`web-favs ${favorites.length ? '' : 'empty'} ${dropCls('favs')}`} aria-label="Favorites" {...zoneProps('favs', (id) => placeTab(id, null, 'after', 'favorite'))}>
+        {favorites.map((t) => {
+          const home = spaceOf(t.spaceId)
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className={`web-fav ${t.id === current?.id ? 'on' : ''} ${live.includes(t.id) ? '' : 'asleep'} ${dropCls(t.id)}`}
+              title={`${t.title || hostOf(t.homeUrl ?? t.url)}\n${t.url || t.homeUrl}${home && home.id !== space.id ? `\nSigned in as in ${home.name}` : ''}`}
+              aria-label={`Favorite ${t.title}`}
+              onClick={() => activate(t.id)}
+              onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
+              {...dragProps(t, 'favorite')}
+            >
+              {rt[t.id]?.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url || t.homeUrl || ''} size={18} />}
+              {home && home.id !== space.id && <span className="web-fav-dot" data-accent={home.color} />}
+            </button>
+          )
+        })}
+        {!favorites.length && <span className="web-favs-hint">{dragging ? 'Drop to add to Favorites' : <>Favorites: drag a tab here or press <kbd className="web-kbd">⌘⇧D</kbd></>}</span>}
+      </div>
+
       <div className="web-space-head" onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'space', id: space.id, anchor: e.currentTarget }) }}>
         <SpaceAvatar space={space} size={20} />
         <div className="min-w-0 flex-1">
@@ -788,32 +882,23 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         </div>
       )}
 
-      <div className={`web-pins ${pinned.length ? '' : 'empty'} ${dropCls('pins')}`} {...zoneProps('pins', (id) => placeTab(id, null, 'after', true))}>
-        {pinned.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`web-pin ${t.id === current?.id ? 'on' : ''} ${dropCls(t.id)}`}
-            title={`${t.title}\n${t.url}`}
-            onClick={() => activate(t.id)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
-            {...dragProps(t, true)}
-          >
-            {rt[t.id]?.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url} size={18} />}
-          </button>
-        ))}
+      <div className={`web-pinned ${dropCls('pins')}`} {...zoneProps('pins', (id) => placeTab(id, null, 'after', 'pinned'))}>
+        {pinned.map((t) => tabRow(t, 'pinned'))}
         {!pinned.length && dragging && <span className="web-pins-hint">Drop to pin to {space.name}</span>}
       </div>
+      {(pinned.length > 0 || today.length > 1) && (
+        <div className="web-divider">
+          <span />
+          {today.length > 1 && <button type="button" className="web-clear" title="Close this space's unpinned tabs except the one you are on" onClick={() => { for (const t of today) if (t.id !== current?.id) closeWebTab(t.id) }}>Clear</button>}
+        </div>
+      )}
 
       <button type="button" className="web-newtab" onClick={() => onKey({ key: 't', shift: false, alt: false, ctrl: false })}>
         <Icon.plus /> New Tab <kbd className="web-kbd">⌘T</kbd>
       </button>
 
-      <div key={space.id} className={`web-tabs ${dropCls('list')}`} role="tablist" {...zoneProps('list', (id) => placeTab(id, null, 'after', false))}>
-        {today.map(tabRow)}
-        {today.length > 1 && (
-          <button type="button" className="web-clear" onClick={() => { for (const t of today) if (t.id !== current?.id) closeWebTab(t.id) }}>Clear other tabs</button>
-        )}
+      <div key={space.id} className={`web-tabs ${dropCls('list')}`} role="tablist" {...zoneProps('list', (id) => placeTab(id, null, 'after', 'today'))}>
+        {today.map((t) => tabRow(t, 'today'))}
       </div>
 
       <div className="web-spaces">
@@ -948,22 +1033,33 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       </div>
 
       {menu?.kind === 'tab' && tabMenuFor && (
-        <Popover anchor={menu.anchor} width={220} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { setMenu(null); togglePin(tabMenuFor.id) }} hint="⌘D">{tabMenuFor.pinned ? 'Unpin' : 'Pin to the space'}</MenuItem>
+        <Popover anchor={menu.anchor} width={236} onClose={() => setMenu(null)}>
+          <MenuItem onClick={() => { setMenu(null); toggleFavorite(tabMenuFor.id) }} hint="⌘⇧D">{tabMenuFor.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</MenuItem>
+          {!tabMenuFor.favorite && <MenuItem onClick={() => { setMenu(null); togglePin(tabMenuFor.id) }} hint="⌘D">{tabMenuFor.pinned ? 'Unpin' : `Pin to ${spaceOf(tabMenuFor.spaceId)?.name ?? 'the space'}`}</MenuItem>}
+          {(tabMenuFor.pinned || tabMenuFor.favorite) && tabMenuFor.homeUrl && tabMenuFor.url && tabMenuFor.url !== tabMenuFor.homeUrl && (
+            <>
+              <MenuItem onClick={() => { setMenu(null); resetToHome(tabMenuFor.id) }}>Back to {hostOf(tabMenuFor.homeUrl)}</MenuItem>
+              <MenuItem onClick={() => { setMenu(null); patchTab(tabMenuFor.id, { homeUrl: tabMenuFor.url }) }}>Keep this page as its address</MenuItem>
+            </>
+          )}
+          {(tabMenuFor.pinned || tabMenuFor.favorite) && live.includes(tabMenuFor.id) && <MenuItem onClick={() => { setMenu(null); unloadTab(tabMenuFor.id) }} hint="⌘W">Unload</MenuItem>}
+          <MenuSep />
           <MenuItem disabled={!tabMenuFor.url} onClick={() => { setMenu(null); duplicate(tabMenuFor.id) }}>Duplicate</MenuItem>
           <MenuItem disabled={!tabMenuFor.url} onClick={() => { setMenu(null); void window.api.invoke('clipboard:write', tabMenuFor.url).then(() => toast('success', 'Link copied')) }}>Copy link</MenuItem>
+          <MenuItem disabled={!tabMenuFor.url} onClick={() => { setMenu(null); sharePage(tabMenuFor.url) }}>Share…</MenuItem>
           <MenuItem disabled={!tabMenuFor.url} onClick={() => { setMenu(null); addToNote(tabMenuFor.url, tabMenuFor.title) }}>Add to today's note</MenuItem>
           <MenuItem disabled={!views.current.has(tabMenuFor.id)} onClick={() => { setMenu(null); act((v) => v.reload(), tabMenuFor.id) }}>Reload</MenuItem>
           <MenuSep />
-          <MenuLabel>Move to space</MenuLabel>
+          {/* A favorite stays a favorite and only changes whose logins it uses; other tabs move to that space. */}
+          <MenuLabel>{tabMenuFor.favorite ? 'Use the logins of' : 'Move to space'}</MenuLabel>
           {spaces.filter((x) => x.id !== tabMenuFor.spaceId).map((x) => (
-            <MenuItem key={x.id} onClick={() => { setMenu(null); moveToSpace(tabMenuFor.id, x.id) }}>
+            <MenuItem key={x.id} onClick={() => { setMenu(null); if (tabMenuFor.favorite) patchTab(tabMenuFor.id, { spaceId: x.id }); else moveToSpace(tabMenuFor.id, x.id) }}>
               <span className="inline-flex items-center gap-2"><SpaceAvatar space={x} size={14} />{x.name}</span>
             </MenuItem>
           ))}
           <MenuSep />
-          {!tabMenuFor.pinned && <MenuItem onClick={() => { setMenu(null); closeOthers(tabMenuFor.id) }}>Close other tabs</MenuItem>}
-          <MenuItem danger onClick={() => { setMenu(null); closeWebTab(tabMenuFor.id) }} hint="⌘W">Close tab</MenuItem>
+          {!tabMenuFor.pinned && !tabMenuFor.favorite && <MenuItem onClick={() => { setMenu(null); closeOthers(tabMenuFor.id) }}>Close other tabs</MenuItem>}
+          <MenuItem danger onClick={() => { setMenu(null); closeWebTab(tabMenuFor.id) }} hint={tabMenuFor.pinned || tabMenuFor.favorite ? undefined : '⌘W'}>{tabMenuFor.favorite ? 'Remove and close' : tabMenuFor.pinned ? 'Unpin and close' : 'Close tab'}</MenuItem>
         </Popover>
       )}
 
@@ -972,7 +1068,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           <MenuItem onClick={() => { setMenu(null); copyLink() }} hint="⌘⇧C">Copy link</MenuItem>
           <MenuItem onClick={() => { setMenu(null); addToNote() }}>Add to today's note</MenuItem>
           <MenuItem onClick={() => { setMenu(null); openFind() }} hint="⌘F">Find in page</MenuItem>
-          <MenuItem onClick={() => { setMenu(null); togglePin(current.id) }} hint="⌘D">{current.pinned ? 'Unpin tab' : 'Pin tab'}</MenuItem>
+          <MenuItem onClick={() => { setMenu(null); toggleFavorite(current.id) }} hint="⌘⇧D">{current.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</MenuItem>
+          {!current.favorite && <MenuItem onClick={() => { setMenu(null); togglePin(current.id) }} hint="⌘D">{current.pinned ? 'Unpin tab' : 'Pin tab'}</MenuItem>}
+          <MenuItem onClick={() => { setMenu(null); sharePage() }}>Share…</MenuItem>
           <MenuSep />
           <MenuItem onClick={() => zoomStep(-1)} hint="⌘−">Zoom out</MenuItem>
           <MenuItem onClick={() => setZoom(1)} hint="⌘0">Actual size ({Math.round((cur.zoom ?? 1) * 100)}%)</MenuItem>

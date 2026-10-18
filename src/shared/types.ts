@@ -315,8 +315,15 @@ export interface WebTab {
   url: string
   title: string
   favicon?: string
-  /** Pinned tabs sit in the favorites grid at the top of their space and survive Close all. */
+  /** Pinned tabs sit at the top of their space's list and survive Clear; ⌘W unloads them instead of closing. */
   pinned?: boolean
+  /**
+   * Favorites are shown in every space (the icon grid at the top), like Arc's. A favorite keeps the logins of its own
+   * space (`spaceId`), so a favorite from an AWS account space stays signed in to that account wherever it is opened.
+   */
+  favorite?: boolean
+  /** The page a pinned tab or favorite goes back to when it is unloaded (⌘W) or reset. */
+  homeUrl?: string
   lastActive: number
 }
 
