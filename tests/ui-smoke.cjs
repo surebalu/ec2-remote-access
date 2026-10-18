@@ -889,8 +889,15 @@ app.whenReady().then(async () => {
     for (let n = 0; n < 50 && guestAt('/two')?.getZoomFactor() !== 1.1; n++) await new Promise((r) => setTimeout(r, 30))
     assert.equal(guestAt('/one').getZoomFactor(), 1.1)
     assert.equal(guestAt('/two').getZoomFactor(), 1.1, 'the page in the background zooms too')
+    // The sidebar follows the zoom so it stays in proportion with the pages.
+    await buntil(`Math.abs(document.querySelector('.web-side').getBoundingClientRect().width - 208 * 1.1) < 1`, 'sidebar zooms with the pages')
     await bkey('0')
-    await buntil(`!document.querySelector('.web-zoom')`, 'zoom reset')
+    await buntil(`!document.querySelector('.web-zoom') && document.querySelector('.web-side').getBoundingClientRect().width === 208`, 'zoom reset')
+    for (let n = 0; n < 3; n++) await bkey('-')
+    await buntil(`document.querySelector('.web-zoom')?.textContent === '75%' && document.querySelector('.web-side').getBoundingClientRect().width === 156`, 'sidebar at 75%')
+    await bshot('browser-zoom-75.png')
+    await bkey('0')
+    await buntil(`!document.querySelector('.web-zoom')`)
     assert.equal(guestAt('/two').getZoomFactor(), 1)
     // Edit a favorite's name.
     await bjs(`document.querySelector('.web-fav').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)

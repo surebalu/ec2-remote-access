@@ -32,6 +32,8 @@ const MAX_HISTORY = 1500
 const inElectron = /\bElectron\//.test(navigator.userAgent)
 
 const SIDEBAR_WIDTH = { default: 208, min: 200, max: 380 }
+/** The browser's own chrome follows the page zoom, within limits that keep it usable. */
+const CHROME_ZOOM = { min: 0.5, max: 1.75 }
 
 /** What the sidebar calls a tab: the name the user gave it, else the page title, else its site. */
 const tabLabel = (t: WebTab): string => t.name || t.title || hostOf(t.url || t.homeUrl || '') || 'New Tab'
@@ -827,6 +829,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const dlTotal = runningDl.reduce((n, d) => n + d.total, 0)
   const dlProgress = runningDl.length ? (dlTotal > 0 ? Math.round((runningDl.reduce((n, d) => n + d.received, 0) / dlTotal) * 100) : 15) : null
   const sideWidth = st.sidebarWidth ?? SIDEBAR_WIDTH.default
+  // The sidebar, start page, find bar and command bar scale with the pages (CSS zoom through --web-zoom), so the two
+  // halves stay in proportion; widths are kept unzoomed and dragging the edge divides by it.
+  const chromeZoom = Math.min(CHROME_ZOOM.max, Math.max(CHROME_ZOOM.min, st.zoom ?? 1))
   /** "  ⌘3" for the space ⌘3 shows (⌘9 is the last space). */
   const keyFor = (i: number): string => (i < 8 ? `  ⌘${i + 1}` : i === spaces.length - 1 ? '  ⌘9' : '')
   const liveIds = st.tabs.filter((t) => live.includes(t.id) && (t.url || pending.current.has(t.id))).map((t) => t.id)
@@ -1049,7 +1054,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const menuSpace = menu?.kind === 'space' ? spaces.find((x) => x.id === menu.id) : undefined
 
   return (
-    <div className={`browser ${hidden ? 'side-hidden' : ''}`} data-accent={space.color}>
+    <div className={`browser ${hidden ? 'side-hidden' : ''}`} data-accent={space.color} style={{ '--web-zoom': chromeZoom } as CSSProperties}>
       {sidebar}
       {hidden && !peek && <div className="web-peek-zone" onMouseEnter={() => setPeek(true)} />}
       {/* Pages swallow mouse events, so a drag across them is tracked on a shield over the whole browser. */}
@@ -1057,7 +1062,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         <div
           className="web-resize-shield"
           onMouseMove={(e) => {
-            const w = Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, resizing.width + e.clientX - resizing.x)))
+            const w = Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, resizing.width + (e.clientX - resizing.x) / chromeZoom)))
             if (w !== sideWidth) update((x) => ({ ...x, sidebarWidth: w }))
           }}
           onMouseUp={() => setResizing(null)}

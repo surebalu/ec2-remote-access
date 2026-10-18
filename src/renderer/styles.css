@@ -760,6 +760,8 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .dl-all:hover { color: var(--text); background: var(--accent-soft); }
 .web-resize-shield { position: absolute; z-index: 50; inset: 0; cursor: col-resize; }
 .web-side.gone { display: none; }
+/* The browser's own parts follow the page zoom (--web-zoom, set by BrowserTab), so they stay in proportion with pages. */
+.web-side, .start-inner, .web-overlay > *, .web-find, .cmdbar.floating { zoom: var(--web-zoom, 1); }
 .web-side.peek { position: absolute; z-index: 30; top: 6px; bottom: 6px; left: 6px; border-radius: 14px; background: color-mix(in srgb, var(--c) 20%, var(--bg-elev)); box-shadow: var(--shadow-lg); animation: web-peek .16s ease-out; }
 @keyframes web-peek { from { transform: translateX(-16px); opacity: 0; } }
 .web-peek-zone { position: absolute; z-index: 25; top: 0; bottom: 0; left: 0; width: 10px; }
