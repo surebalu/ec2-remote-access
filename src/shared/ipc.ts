@@ -4,7 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -93,6 +93,13 @@ export interface IpcApi {
   /** The host's note (created on first use); returns its path. */
   'notes:hostNote': (instanceKey: string) => Promise<string>
   'notes:daily': () => Promise<string>
+  /** Whiteboards (main/boards.ts), newest first. */
+  'boards:list': () => Promise<BoardSummary[]>
+  'boards:load': (id: string) => Promise<Board | null>
+  'boards:save': (board: Board) => Promise<void>
+  'boards:delete': (id: string) => Promise<void>
+  /** Saves a PNG (data: URL) into the notes folder (EC2 Remote/Boards) and returns its path there, for ![[embeds]]. */
+  'notes:saveImage': (name: string, dataUrl: string) => Promise<string>
   /** Opens a note in the Obsidian app. */
   'notes:openInObsidian': (path: string) => Promise<void>
   'notes:append': (path: string, text: string) => Promise<void>

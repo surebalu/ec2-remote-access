@@ -60,6 +60,18 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
   const [info, setInfo] = useState<Record<string, PaneInfo>>({})
   const [home, setHome] = useState<string>()
   const [menu, setMenu] = useState<Menu | null>(null)
+  // The side list goes by the room the tab has, not the device: an iPad has plenty, a phone or a narrow split does not.
+  const [roomy, setRoomy] = useState(() => !isMobile() || window.innerWidth >= 700)
+  const appObserver = useRef<ResizeObserver | null>(null)
+  const appRef = useCallback((el: HTMLDivElement | null) => {
+    appObserver.current?.disconnect()
+    if (!el) return
+    appObserver.current = new ResizeObserver(([e]) => {
+      // A hidden tab measures 0; keep what it had.
+      if (e.contentRect.width > 0) setRoomy(e.contentRect.width >= 560)
+    })
+    appObserver.current.observe(el)
+  }, [])
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null)
   const body = useRef<HTMLDivElement>(null)
@@ -305,8 +317,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     const panes = paneIds(t.root).length
     return [running ? `▶ ${running}` : tildify(cwdOf(t.activePane) ?? '', home), panes > 1 ? `${panes} panes` : ''].filter(Boolean).join(' · ')
   }
-  // A phone has no room for the side list.
-  const vertical = (st.tabBar ?? 'vertical') === 'vertical' && !isMobile()
+  const vertical = (st.tabBar ?? 'vertical') === 'vertical' && roomy
   const sideWidth = st.tabBarWidth ?? SIDE_WIDTH.default
 
   const dragProps = (t: TermTabState) => ({
@@ -429,7 +440,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
   const awsProfiles = profiles.filter((p) => p.enabled)
 
   return (
-    <div className={`term-app ${vertical ? 'vertical' : ''}`}>
+    <div ref={appRef} className={`term-app ${vertical ? 'vertical' : ''}`}>
       {vertical ? (
         <aside className="term-side" style={{ width: sideWidth }}>
           <div className="term-side-head">

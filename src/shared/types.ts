@@ -343,6 +343,44 @@ export interface WebHistoryEntry {
   at: number
 }
 
+/** One thing drawn on a whiteboard (components/board). Coordinates are board units; the view pans and zooms. */
+export interface BoardItem {
+  id: string
+  type: 'pen' | 'highlighter' | 'line' | 'arrow' | 'rect' | 'ellipse' | 'diamond' | 'text' | 'note' | 'image'
+  /** Shapes, text, notes, images: the box. Pen, highlighter, line, arrow: the bounding box of `points`. */
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Pen and highlighter: [x, y, pressure]; line and arrow: start and end. Absolute board coordinates. */
+  points?: number[][]
+  /** A colour, 'ink' (follows light/dark), or 'gradient'. */
+  color: string
+  width: number
+  fill?: 'none' | 'tint' | 'solid'
+  dashed?: boolean
+  text?: string
+  fontSize?: number
+  /** Image items: a data: URL. */
+  src?: string
+}
+
+export interface Board {
+  id: string
+  name: string
+  items: BoardItem[]
+  background: 'dots' | 'grid' | 'plain'
+  view: { x: number; y: number; zoom: number }
+  updatedAt: number
+}
+
+export interface BoardSummary {
+  id: string
+  name: string
+  updatedAt: number
+  items: number
+}
+
 /** Opens a shell on this computer for a pane of the Terminal tab (main/localterm.ts). */
 export interface LocalTermOpen {
   /** The pane id; also the session id in later term:* calls and events. */

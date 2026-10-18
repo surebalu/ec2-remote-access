@@ -13,7 +13,8 @@ import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
 import { opLogins, opSecrets } from './onepassword'
 import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
 import { loginMatches } from '@shared/browser'
-import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
+import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
+import { deleteBoard, listBoards, loadBoard, saveBoard } from './boards'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
@@ -68,6 +69,11 @@ export const handlers: Handlers = {
     return { flowId: r.flowId, userCode: r.userCode, verificationUri: r.verificationUri, verificationUriComplete: r.verificationUriComplete, expiresIn: r.expiresIn }
   },
   'notes:openInObsidian': (path) => openInObsidian(path),
+  'notes:saveImage': (name, dataUrl) => saveImage(name, dataUrl),
+  'boards:list': async () => listBoards(),
+  'boards:load': async (id) => loadBoard(id),
+  'boards:save': (board) => saveBoard(board),
+  'boards:delete': (id) => deleteBoard(id),
   'shell:open': async (url) => {
     if (/^https?:\/\//.test(url)) await host().openExternal(url)
   },

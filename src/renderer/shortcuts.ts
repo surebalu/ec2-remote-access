@@ -76,6 +76,22 @@ export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset (one zoom for every page)' }
 ]
 
+/** The Whiteboard tab: single keys pick tools, as in Presentify, while nothing is being typed. */
+export const WHITEBOARD_SHORTCUTS: ShortcutInfo[] = [
+  { keys: 'V / H (or hold Space)', label: 'Select / pan' },
+  { keys: 'P / M / E / K', label: 'Pen / highlighter / eraser / laser pointer' },
+  { keys: 'L / A / R / O / D', label: 'Line / arrow / rectangle / ellipse / diamond (⇧ keeps 45° or a square)' },
+  { keys: 'T / N', label: 'Text / sticky note (double-click to edit)' },
+  { keys: '1 … 5 / 6', label: 'Colours of the palette (right-click a swatch to change it) / gradient' },
+  { keys: '[ / ]', label: 'Thinner / thicker (spotlight smaller / larger while it is on)' },
+  { keys: 'F', label: 'Spotlight around the pointer' },
+  { keys: '⌘Z / ⌘⇧Z', label: 'Undo / redo' },
+  { keys: '⌘C / ⌘X / ⌘V / ⌘D', label: 'Copy / cut / paste (also screenshots) / duplicate' },
+  { keys: '⌘A / ⌫ / arrows', label: 'Select all / delete / nudge (⇧ for 10)' },
+  { keys: '⌘] / ⌘[', label: 'Bring to front / send to back' },
+  { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / fit everything (or pinch and scroll)' }
+]
+
 export interface TabKey {
   /** Lower-cased KeyboardEvent.key ('t', '[', 'arrowdown', 'tab'). */
   key: string
@@ -87,11 +103,12 @@ export interface TabKey {
 
 export type BrowserKey = TabKey
 
-/** The Browser and Terminal tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
-const tabKeys: Partial<Record<'browser' | 'local', (k: TabKey) => boolean>> = {}
+/** The Browser, Terminal and Whiteboard tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
+type KeyedKind = 'browser' | 'local' | 'board'
+const tabKeys: Partial<Record<KeyedKind, (k: TabKey) => boolean>> = {}
 
 /** Registers (or with null removes) the key handler of an app tab kind; it returns whether it used the key. */
-export function setTabKeys(kind: 'browser' | 'local', fn: ((k: TabKey) => boolean) | null): void {
+export function setTabKeys(kind: KeyedKind, fn: ((k: TabKey) => boolean) | null): void {
   if (fn) tabKeys[kind] = fn
   else delete tabKeys[kind]
 }
@@ -140,7 +157,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
     return true
   }
   const inFront = st.gridView ? undefined : st.tabs.find((t) => t.id === st.activeTab)
-  const tabHandler = inFront && (inFront.kind === 'browser' || inFront.kind === 'local') ? tabKeys[inFront.kind] : undefined
+  const tabHandler = inFront && (inFront.kind === 'browser' || inFront.kind === 'local' || inFront.kind === 'board') ? tabKeys[inFront.kind] : undefined
   const tabCombo = (e.metaKey && !e.ctrlKey) || (e.ctrlKey && !e.metaKey && e.key === 'Tab')
   if (tabHandler && tabCombo && !e.repeat && !modalOpen() && tabHandler({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
     e.preventDefault()

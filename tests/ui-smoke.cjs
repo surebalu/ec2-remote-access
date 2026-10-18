@@ -67,6 +67,9 @@ app.on('session-created', (ses) => {
 })
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
+// Whiteboards main has saved (boards:*), and the images added to notes.
+const boardsSaved = {}
+const noteImages = []
 const shells = new Map()
 const termOut = (sh, data) => { if (!sh.sender.isDestroyed()) sh.sender.send('term:event', { id: sh.id, type: 'data', data }) }
 const termPrompt = (sh) => termOut(sh, `\x1b]7;file://fixture${sh.cwd}\x07\x1b]633;P;Git=main\x07\x1b]633;P;Aws=${sh.env?.AWS_PROFILE ?? ''}\x07\x1b]133;A\x07fixture ${sh.cwd.replace('/Users/fixture', '~')} % `)
@@ -132,6 +135,11 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
     ]
     case 'browser:fill': return ['username', 'password']
+    case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
+    case 'boards:load': return boardsSaved[args[0]] ? structuredClone(boardsSaved[args[0]]) : null
+    case 'boards:save': boardsSaved[args[0].id] = structuredClone(args[0]); return
+    case 'boards:delete': delete boardsSaved[args[0]]; return
+    case 'notes:saveImage': noteImages.push(args[1]); return `EC2 Remote/Boards/${args[0]}.png`
     case 'local:home': return '/Users/fixture'
     case 'local:reveal': return
     case 'term:history': return ['ls -la', 'git status', 'git checkout main', 'npm test']
@@ -807,6 +815,22 @@ app.whenReady().then(async () => {
     await puntil(`document.querySelectorAll('.session-grid > .session-pane').length === 1`)
     await ptap('Done')
     await puntil(`!document.querySelector('.session-grid')`)
+    // The Terminal on an iPad has room for its tabs down the side; a phone-sized window puts them across the top.
+    await ptap('More')
+    await ptap('Terminal')
+    await puntil(`!!document.querySelector('.term-side .term-tab')`)
+    await pshot('ipad-terminal.png')
+    phone.setContentSize(430, 932)
+    await puntil(`innerWidth === 430 && !!document.querySelector('.term-tabs .term-tab') && !document.querySelector('.term-side')`)
+    phone.setContentSize(1194, 834)
+    await puntil(`innerWidth === 1194 && !!document.querySelector('.term-side .term-tab')`)
+    // The whiteboard on an iPad: the toolbar fits and the page does not scroll sideways.
+    await ptap('More')
+    await ptap('Whiteboard')
+    await puntil(`!!document.querySelector('.board-toolbar') && document.querySelector('.board-svg').getClientRects().length > 0`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.board-toolbar').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight })()`), true, 'iPad: whiteboard toolbar on screen')
+    assert.equal(await noSideScroll(), true, 'iPad whiteboard: no sideways scrolling')
+    await pshot('ipad-whiteboard.png')
 
     // Signing in from a phone: the approval happens in Safari, iOS suspends the page and drops its socket, and the
     // "signed in" push is sent to nobody. The dialog must still finish by asking the computer what token it holds.
@@ -1184,6 +1208,85 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'restored tabs')
     for (let n = 0; n < 60 && opens().length < opensBefore + 1; n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'restored shell starts in its folder')
+
+    // The Whiteboard: pen, shapes, a sticky note, selecting, deleting, undo, saving, a second board, and a PNG into today's note.
+    await tjs(`document.querySelector('button[aria-label="Whiteboard"]').click()`)
+    await tuntil(`!!document.querySelector('.board-svg') && !!document.querySelector('.board-hint')`, 'whiteboard opens on an empty board')
+    for (let n = 0; n < 60 && !Object.values(boardsSaved).some((b) => b.name === 'Brainstorm'); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.ok(Object.values(boardsSaved).some((b) => b.name === 'Brainstorm'), 'a first board is created and saved')
+    assert.equal(await tjs(`document.querySelector('.bt-btn.on').getAttribute('aria-label')`), 'Pen', 'the pen is ready')
+    const ptr = (type, x, y, extra = {}) => tjs(`(() => { const r = document.querySelector('.board-svg').getBoundingClientRect(); document.querySelector('.board-svg').dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { clientX: r.left + ${x}, clientY: r.top + ${y}, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: ${type === 'pointerup' ? 0 : 1}, bubbles: true, cancelable: true, ...${JSON.stringify(extra)} })) })()`)
+    const stroke = async (points, extra) => {
+      await ptr('pointerdown', ...points[0], extra)
+      for (const p of points.slice(1)) await ptr('pointermove', ...p, extra)
+      await ptr('pointerup', ...points.at(-1), extra)
+    }
+    const boardItems = () => tjs(`document.querySelectorAll('.board-items > *').length`)
+    await stroke([[120, 200], [160, 180], [200, 210], [240, 190], [280, 220], [320, 200]])
+    await tuntil(`document.querySelectorAll('.board-items > path').length === 1 && !document.querySelector('.board-hint')`, 'a pen stroke')
+    await tkey('r')
+    await stroke([[380, 150], [450, 200], [560, 260]])
+    await tkey('a')
+    await stroke([[580, 200], [650, 205], [700, 210]])
+    await tkey('o')
+    await tkey('3')
+    await stroke([[150, 300], [250, 380], [330, 420]])
+    await tuntil(`document.querySelectorAll('.board-items > rect').length === 1 && document.querySelectorAll('.board-items > ellipse').length === 1 && document.querySelectorAll('.board-items > g polygon').length === 1`, 'rectangle, arrow and ellipse')
+    assert.equal(await tjs(`document.querySelector('.board-items > ellipse').getAttribute('stroke')`), '#0090ff', 'key 3 picks the third colour')
+    // A sticky note: placed on release, typed into, kept when the editor closes.
+    await tkey('n')
+    await ptr('pointerdown', 840, 220)
+    await ptr('pointerup', 840, 220)
+    await tuntil(`document.activeElement?.classList.contains('board-editor')`, 'the note editor has focus')
+    await tjs(`(() => { const a = document.activeElement; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, 'Ship the whiteboard on Friday'); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await tuntil(`!document.querySelector('.board-editor') && document.querySelector('.board-note')?.textContent.includes('Ship the')`, 'the note keeps its text')
+    // Text: a box sized to what was typed; an empty one disappears.
+    await tkey('t')
+    await ptr('pointerdown', 420, 330)
+    await ptr('pointerup', 420, 330)
+    await tuntil(`document.activeElement?.classList.contains('board-editor')`, 'the text editor has focus')
+    await tjs(`(() => { const a = document.activeElement; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, 'Ideas'); a.dispatchEvent(new Event('input', { bubbles: true })); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })()`)
+    await tkey('t')
+    await ptr('pointerdown', 700, 420)
+    await ptr('pointerup', 700, 420)
+    await tuntil(`document.activeElement?.classList.contains('board-editor')`)
+    await tjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await tuntil(`!document.querySelector('.board-editor')`)
+    assert.equal(await boardItems(), 6, 'pen, rectangle, arrow, ellipse, note and one text box')
+    await tshot('whiteboard.png')
+    // Marquee-select the stroke and the rectangle, delete them, then undo.
+    await tkey('v')
+    await stroke([[100, 120], [300, 180], [500, 240]])
+    await tuntil(`document.querySelector('.board-count')?.textContent === '2 selected'`, 'two selected')
+    assert.equal(await tjs(`document.querySelectorAll('.board-handle').length`), 8, 'resize handles around the selection')
+    await tkey('Backspace')
+    await tuntil(`document.querySelectorAll('.board-items > *').length === 4`, 'deleted')
+    await tkey('z', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.board-items > *').length === 6`, '⌘Z brings them back')
+    // Moving the rectangle by dragging it.
+    await tkey('Escape')
+    const rectX = await tjs(`Number(document.querySelector('.board-items > rect').getAttribute('x'))`)
+    await stroke([[380, 200], [430, 230], [480, 260]])
+    await tuntil(`Number(document.querySelector('.board-items > rect').getAttribute('x')) === ${rectX + 100}`, 'dragging moves the rectangle')
+    for (let n = 0; n < 60 && !Object.values(boardsSaved).some((b) => b.name === 'Brainstorm' && b.items.length === 6 && b.items.some((it) => it.type === 'note' && it.text.startsWith('Ship'))); n++) await new Promise((r) => setTimeout(r, 50))
+    const saved = Object.values(boardsSaved).find((b) => b.name === 'Brainstorm')
+    assert.deepEqual(saved.items.map((it) => it.type).sort(), ['arrow', 'ellipse', 'note', 'pen', 'rect', 'text'], 'the board is saved with its items')
+    // A PNG of the board into today's note.
+    await tjs(`document.querySelector('.bt-btn[aria-label="More"]').click()`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith('Add to today')).click()`)
+    for (let n = 0; n < 100 && !notes['Journal/2026-10-18.md']?.text.includes('![[Brainstorm.png]]'); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.match(noteImages.at(-1) ?? '', /^data:image\/png;base64,.{2000,}/, 'the export is a real PNG')
+    assert.ok(notes['Journal/2026-10-18.md'].text.includes('![[Brainstorm.png]]'), 'the image is embedded in the daily note')
+    // A second board starts empty and both are listed.
+    await tjs(`document.querySelector('button[aria-label="New board"]').click()`)
+    await tuntil(`document.querySelectorAll('.board-row').length === 2 && !!document.querySelector('.board-hint') && document.querySelector('.board-row.on .board-row-name').textContent === 'Board'`, 'a new empty board')
+    await tjs(`[...document.querySelectorAll('.board-row')].find((r) => r.textContent.startsWith('Brainstorm')).click()`)
+    await tuntil(`document.querySelectorAll('.board-items > *').length === 6`, 'switching back loads the first board')
+    // The shortcuts list has a whiteboard section.
+    await tkey('/', { metaKey: true })
+    await tuntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('On the whiteboard')`, 'shortcuts dialog lists the whiteboard keys')
+    await tkey('Escape')
     twin.destroy()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)

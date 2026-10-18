@@ -14,7 +14,7 @@ export interface RdpTabRequest {
 
 export interface Tab {
   id: string
-  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser' | 'local'
+  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser' | 'local' | 'board'
   instanceKey: string
   title: string
   route?: Route
@@ -109,6 +109,8 @@ interface State {
   /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
   openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
   terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; nonce: number } | null
+  /** Shows the Whiteboard tab (there is one). */
+  openBoard: () => void
   portForwardFor: { key?: string; presetId?: string } | null
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
@@ -263,6 +265,15 @@ export const useStore = create<State>((set, get) => ({
     }
     if (req) set({ terminalRequest: { ...req, nonce: Date.now() + Math.random() } })
     get().setActive(term.id)
+  },
+  openBoard: () => {
+    let board = get().tabs.find((t) => t.kind === 'board')
+    if (!board) {
+      board = { id: `board-${Date.now().toString(36)}`, kind: 'board', instanceKey: '', title: 'Whiteboard', status: 'connected' }
+      const created = board
+      set((s) => ({ tabs: [...s.tabs, created] }))
+    }
+    get().setActive(board.id)
   },
   browserRequest: null,
   openBrowser: (req) => {
@@ -708,7 +719,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser') { /* nothing in main to close: both save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board') { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
@@ -737,9 +748,9 @@ export const useStore = create<State>((set, get) => ({
 }))
 
 
-/** Remote sessions, as opposed to the Notes and Browser tabs: only sessions are tiles, counted, or saved in workspaces. */
+/** Remote sessions, as opposed to the Notes, Browser, Terminal and Whiteboard tabs: only sessions are tiles, counted, or saved in workspaces. */
 export function isSession(t: Tab): boolean {
-  return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local'
+  return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local' && t.kind !== 'board'
 }
 
 /** A tab that attaches one of a host's persistent shells on another tab's connection, replaying its scrollback. */

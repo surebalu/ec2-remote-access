@@ -49,6 +49,7 @@ function commands(): Command[] {
     { id: 'notes', title: 'Open notes', keywords: 'obsidian markdown vault', hint: '⌘⇧N', icon: Icon.note, run: () => s.openNotes() },
     { id: 'notes-today', title: "Open today's note", keywords: 'daily journal obsidian', icon: Icon.note, run: () => void window.api.invoke('notes:daily').then((p) => s.openNotes(p)) },
     { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
+    { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', icon: Icon.board, run: () => s.openBoard() },
     { id: 'terminal', title: 'New terminal tab', keywords: 'local shell zsh warp console', hint: '⌃`', icon: Icon.console, run: () => s.openTerminal({ newTab: true }), when: hasBrowser() },
     { id: 'notes-host', title: 'Open the note for this host', keywords: 'notes obsidian', icon: Icon.note, run: () => openHostNote(active!.instanceKey, active!.id), when: !!active?.instanceKey },
     { id: 'forward', title: 'Forward a port…', keywords: 'tunnel port forward database', icon: Icon.plug, run: () => s.set({ portForwardFor: {} }) },
@@ -139,7 +140,7 @@ export default function QuickSwitcher(): ReactElement {
     const tabs = s.tabs.filter((t) => !t.transient && `${t.title} ${t.shellLabel ?? ''} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
     results = [
       ...hostVerbs(query, visible),
-      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: t.kind === 'notes' || t.kind === 'browser' || t.kind === 'local' ? 'Open tab' : `Open ${t.kind.toUpperCase()} session · ${t.status}`, key: t.instanceKey || undefined, icon: t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'notes' ? Icon.note : t.kind === 'browser' ? Icon.globe : t.kind === 'local' ? Icon.console : Icon.terminal, action: () => s.setActive(t.id), hint: 'Switch' })),
+      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: t.kind === 'notes' || t.kind === 'browser' || t.kind === 'local' || t.kind === 'board' ? 'Open tab' : `Open ${t.kind.toUpperCase()} session · ${t.status}`, key: t.instanceKey || undefined, icon: t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'notes' ? Icon.note : t.kind === 'browser' ? Icon.globe : t.kind === 'local' ? Icon.console : t.kind === 'board' ? Icon.board : Icon.terminal, action: () => s.setActive(t.id), hint: 'Switch' })),
       ...hosts.map((i) => {
         const available = ['ssm', 'direct'].includes(routeOf(i, s.settings).route)
         return { id: i.key, title: i.name, subtitle: `${i.profile} · ${i.region} · ${i.instanceId}${i.staleReason ? ' · cached' : ''}`, key: i.key,

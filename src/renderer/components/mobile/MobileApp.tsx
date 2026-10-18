@@ -12,8 +12,8 @@ import Sheet, { SheetItem } from './Sheet'
 type View = 'hosts' | 'sessions' | 'more'
 
 const dotFor = (st: Tab['status']): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : <Icon.terminal />)
-const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : 'Terminal')
+const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : <Icon.terminal />)
+const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : 'Terminal')
 
 const LIST_HIDDEN_KEY = 'ui.mobileListHidden'
 
@@ -275,6 +275,11 @@ function MobileMore(): ReactElement {
         <button className="m-host" onClick={() => s.openNotes()}>
           <span className="m-host-os"><Icon.note /></span>
           <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Notes</span><span className="m-host-meta">Markdown notes on the computer running the app, a note per host</span></span>
+          <Icon.chevron className="muted" />
+        </button>
+        <button className="m-host" onClick={() => s.openBoard()}>
+          <span className="m-host-os"><Icon.board /></span>
+          <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Whiteboard</span><span className="m-host-meta">Sketch and brainstorm; draw with a finger or Apple Pencil</span></span>
           <Icon.chevron className="muted" />
         </button>
         <button className="m-host" onClick={() => s.set({ settingsOpen: true })}>

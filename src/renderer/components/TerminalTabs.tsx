@@ -7,6 +7,7 @@ import SftpTab from './SftpTab'
 import NotesTab from './NotesTab'
 import BrowserTab from './browser/BrowserTab'
 import TerminalApp from './terminal/TerminalApp'
+import BoardTab from './board/BoardTab'
 import { Icon } from './icons'
 
 const GAP = 4
@@ -16,7 +17,7 @@ const CROWDED_AT = 3
 const OVERFLOW_W = 44
 
 const dotFor = (st: string): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : <Icon.terminal />)
+const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : <Icon.terminal />)
 
 function useWindowWidth(): number {
   const [w, setW] = useState(() => window.innerWidth)
@@ -277,7 +278,7 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
               <button className="btn btn-ghost btn-sm btn-icon" title={t.persistent ? 'Close this tile (the session keeps running on the host)' : 'Close'} aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id, { detach: !!t.persistent })}><Icon.x /></button>
             </div>
             <div className="tile-body relative flex min-h-0 flex-1 flex-col">
-              {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : t.kind === 'notes' ? <NotesTab tab={t} active={shown(t.id)} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={shown(t.id)} /> : t.kind === 'local' ? <TerminalApp tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
+              {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : t.kind === 'notes' ? <NotesTab tab={t} active={shown(t.id)} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={shown(t.id)} /> : t.kind === 'local' ? <TerminalApp tab={t} active={shown(t.id)} /> : t.kind === 'board' ? <BoardTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
               {shield && (
                 <div
                   className="tile-shield"

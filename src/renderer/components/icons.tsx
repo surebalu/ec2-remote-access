@@ -264,6 +264,13 @@ export const Icon = {
       <path d="M14 3v5h5M9 12h7M9 16h5" />
     </svg>
   ),
+  /** Easel with a squiggle: the whiteboard. */
+  board: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M7 12c1.5-3 3-3 4-1s2.5 2 4-2M9 20l3-4 3 4" />
+    </svg>
+  ),
   /** Page with a plus: add to a note. */
   noteAdd: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
