@@ -34,6 +34,10 @@ export interface Tab {
   persistent?: boolean
   /** The name of the persistent shell the tab shows ("debug"), shown next to its title. */
   shellLabel?: string
+  /** tmux session id of that shell, to tell which of a host's shells already have a tab. */
+  shellName?: string
+  /** Opened only to show a shell as a tile of a host's session grid: kept out of the tab bar, closed with the grid. */
+  transient?: boolean
 }
 
 export interface Toast {
@@ -62,6 +66,13 @@ interface State {
   gridView: boolean
   /** Shows or leaves the all-sessions grid; showing it needs at least one session. */
   showGrid: (on: boolean) => void
+  /** Set while the grid shows only one host's SSH sessions (every shell kept on it), rather than every tab. */
+  gridHost: string | null
+  /**
+   * Tiles every persistent shell of a tab's host: shells without a tab here get a transient one on that tab's
+   * connection. Shells open on another device are left alone; returns how many.
+   */
+  showHostGrid: (fromId: string, shells: HostShell[]) => number
   toasts: Toast[]
   search: string
   osFilter: OsFilter
@@ -180,9 +191,22 @@ export const useStore = create<State>((set, get) => ({
   activeTab: 'hosts',
   gridView: false,
   showGrid: (on) => set((s) => {
-    if (!on || !s.tabs.length) return { gridView: false }
-    return { gridView: true, activeTab: s.tabs.some((t) => t.id === s.activeTab) ? s.activeTab : s.tabs[0].id }
+    // Either way the host grid's transient tabs go (unmounting a tab detaches its shell; it keeps running).
+    const tabs = s.tabs.filter((t) => !t.transient)
+    if (!on || !tabs.length) return { gridView: false, gridHost: null, tabs }
+    return { gridView: true, gridHost: null, tabs, activeTab: tabs.some((t) => t.id === s.activeTab) ? s.activeTab : tabs[0].id }
   }),
+  gridHost: null,
+  showHostGrid: (fromId, shells) => {
+    const st = get()
+    const from = st.tabs.find((t) => t.id === fromId)
+    if (!from?.request) return 0
+    const inTabs = new Set(st.tabs.filter((t) => t.instanceKey === from.instanceKey && t.shellName).map((t) => t.shellName))
+    const missing = shells.filter((sh) => !sh.current && !inTabs.has(sh.name))
+    const extra = missing.filter((sh) => !sh.attached).map((sh) => shellTab(from, sh, true))
+    set((s) => ({ tabs: [...s.tabs.filter((t) => !t.transient), ...extra], gridView: true, gridHost: from.instanceKey, activeTab: fromId }))
+    return missing.length - extra.length
+  },
   toasts: [],
   search: '',
   osFilter: 'all',
@@ -219,12 +243,7 @@ export const useStore = create<State>((set, get) => ({
   openShellTab: (fromId, shell) => {
     const st = get()
     const tab = st.tabs.find((t) => t.id === fromId)
-    if (!tab?.request) return
-    const nid = `ssh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-    st.addTab({
-      id: nid, kind: 'ssh', instanceKey: tab.instanceKey, title: tab.title, status: 'connecting', shellLabel: shell.label || undefined,
-      request: { ...tab.request, sessionId: nid, reuseSessionId: tab.status === 'connected' ? tab.id : undefined, shellName: shell.name, shellHistory: true, shellLabel: undefined }
-    })
+    if (tab?.request) st.addTab(shellTab(tab, shell, false))
   },
   duplicateTab: (id, split = false) => {
     const st = get()
@@ -649,7 +668,9 @@ export const useStore = create<State>((set, get) => ({
       // Focus stays inside a split when a pane closes; otherwise the neighbour to the left takes over.
       const next = inSplit && splitGroup.length ? splitGroup[Math.max(0, s.splitGroup.indexOf(id) - 1)] : (tabs[Math.max(0, idx - 1)]?.id ?? 'hosts')
       const activeTab = s.activeTab === id ? next : s.activeTab
-      return { tabs, activeTab, gridView: s.gridView && tabs.length > 0, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
+      // The host grid ends with the last of its host's terminals.
+      const hostGrid = !!s.gridHost && tabs.some((t) => t.instanceKey === s.gridHost && t.kind === 'ssh')
+      return { tabs, activeTab, gridView: s.gridView && tabs.length > 0 && (!s.gridHost || hostGrid), gridHost: hostGrid ? s.gridHost : null, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
     })
   },
   toggleTerminalPane: (open) => {
@@ -658,9 +679,22 @@ export const useStore = create<State>((set, get) => ({
     try { localStorage.setItem(TERMINAL_PANE_KEY, next ? '1' : '0') } catch { /* storage unavailable */ }
   },
   // Picking a tab or Hosts shows it on its own; tiles in the grid take focus through set({ activeTab }).
-  setActive: (id) => set({ activeTab: id, gridView: false })
+  // Leaving a host grid closes its transient tabs, except the one picked, which becomes a normal tab.
+  setActive: (id) => set((s) => ({
+    activeTab: id, gridView: false, gridHost: null,
+    tabs: s.tabs.some((t) => t.transient) ? s.tabs.filter((t) => !t.transient || t.id === id).map((t) => (t.id === id && t.transient ? { ...t, transient: false } : t)) : s.tabs
+  }))
 }))
 
+
+/** A tab that attaches one of a host's persistent shells on another tab's connection, replaying its scrollback. */
+function shellTab(from: Tab, shell: HostShell, transient: boolean): Tab {
+  const id = `ssh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  return {
+    id, kind: 'ssh', instanceKey: from.instanceKey, title: from.title, status: 'connecting', shellLabel: shell.label || undefined, shellName: shell.name, transient,
+    request: { ...from.request!, sessionId: id, reuseSessionId: from.status === 'connected' ? from.id : undefined, shellName: shell.name, shellHistory: true, shellLabel: undefined }
+  }
+}
 
 /** Reopens one saved workspace tab through the same openers the hosts table uses. */
 function openWorkspaceTab(t: WorkspaceTab): void {

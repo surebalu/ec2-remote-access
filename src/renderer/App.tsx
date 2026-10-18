@@ -2,7 +2,7 @@ import { useEffect, type ReactElement } from 'react'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import InstanceTable from './components/InstanceTable'
-import TerminalTabs, { SessionPanes } from './components/TerminalTabs'
+import TerminalTabs, { HostGridBar, SessionPanes } from './components/TerminalTabs'
 import ConnectDialog from './components/ConnectDialog'
 import PasswordDialog from './components/PasswordDialog'
 import SettingsDialog from './components/SettingsDialog'
@@ -125,6 +125,7 @@ export default function App(): ReactElement {
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />
           <div className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
+          <HostGridBar />
           <SessionPanes grid={gridView} />
           <TunnelBar />
         </main>

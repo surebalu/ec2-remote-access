@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { useStore, type Tab } from '../../store'
-import { nativeApp, postNative, setLayoutPreference, trackVisualViewport } from '../../mobile'
+import { nativeApp, postNative, setLayoutPreference, trackVisualViewport, WIDE_QUERY } from '../../mobile'
 import { SessionPanes } from '../TerminalTabs'
 import AuthBanner from '../AuthBanner'
 import { Icon } from '../icons'
@@ -16,7 +16,6 @@ const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.k
 const LIST_HIDDEN_KEY = 'ui.mobileListHidden'
 
 /** Unfolded foldables and tablets: list and session side by side. Phones in landscape are too short for it. */
-const WIDE_QUERY = '(min-width: 700px) and (min-height: 500px)'
 function useWide(): boolean {
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches)
   useEffect(() => {
@@ -52,10 +51,13 @@ export default function MobileApp(): ReactElement {
   const fullSession = wide && listHidden && !!active
   // All sessions tiled on one screen: only where there is room for tiles (tablets, unfolded foldables).
   const grid = wide && s.gridView && s.tabs.length > 0
+  // A host grid's transient tabs are tiles, not sessions to list.
+  const listed = s.tabs.filter((t) => !t.transient)
+  const hostTitle = s.gridHost ? s.tabs.find((t) => t.instanceKey === s.gridHost)?.title.replace(/ @ .*/, '') : undefined
 
   useEffect(() => trackVisualViewport(), [])
   // The iOS app keeps the screen awake while sessions are open, so a terminal left running doesn't lock the phone.
-  useEffect(() => postNative({ type: 'sessions', count: s.tabs.length }), [s.tabs.length])
+  useEffect(() => postNative({ type: 'sessions', count: listed.length }), [listed.length])
   useEffect(() => {
     document.documentElement.toggleAttribute('data-mobile-session', !!active)
     return () => document.documentElement.removeAttribute('data-mobile-session')
@@ -82,7 +84,7 @@ export default function MobileApp(): ReactElement {
         <nav className="m-tabbar" aria-label="Sections">
           <button className={view === 'hosts' ? 'on' : ''} onClick={() => setView('hosts')}><Icon.cloud /><span>Hosts</span></button>
           <button className={view === 'sessions' ? 'on' : ''} onClick={() => setView('sessions')}>
-            <span className="relative"><Icon.layers />{s.tabs.length > 0 && <span className="m-badge">{s.tabs.length}</span>}</span><span>Sessions</span>
+            <span className="relative"><Icon.layers />{listed.length > 0 && <span className="m-badge">{listed.length}</span>}</span><span>Sessions</span>
           </button>
           <button className={view === 'more' ? 'on' : ''} onClick={() => setView('more')}><Icon.more /><span>More</span></button>
         </nav>
@@ -93,7 +95,7 @@ export default function MobileApp(): ReactElement {
             <button className="m-header-btn" aria-label={fullSession ? 'Show host list' : 'Full screen session'} aria-pressed={fullSession} onClick={toggleList}>
               <Icon.panelRight filled={!fullSession} className="-scale-x-100" />
             </button>
-            <div className="m-session-title"><Icon.grid /><span className="truncate">All sessions</span><span className="mono muted">{s.tabs.length}</span></div>
+            <div className="m-session-title"><Icon.grid /><span className="truncate">{hostTitle ?? 'All sessions'}</span><span className="mono muted">{s.gridHost ? s.tabs.filter((t) => t.instanceKey === s.gridHost && t.kind === 'ssh').length : listed.length}</span></div>
             <button className="m-header-btn" onClick={() => s.showGrid(false)}>Done</button>
           </header>
         ) : active ? (
@@ -114,11 +116,11 @@ export default function MobileApp(): ReactElement {
               {active.shellLabel && <span className="shell-chip">{active.shellLabel}</span>}
               {active.status === 'connected' && active.route && <span className={`m-route ${active.route}`}>{active.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
             </div>
-            {wide && s.tabs.length > 1 && (
+            {wide && listed.length > 1 && (
               <button className="m-header-btn" aria-label="All sessions on one screen" onClick={() => s.showGrid(true)}><Icon.grid /></button>
             )}
             <button className="m-header-btn" aria-label="Switch session" onClick={() => setSwitcher(true)}>
-              <Icon.layers /><span className="mono">{s.tabs.length}</span>
+              <Icon.layers /><span className="mono">{listed.length}</span>
             </button>
           </header>
         ) : (
@@ -138,7 +140,7 @@ export default function MobileApp(): ReactElement {
       </section>
       {switcher && (
         <Sheet title="Sessions" onClose={() => setSwitcher(false)}>
-          {s.tabs.map((t) => (
+          {listed.map((t) => (
             <SheetItem key={t.id} icon={kindIcon(t)} hint={<span className="dot" style={{ background: dotFor(t.status) }} />} onClick={() => { setSwitcher(false); s.setActive(t.id) }}>
               {t.title.replace(/ @ .*/, '')}{t.shellLabel ? ` · ${t.shellLabel}` : ''} <span className="muted">· {kindLabel(t)}</span>
             </SheetItem>
@@ -152,13 +154,14 @@ export default function MobileApp(): ReactElement {
 
 function MobileSessions({ wide }: { wide: boolean }): ReactElement {
   const s = useStore()
-  if (!s.tabs.length && !s.tunnels.length) {
+  const tabs = s.tabs.filter((t) => !t.transient)
+  if (!tabs.length && !s.tunnels.length) {
     return <div className="m-empty"><p>No open sessions. Pick a host to start a terminal, desktop or file browser.</p></div>
   }
   return (
     <div className="m-list-page">
-      {s.tabs.length > 0 && <h3 className="m-group-title">Open sessions</h3>}
-      {wide && s.tabs.length > 1 && (
+      {tabs.length > 0 && <h3 className="m-group-title">Open sessions</h3>}
+      {wide && tabs.length > 1 && (
         <div className="m-card-list mb-3">
           <button className={`m-host ${s.gridView ? 'on' : ''}`} onClick={() => s.showGrid(true)}>
             <span className="m-host-os"><Icon.grid /></span>
@@ -170,7 +173,7 @@ function MobileSessions({ wide }: { wide: boolean }): ReactElement {
         </div>
       )}
       <div className="m-card-list">
-        {s.tabs.map((t) => (
+        {tabs.map((t) => (
           <div key={t.id} className={`m-host ${s.activeTab === t.id ? 'on' : ''}`} role="button" tabIndex={0} onClick={() => s.setActive(t.id)}>
             <span className="m-host-os">{kindIcon(t)}</span>
             <span className="min-w-0 flex-1 text-left">

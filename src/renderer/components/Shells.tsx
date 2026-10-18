@@ -89,9 +89,11 @@ export function DetachedShells({ shells, mobile, onResume, onEnd, onDismiss }: {
  * names it, the tab button opens it in a tab of its own, End stops one nobody is showing. A new session can be named
  * as it starts.
  */
-export function ShellList({ shells, variant, onSwitch, onNew, onRename, onOpenInTab, onEnd }: {
+export function ShellList({ shells, variant, onSwitch, onNew, onRename, onOpenInTab, onEnd, onShowAll }: {
   shells: HostShell[] | null
   variant: 'menu' | 'sheet'
+  /** Tiles every session of the host on one screen; absent where tiles would not fit (a phone). */
+  onShowAll?: () => void
   onSwitch: (sh: HostShell) => void
   onNew: (label: string) => void
   onRename: (sh: HostShell, label: string) => void
@@ -115,6 +117,11 @@ export function ShellList({ shells, variant, onSwitch, onNew, onRename, onOpenIn
   return (
     <div className={`shell-list ${variant}`}>
       {shells === null && <div className="shell-empty muted">Loading the sessions on this host…</div>}
+      {onShowAll && shells && shells.length > 1 && (
+        <button className="shell-all-btn" onClick={onShowAll}>
+          <Icon.grid /> All {shells.length} sessions on one screen
+        </button>
+      )}
       {shells?.map((sh, i) => (
         <div
           key={sh.name}

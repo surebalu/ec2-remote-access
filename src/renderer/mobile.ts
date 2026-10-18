@@ -25,6 +25,9 @@ function decideLayout(): boolean {
 }
 
 const MOBILE = decideLayout()
+
+/** Touch screens wide enough for list and session side by side (tablets, unfolded foldables), and for tiles. */
+export const WIDE_QUERY = '(min-width: 700px) and (min-height: 500px)'
 if (MOBILE) document.documentElement.setAttribute('data-mobile', '')
 
 export function isMobile(): boolean {
