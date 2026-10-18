@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { basename, resolve, sep } from 'node:path'
 import { startDeviceFlow, waitForDeviceFlow, saveSsoProfiles, cancelDeviceFlow, addStaticProfile, removeProfile, renameProfile, ssoSessionsInConfig, sessionTokenInfo, loginExistingSession } from './aws/sso'
 import type { IpcApi } from '@shared/ipc'
 import { host } from './host'
@@ -8,6 +10,8 @@ import { windowsPassword } from './aws/passwords'
 import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
 import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
+import { opLogins, opSecrets } from './onepassword'
+import { loginMatches } from '@shared/browser'
 import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
@@ -138,6 +142,23 @@ export const handlers: Handlers = {
   'browser:save': (state) => saveBrowserState(state),
   'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
   'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
+  'browser:openDownload': async (path, how) => {
+    const dir = host().downloadsDir()
+    if (!dir) return
+    // Only what the browser put in Downloads: the renderer never gets to open arbitrary files.
+    const target = path ? resolve(path) : dir
+    if (target !== dir && !target.startsWith(dir + sep)) throw new Error('Only files in your Downloads folder can be opened from here.')
+    if (path && !existsSync(target)) throw new Error(`${basename(target)} is no longer in your Downloads folder.`)
+    if (how === 'reveal' && path) host().revealPath(target)
+    else await host().openPath(target)
+  },
+  'browser:cancelDownload': async (id) => host().cancelDownload(id),
+  'browser:logins': async (pageUrl, refresh) => (await opLogins(refresh)).map((l) => ({ ...l, matches: loginMatches(l.urls, pageUrl) })),
+  'browser:fill': async (webContentsId, account, itemId, anySite) => {
+    const login = (await opLogins()).find((l) => l.id === itemId && l.account === account)
+    if (!login) throw new Error('That 1Password item is no longer there.')
+    return host().fillWebPage(webContentsId, await opSecrets(account, itemId), anySite ? null : login.urls)
+  },
   'clipboard:write': async (text) => {
     if (!host().clipboardWrite(text)) throw new Error('No clipboard on this host')
   },

@@ -4,7 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -105,6 +105,16 @@ export interface IpcApi {
   'browser:save': (state: BrowserState) => Promise<void>
   /** A one-time sign-in link to the AWS console of `profile` (SSO credentials), landing on `destination`. */
   'browser:consoleUrl': (profile: string, destination: string) => Promise<string>
+  /** Opens a downloaded file, shows it in Finder, or opens the Downloads folder (no path). Only inside Downloads. */
+  'browser:openDownload': (path: string | null, how: 'open' | 'reveal') => Promise<void>
+  'browser:cancelDownload': (id: string) => Promise<void>
+  /** 1Password logins (through the 1Password CLI), those saved for `pageUrl`'s site marked `matches`. */
+  'browser:logins': (pageUrl: string, refresh?: boolean) => Promise<WebLogin[]>
+  /**
+   * Types a 1Password login into a page (by its webContents id); returns what was filled ('username', 'password',
+   * 'code'). Refuses a page on another site than the login's unless `anySite` (the user confirmed).
+   */
+  'browser:fill': (webContentsId: number, account: string, itemId: string, anySite?: boolean) => Promise<string[]>
   /** The system Share menu for a page; false when the host has none (gateway). */
   'browser:share': (url: string) => Promise<boolean>
   'clipboard:write': (text: string) => Promise<void>
@@ -133,9 +143,12 @@ export interface IpcEvents {
   'web:window': { webContentsId: number; url: string; background: boolean }
   /** A browser shortcut pressed while a page had the keyboard (pages swallow keys before the app sees them). */
   'web:shortcut': { webContentsId: number; key: string; shift: boolean; alt: boolean }
-  /** A page context-menu action the app carries out (Add to note). */
-  'web:menu': { webContentsId: number; action: 'note'; url: string; title: string }
-  'web:download': { name: string; path: string; state: 'completed' | 'cancelled' | 'interrupted' }
+  /** The mouse went down inside a page (the app's document never sees those clicks). */
+  'web:pointer': { webContentsId: number }
+  /** A page context-menu action the app carries out (Add to note, Fill from 1Password). */
+  'web:menu': { webContentsId: number; action: 'note' | 'fill'; url: string; title: string }
+  /** A download started, progressed or finished (main/webviews.ts). */
+  'web:download': WebDownload
 }
 
 export type IpcChannel = keyof IpcApi

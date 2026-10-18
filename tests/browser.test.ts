@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { frequentSites, matchesWords, searchHistory } from '../src/shared/browser.ts'
+import { frequentSites, loginMatches, matchesWords, searchHistory, siteOf } from '../src/shared/browser.ts'
 import { AWS_SERVICES, consoleHome, ec2InstanceUrl, federationLoginUrl, federationTokenUrl, hostOf, isAwsConsoleUrl, isAwsSignInPage, isWebUrl, normalizeInput, partitionFor, restorableUrl, signInDestination } from '../src/shared/browser.ts'
 
 test('typed text becomes an address, or a search', () => {
@@ -63,4 +63,17 @@ test('the command bar matches every word, and history is newest first without re
   assert.deepEqual(searchHistory(h, 'alpha', 5).map((x) => x.at), [4, 3])
   assert.deepEqual(searchHistory(h, '', 5, 'aws-pplm').map((x) => x.url), ['https://b.com/'])
   assert.deepEqual(frequentSites(h, 'general', 4), [{ host: 'a.com', url: 'https://a.com/', visits: 3 }])
+})
+
+test('saved logins match pages of the same site, never another one', () => {
+  assert.equal(siteOf('jira.example.com'), 'example.com')
+  assert.equal(siteOf('a.example.co.uk'), 'example.co.uk')
+  assert.equal(siteOf('10.1.2.3'), '10.1.2.3')
+  assert.equal(siteOf('localhost'), 'localhost')
+  assert.equal(loginMatches(['https://id.example.com/login'], 'https://jira.example.com/browse/X-1'), true)
+  assert.equal(loginMatches(['example.com'], 'https://example.com/'), true)
+  assert.equal(loginMatches(['https://example.com'], 'https://example.com.evil.io/'), false)
+  assert.equal(loginMatches(['https://examplecorp.com'], 'https://example.com/'), false)
+  assert.equal(loginMatches([], 'https://example.com/'), false)
+  assert.equal(loginMatches(['https://example.com'], 'about:blank'), false)
 })

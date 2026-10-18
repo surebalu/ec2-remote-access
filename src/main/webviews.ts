@@ -4,8 +4,11 @@
  * full screen. It also gives pages what a browser has and a bare guest lacks: new windows become tabs, a context menu,
  * app shortcuts while a page has the keyboard, and download notices. Electron-only (index.ts calls it).
  */
-import { app, BrowserWindow, clipboard, Menu, shell, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
-import { isWebUrl } from '@shared/browser'
+import { existsSync } from 'node:fs'
+import { basename, extname, join } from 'node:path'
+import { app, BrowserWindow, clipboard, Menu, shell, webContents, type DownloadItem, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
+import { isWebUrl, loginMatches } from '@shared/browser'
+import type { WebDownload } from '@shared/types'
 
 /** Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them). */
 const FORWARDED = new Set(['t', 'w', 'l', 'r', '[', ']', '{', '}', 'f', 'k', 's', 'd', '=', '+', '-', '0', 'n', 'b', 'c'])
@@ -25,6 +28,63 @@ export function initWebviews(win: BrowserWindow): void {
 }
 
 const seenSessions = new WeakSet<Session>()
+/** Downloads still running, by the id the renderer knows them by (for Cancel). */
+const running = new Map<string, DownloadItem>()
+const reserved = new Set<string>()
+
+/** "report.pdf" in the Downloads folder, or "report (1).pdf" when that is taken (also by a download in progress). */
+function freePath(dir: string, name: string): string {
+  const ext = extname(name)
+  const stem = basename(name, ext) || 'download'
+  let p = join(dir, `${stem}${ext}`)
+  for (let n = 1; existsSync(p) || reserved.has(p); n++) p = join(dir, `${stem} (${n})${ext}`)
+  return p
+}
+
+export function cancelDownload(id: string): void {
+  running.get(id)?.cancel()
+}
+
+/**
+ * Finds the login fields of the page and types the values in: the username field before the password field (or one
+ * marked autocomplete=username/email), the password field, and a one-time code field on a page that asks only for a
+ * code. Values go through the native setter plus input/change events so frameworks (React, Angular) see them.
+ */
+const FILL_SCRIPT = `(v) => {
+  const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+  const inputs = [...document.querySelectorAll('input')].filter((i) => visible(i) && !i.disabled && !i.readOnly)
+  const hint = (i) => [i.name, i.id, i.placeholder, i.getAttribute('aria-label'), i.autocomplete].join(' ')
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+  const put = (el, value) => { el.focus(); setter.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+  const textual = (i) => ['text', 'email', 'tel', ''].includes(i.type)
+  const filled = []
+  const pw = inputs.find((i) => i.type === 'password')
+  if (v.username) {
+    const user = inputs.find((i) => /username|email/.test(i.autocomplete))
+      ?? (pw ? inputs.slice(0, inputs.indexOf(pw)).reverse().find(textual) : inputs.find((i) => textual(i) && /user|login|mail|account|name/i.test(hint(i))))
+    if (user) { put(user, v.username); filled.push('username') }
+  }
+  if (pw && v.password) { put(pw, v.password); filled.push('password') }
+  if (!pw && v.otp) {
+    const code = inputs.find((i) => i.autocomplete === 'one-time-code' || /otp|totp|mfa|2fa|one.?time|verif|code/i.test(hint(i)))
+    if (code) { put(code, v.otp); filled.push('code') }
+  }
+  if (filled.length) document.activeElement?.blur?.()
+  return filled
+}`
+
+/**
+ * Types a login into a browser page. Runs in an isolated world (page scripts cannot see or patch the code doing it)
+ * and checks, right before filling, that the page is still on a site the login is saved for (unless `allowedUrls` is
+ * null because the user confirmed another site).
+ */
+export async function fillPage(webContentsId: number, values: { username?: string; password?: string; otp?: string }, allowedUrls: string[] | null): Promise<string[]> {
+  const wc = webContents.fromId(webContentsId)
+  if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') throw new Error('That page is closed.')
+  if (allowedUrls && !loginMatches(allowedUrls, wc.getURL())) throw new Error('This page is not on the site the login is saved for; nothing was filled.')
+  const result = await wc.executeJavaScriptInIsolatedWorld(1000, [{ code: `(${FILL_SCRIPT})(${JSON.stringify(values)})` }], true)
+  return Array.isArray(result) ? result.map(String) : []
+}
 
 /** Per-partition setup, once: deny permissions, report downloads. */
 function prepareSession(session: Session, host: WebContents): void {
@@ -32,9 +92,29 @@ function prepareSession(session: Session, host: WebContents): void {
   seenSessions.add(session)
   session.setPermissionRequestHandler((_wc, permission, done) => done(ALLOWED_PERMISSIONS.has(permission)))
   session.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission))
+  // Like a browser, files go straight to Downloads (no save dialog), and the sidebar's Downloads button shows them.
   session.on('will-download', (_e, item) => {
+    const id = `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    const path = freePath(app.getPath('downloads'), item.getFilename())
+    item.setSavePath(path)
+    reserved.add(path)
+    running.set(id, item)
+    const at = Date.now()
+    const report = (state: WebDownload['state'], icon?: string): void => {
+      if (!host.isDestroyed()) host.send('web:download', { id, name: basename(path), path, state, received: item.getReceivedBytes(), total: item.getTotalBytes(), at, icon })
+    }
+    report('progressing')
+    let last = 0
+    item.on('updated', () => {
+      if (Date.now() - last < 300) return
+      last = Date.now()
+      report('progressing')
+    })
     item.once('done', (_ev, state) => {
-      if (!host.isDestroyed()) host.send('web:download', { name: item.getFilename(), path: item.getSavePath(), state })
+      running.delete(id)
+      reserved.delete(path)
+      if (state !== 'completed') return report(state)
+      app.getFileIcon(path, { size: 'normal' }).then((i) => report(state, i.toDataURL()), () => report(state))
     })
   })
 }
@@ -53,6 +133,9 @@ app.on('web-contents-created', (_e, contents) => {
   contents.on('will-navigate', (e, url) => { if (!isWebUrl(url)) e.preventDefault() })
   contents.on('will-frame-navigate', (e) => { if (e.isMainFrame && !isWebUrl(e.url)) e.preventDefault() })
 
+  contents.on('before-mouse-event', (_e, mouse) => {
+    if (mouse.type === 'mouseDown') host()?.send('web:pointer', { webContentsId: contents.id })
+  })
   contents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return
     const key = input.key.toLowerCase()
@@ -85,6 +168,10 @@ app.on('web-contents-created', (_e, contents) => {
       )
     }
     if (p.isEditable) {
+      items.push(
+        { label: 'Fill from 1Password…', click: () => h?.send('web:menu', { webContentsId: contents.id, action: 'fill', url: contents.getURL(), title: contents.getTitle() }) },
+        { type: 'separator' }
+      )
       items.push({ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'selectAll' }, { type: 'separator' })
     } else if (p.selectionText.trim()) {
       const text = p.selectionText.trim()

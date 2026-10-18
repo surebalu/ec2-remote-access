@@ -324,6 +324,8 @@ export interface WebTab {
   favorite?: boolean
   /** The page a pinned tab or favorite goes back to when it is unloaded (⌘W) or reset. */
   homeUrl?: string
+  /** A name the user gave a pinned tab or favorite, shown instead of the page's title. */
+  name?: string
   lastActive: number
 }
 
@@ -332,6 +334,33 @@ export interface WebHistoryEntry {
   title: string
   spaceId: string
   at: number
+}
+
+/** A 1Password login as the browser's Fill menu lists it: no secrets, only what identifies it. */
+export interface WebLogin {
+  id: string
+  /** The 1Password account (user id) the item is in. */
+  account: string
+  accountName: string
+  title: string
+  username: string
+  vault: string
+  urls: string[]
+  /** Saved for the site of the page it was asked for. */
+  matches: boolean
+}
+
+/** A file the browser downloaded (always into the Downloads folder). */
+export interface WebDownload {
+  id: string
+  name: string
+  path: string
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted'
+  received: number
+  total: number
+  at: number
+  /** The file's Finder icon as a data URL, once it has finished. */
+  icon?: string
 }
 
 /** Everything the browser keeps between runs (main/browser.ts, browser.json beside the settings). */
@@ -345,6 +374,12 @@ export interface BrowserState {
   /** Last favicon seen per host, for the start page's frequent sites. */
   favicons?: Record<string, string>
   sidebarHidden?: boolean
+  /** Recent downloads, newest first. */
+  downloads?: WebDownload[]
+  /** Page zoom for every page in the browser (1 = 100%). */
+  zoom?: number
+  /** Sidebar width in px when the user dragged its edge; unset = the default. */
+  sidebarWidth?: number
 }
 
 /** Where notes live (main/notes.ts) and how that was decided. */

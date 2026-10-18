@@ -29,6 +29,12 @@ export function createGatewayHost(dataDir: string, broadcast: (channel: string, 
       mkdirSync(trash, { recursive: true })
       for (const p of paths) renameSync(p, join(trash, `${Date.now()}-${basename(p)}`))
     },
+    downloadsDir: () => null,
+    openPath: async () => undefined,
+    cancelDownload: () => undefined,
+    fillWebPage: async () => {
+      throw new Error('Filling pages needs the Mac app.')
+    },
     shareUrl: () => false,
     clipboardWrite: () => false,
     setThemeSource: () => undefined,

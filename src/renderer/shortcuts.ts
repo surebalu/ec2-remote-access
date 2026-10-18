@@ -37,13 +37,16 @@ export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘[ / ⌘]', label: 'Back / forward' },
   { keys: '⌘R / ⌘⇧R', label: 'Reload / reload without cache' },
   { keys: '⌃Tab / ⌃⇧Tab', label: 'Next / previous tab in the space' },
-  { keys: '⌥⌘↓ / ⌥⌘↑', label: 'Next / previous space' },
+  { keys: '⌥⌘↓ / ⌥⌘↑', label: 'Next / previous space (or swipe sideways on the sidebar)' },
+  { keys: '⌘⇧[ / ⌘⇧]', label: 'Leave the browser for the previous / next app tab' },
   { keys: '⌘D', label: 'Pin or unpin the tab in its space' },
   { keys: '⌘⇧D', label: 'Add to or remove from Favorites (shown in every space)' },
   { keys: '⌘S', label: 'Show / hide the browser sidebar' },
   { keys: '⌘F', label: 'Find in page' },
   { keys: '⌘⇧C', label: 'Copy the page address' },
-  { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset' }
+  { keys: '⌘⇧L', label: 'Fill the login from 1Password' },
+  { keys: '⌘1 … ⌘8 / ⌘9', label: 'Tab 1 … 8 in the sidebar (Favorites first) / the last tab' },
+  { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset (one zoom for every page)' }
 ]
 
 export interface BrowserKey {

@@ -1,8 +1,8 @@
-import type { DragEvent, ReactElement } from 'react'
+import type { CSSProperties, DragEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccentColor, BrowserState, WebSpace, WebTab } from '@shared/types'
 import {
-  consoleHome, frequentSites, hostOf, isAwsConsoleUrl, isAwsSignInPage, isFederationUrl, matchesWords, normalizeInput,
+  consoleHome, frequentSites, hostOf, isAwsConsoleUrl, isAwsSignInPage, isFederationUrl, isWebUrl, matchesWords, normalizeInput,
   partitionFor, restorableUrl, searchHistory, signInDestination, spaceIdForProfile
 } from '@shared/browser'
 import { useStore, type Tab } from '../../store'
@@ -13,6 +13,8 @@ import Popover, { MenuItem, MenuLabel, MenuSep } from '../Popover'
 import Webview, { type WebviewEl, type WebviewEvents } from './Webview'
 import CommandBar, { type Suggestion } from './CommandBar'
 import StartPage from './StartPage'
+import Downloads from './Downloads'
+import OnePassword from './OnePassword'
 import { Favicon, ServiceBadge, SPACE_SERVICES, SpaceAvatar, type Space } from './parts'
 
 /**
@@ -28,6 +30,17 @@ const MAX_LIVE = 12
 const ZOOMS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 const MAX_HISTORY = 1500
 const inElectron = /\bElectron\//.test(navigator.userAgent)
+
+const SIDEBAR_WIDTH = { default: 208, min: 200, max: 380 }
+
+/** What the sidebar calls a tab: the name the user gave it, else the page title, else its site. */
+const tabLabel = (t: WebTab): string => t.name || t.title || hostOf(t.url || t.homeUrl || '') || 'New Tab'
+
+/** The sidebar's order, which ⌘1…⌘9 and ⌃Tab follow: Favorites, then the space's Pinned, then its Today. */
+function sidebarOrder(s: BrowserState): WebTab[] {
+  const mine = s.tabs.filter((t) => t.spaceId === s.activeSpace && !t.favorite)
+  return [...s.tabs.filter((t) => t.favorite), ...mine.filter((t) => t.pinned), ...mine.filter((t) => !t.pinned)]
+}
 
 const newId = (): string => `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 
@@ -62,7 +75,6 @@ interface Runtime {
   signingIn?: boolean
   back?: boolean
   fwd?: boolean
-  zoom?: number
 }
 
 type Zone = 'favorite' | 'pinned' | 'today'
@@ -72,6 +84,9 @@ type MenuState =
   | { kind: 'space'; id: string; anchor: HTMLElement }
   | { kind: 'page'; anchor: HTMLElement }
   | { kind: 'newSpace'; anchor: HTMLElement; edit?: string }
+  | { kind: 'editTab'; id: string; anchor: HTMLElement }
+  | { kind: 'downloads'; anchor: HTMLElement }
+  | { kind: 'fill'; anchor: HTMLElement; tabId: string }
 
 function initialState(saved: BrowserState | null): BrowserState {
   const s = saved ?? { spaces: [GENERAL], tabs: [], activeSpace: GENERAL.id, activeTab: {}, history: [] }
@@ -81,6 +96,8 @@ function initialState(saved: BrowserState | null): BrowserState {
     tabs: (s.tabs ?? []).map((t) => ({ ...t, url: restorableUrl(t.url) })),
     activeTab: s.activeTab ?? {},
     history: s.history ?? [],
+    // A download cannot outlive the app run that started it.
+    downloads: (s.downloads ?? []).map((d) => (d.state === 'progressing' ? { ...d, state: 'interrupted' as const } : d)),
     favicons: s.favicons ?? {}
   }
 }
@@ -115,6 +132,11 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const [drop, setDrop] = useState<{ target: string; where: 'before' | 'after' | 'on' } | null>(null)
   const [dragging, setDragging] = useState(false)
   const [spaceDraft, setSpaceDraft] = useState<{ name: string; color: AccentColor }>({ name: '', color: 'violet' })
+  /** A download finished since the Downloads popover was last opened (a dot on its button). */
+  const [unseenDownloads, setUnseenDownloads] = useState(false)
+  const [tabDraft, setTabDraft] = useState<{ name: string; url: string; error?: string }>({ name: '', url: '' })
+  /** Dragging the sidebar's edge: where the drag started. */
+  const [resizing, setResizing] = useState<{ x: number; width: number } | null>(null)
   /** Bumped to focus the start page's command bar (⌘T / ⌘L while it shows). */
   const [startFocus, setStartFocus] = useState(0)
 
@@ -128,6 +150,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const dragId = useRef<string | null>(null)
   const findInput = useRef<HTMLInputElement>(null)
   const handledRequest = useRef<number | null>(null)
+  /** Two-finger horizontal swipe on the sidebar (like Arc): distance so far, and the gesture that already switched. */
+  const swipe = useRef({ dx: 0, at: 0, done: false })
   /** Mount order of the pages. React moves keyed nodes when a list reorders, and moving a <webview> reloads it. */
   const mountOrder = useRef<string[]>([])
 
@@ -292,11 +316,25 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     const at = list.findIndex((x) => x.id === stRef.current?.activeSpace)
     switchSpace(list[(at + step + list.length) % list.length].id)
   }
+  /**
+   * A sideways two-finger swipe on the sidebar switches space, once per gesture: the trackpad's momentum keeps
+   * sending events, so a new switch needs a pause between events (a new gesture) first.
+   */
+  const onSidebarWheel = (e: { deltaX: number; deltaY: number }): void => {
+    const w = swipe.current
+    const now = Date.now()
+    if (now - w.at > 180) Object.assign(w, { dx: 0, done: false })
+    w.at = now
+    if (w.done || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+    w.dx += e.deltaX
+    if (Math.abs(w.dx) < 70) return
+    w.done = true
+    cycleSpace(w.dx > 0 ? 1 : -1)
+  }
   const cycleTab = (step: number): void => {
     const s = stRef.current
     if (!s) return
-    const mine = s.tabs.filter((t) => t.spaceId === s.activeSpace && !t.favorite)
-    const list = [...s.tabs.filter((t) => t.favorite), ...mine.filter((t) => t.pinned), ...mine.filter((t) => !t.pinned)]
+    const list = sidebarOrder(s)
     if (!list.length) return
     const at = list.findIndex((t) => t.id === s.activeTab[s.activeSpace])
     activate(list[(at + step + list.length) % list.length].id)
@@ -400,15 +438,16 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     const v = id ? views.current.get(id) : undefined
     if (v) safely(() => fn(v), undefined)
   }
+  /**
+   * One zoom for the whole browser, applied to every page. Chromium keeps zoom per site, so each page gets it again
+   * whenever it attaches or loads a document (onReady).
+   */
   const setZoom = (z: number): void => {
-    const c = currentRef.current
-    const v = el()
-    if (!c || !v) return
-    safely(() => v.setZoomFactor(z), undefined)
-    patchRt(c.id, { zoom: z })
+    update((s) => ({ ...s, zoom: z === 1 ? undefined : z }))
+    for (const v of views.current.values()) safely(() => v.setZoomFactor(z), undefined)
   }
   const zoomStep = (step: number): void => {
-    const z = (currentRef.current && rt[currentRef.current.id]?.zoom) || 1
+    const z = stRef.current?.zoom ?? 1
     const i = ZOOMS.findIndex((x) => x >= z - 0.001)
     setZoom(ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, (i < 0 ? ZOOMS.indexOf(1) : i) + step))])
   }
@@ -466,9 +505,38 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     // New favorites go to the end of the grid.
     update((s) => ({ ...s, tabs: [...s.tabs.filter((x) => x.id !== id), { ...t, favorite: true, pinned: false, homeUrl: t.pinned ? t.homeUrl : t.url }] }))
   }
+  /** Saves the Edit form of a pinned tab or favorite; returns an error to show, or null. */
+  const saveTabEdit = (id: string, name: string, address: string): string | null => {
+    const t = findTab(id)
+    if (!t) return null
+    const typed = address.trim()
+    const url = typed ? normalizeInput(typed) : ''
+    if (typed && (!isWebUrl(url) || (url.startsWith('https://www.google.com/search?') && !/^https?:\/\//i.test(typed)))) return 'Enter a web address, like jira.example.com or https://…'
+    const moved = !!url && url !== (t.homeUrl ?? t.url)
+    patchTab(id, { name: name.trim() || undefined, ...(moved ? { homeUrl: url } : {}) })
+    if (moved) {
+      if (live.includes(id)) void loadInto(id, t.spaceId, url)
+      else patchTab(id, { url })
+    }
+    return null
+  }
   const resetToHome = (id: string): void => {
     const t = findTab(id)
     if (t?.homeUrl) void loadInto(id, t.spaceId, t.homeUrl)
+  }
+  /** Opens Fill from 1Password for the page on screen, under the key button in the address pill. */
+  const openFill = (): void => {
+    const c = currentRef.current
+    if (!c?.url || !views.current.has(c.id)) {
+      toast('info', 'Open the login page first, then fill it from 1Password.')
+      return
+    }
+    // The key button lives in the sidebar: show it (peek) when the sidebar is hidden.
+    if (stRef.current?.sidebarHidden) setPeek(true)
+    setTimeout(() => {
+      const anchor = document.querySelector<HTMLElement>('.web-url-key')
+      if (anchor) setMenu({ kind: 'fill', anchor, tabId: c.id })
+    }, 0)
   }
   const sharePage = (url?: string): void => {
     const u = url ?? currentRef.current?.url
@@ -484,6 +552,13 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       cycleTab(k.shift ? -1 : 1)
       return true
     }
+    // ⌘1…⌘8: the tab at that place in the sidebar, ⌘9: the last one (the app's tab bar keeps ⌘⇧[ / ⌘⇧]).
+    if (/^[1-9]$/.test(k.key) && !k.shift && !k.alt) {
+      const list = stRef.current ? sidebarOrder(stRef.current) : []
+      const t = k.key === '9' ? list.at(-1) : list[Number(k.key) - 1]
+      if (t) activate(t.id)
+      return true
+    }
     switch (k.key) {
       case 't':
         if (k.shift) reopenClosed()
@@ -491,6 +566,10 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         else setCmd({ mode: 'new', query: '', nonce: Date.now() })
         return true
       case 'l':
+        if (k.shift) {
+          openFill()
+          return true
+        }
         if (showStart) setStartFocus((n) => n + 1)
         else setCmd(c?.url ? { mode: 'edit', query: c.url, nonce: Date.now() } : { mode: 'new', query: '', nonce: Date.now() })
         return true
@@ -567,11 +646,22 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         const t = id ? findTab(id) : undefined
         if (t) openInNewTab(t.spaceId, d.url, { background: d.background, after: t.id })
       }),
+      // A click inside a page never reaches this document; main reports it so open menus close as they would.
+      window.api.on('web:pointer', (d) => {
+        if (tabForWc(d.webContentsId)) setMenu(null)
+      }),
       window.api.on('web:menu', (d) => {
-        if (tabForWc(d.webContentsId) && d.action === 'note') addToNote(d.url, d.title)
+        if (!tabForWc(d.webContentsId)) return
+        if (d.action === 'note') addToNote(d.url, d.title)
+        else if (d.action === 'fill') openFill()
       }),
       window.api.on('web:download', (d) => {
-        if (d.state === 'completed') toast('success', `Downloaded ${d.name}`)
+        update((s) => {
+          const list = s.downloads ?? []
+          const known = list.some((x) => x.id === d.id)
+          return { ...s, downloads: (known ? list.map((x) => (x.id === d.id ? d : x)) : [d, ...list]).slice(0, 40) }
+        })
+        if (d.state === 'completed') setUnseenDownloads(true)
         else if (d.state === 'interrupted') toast('error', `Download of ${d.name} failed`)
       })
     ]
@@ -637,8 +727,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     onReady: (id, v) => {
       const wc = safely(() => v.getWebContentsId(), 0)
       if (wc) wcTab.current.set(wc, id)
-      const z = rt[id]?.zoom
-      if (z && z !== 1) safely(() => v.setZoomFactor(z), undefined)
+      safely(() => v.setZoomFactor(stRef.current?.zoom ?? 1), undefined)
     }
   }
   const register = useCallback((id: string, v: WebviewEl | null) => {
@@ -685,9 +774,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       const url = normalizeInput(query)
       const search = url.startsWith('https://www.google.com/search?') && !/^https?:\/\//i.test(query)
       out.push({ id: 'go', group: '', title: search ? query : url, subtitle: search ? 'Search Google' : 'Open this address', icon: search ? <Icon.search /> : <Icon.globe />, hint: search ? 'Search' : 'Open', run: (toNew) => go(url, toNew) })
-      const tabs = s.tabs.filter((t) => t.id !== c?.id && t.url && matchesWords(query, t.title, t.url)).slice(0, 4)
+      const tabs = s.tabs.filter((t) => t.id !== c?.id && t.url && matchesWords(query, t.name, t.title, t.url)).slice(0, 4)
       for (const t of tabs) {
-        out.push({ id: `tab-${t.id}`, group: 'Open tabs', title: t.title || hostOf(t.url), subtitle: `${spaceOf(t.spaceId)?.name ?? ''} · ${hostOf(t.url)}`, icon: <Favicon src={t.favicon} url={t.url} />, hint: 'Switch', run: () => activate(t.id) })
+        out.push({ id: `tab-${t.id}`, group: t.favorite ? 'Favorites' : 'Open tabs', title: tabLabel(t), subtitle: `${spaceOf(t.spaceId)?.name ?? ''} · ${hostOf(t.url)}`, icon: <Favicon src={t.favicon} url={t.url} />, hint: 'Switch', run: () => activate(t.id) })
       }
     }
     const aws: Suggestion[] = []
@@ -713,6 +802,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         { title: 'Copy link', words: 'copy link url address', when: !!c?.url, run: copyLink },
         { title: c?.favorite ? 'Remove from Favorites' : 'Add page to Favorites', words: 'favorite favourite star bookmark', when: !!c?.url, run: () => c && toggleFavorite(c.id) },
         { title: 'Share page', words: 'share anybox airdrop messages send', when: !!c?.url, run: () => sharePage() },
+        { title: 'Fill from 1Password', words: '1password password login autofill fill sign in', when: !!c?.url, run: openFill },
         { title: 'Open in your browser', words: 'external safari chrome default browser open', when: !!c?.url, run: openExternal },
         { title: 'Find in page', words: 'find search page text', when: !!c?.url, run: openFind },
         { title: 'Show or hide the sidebar', words: 'sidebar hide show toggle', when: true, run: toggleSidebar },
@@ -726,20 +816,23 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     return out.slice(0, 16)
   }
 
-  // Menus close when a page takes the focus (clicks inside a page never reach this document).
-  useEffect(() => {
-    const blur = (): void => {
-      if (document.activeElement?.tagName === 'WEBVIEW') setMenu(null)
-    }
-    window.addEventListener('blur', blur)
-    return () => window.removeEventListener('blur', blur)
-  }, [])
 
   // ----- rendering -----
 
   if (!st) return <div className="browser" data-accent={space.color} />
 
   const hidden = !!st.sidebarHidden
+  // Overall progress of running downloads for the ring on the Downloads button (null when none run).
+  const runningDl = (st.downloads ?? []).filter((d) => d.state === 'progressing')
+  const dlTotal = runningDl.reduce((n, d) => n + d.total, 0)
+  const dlProgress = runningDl.length ? (dlTotal > 0 ? Math.round((runningDl.reduce((n, d) => n + d.received, 0) / dlTotal) * 100) : 15) : null
+  const sideWidth = st.sidebarWidth ?? SIDEBAR_WIDTH.default
+  const order = sidebarOrder(st)
+  /** "⌘3" for a tab ⌘3 selects (⌘9 is the last tab). */
+  const keyFor = (t: WebTab): string => {
+    const i = order.indexOf(t)
+    return i >= 0 && i < 8 ? `  ⌘${i + 1}` : i >= 0 && i === order.length - 1 ? '  ⌘9' : ''
+  }
   const liveIds = st.tabs.filter((t) => live.includes(t.id) && (t.url || pending.current.has(t.id))).map((t) => t.id)
   mountOrder.current = [...mountOrder.current.filter((id) => liveIds.includes(id)), ...liveIds.filter((id) => !mountOrder.current.includes(id))]
   const liveTabs = mountOrder.current.map((id) => st.tabs.find((t) => t.id === id)!)
@@ -799,14 +892,14 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         role="tab"
         aria-selected={t.id === current?.id}
         className={`web-tab ${t.id === current?.id ? 'on' : ''} ${loaded ? '' : 'asleep'} ${dropCls(t.id)}`}
-        title={t.url ? `${t.title}\n${t.url}` : t.title}
+        title={`${tabLabel(t)}${keyFor(t)}${t.url ? `\n${t.url}` : ''}`}
         onClick={() => activate(t.id)}
         onAuxClick={(e) => { if (e.button === 1) closeOrUnload(t.id) }}
         onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
         {...dragProps(t, zone)}
       >
         <span className="web-tab-icon">{r.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url || t.homeUrl || ''} />}</span>
-        <span className="web-tab-title">{t.title || hostOf(t.url) || 'New Tab'}</span>
+        <span className="web-tab-title">{tabLabel(t)}</span>
         {drifted && <button type="button" className="web-tab-x" title={`Back to ${hostOf(t.homeUrl!)}`} aria-label={`Back to the pinned page of ${t.title}`} onClick={(e) => { e.stopPropagation(); resetToHome(t.id) }}><Icon.undo /></button>}
         {zone === 'pinned'
           ? loaded && <button type="button" className="web-tab-x" title="Unload (stays pinned)" aria-label={`Unload ${t.title}`} onClick={(e) => { e.stopPropagation(); unloadTab(t.id) }}><Icon.minus /></button>
@@ -818,10 +911,30 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const sidebar = (
     <aside
       className={`web-side ${hidden ? (peek ? 'peek' : 'gone') : ''}`}
+      style={{ width: sideWidth }}
       onMouseLeave={() => { if (peek && !menu) setPeek(false) }}
+      onWheel={onSidebarWheel}
     >
+      {!hidden && (
+        <div
+          className="web-side-resize"
+          title="Drag to resize · double-click for the default width"
+          onMouseDown={(e) => { e.preventDefault(); setResizing({ x: e.clientX, width: sideWidth }) }}
+          onDoubleClick={() => update((x) => ({ ...x, sidebarWidth: undefined }))}
+        />
+      )}
       <div className="web-side-top">
         <button type="button" className="web-ico" title="Hide sidebar (⌘S)" aria-label="Toggle sidebar" onClick={toggleSidebar}><Icon.sidebar /></button>
+        <button
+          type="button"
+          className={`web-ico web-dl ${unseenDownloads ? 'unseen' : ''} ${dlProgress !== null ? 'busy' : ''}`}
+          title="Downloads"
+          aria-label="Downloads"
+          style={dlProgress !== null ? ({ '--p': `${dlProgress}%` } as CSSProperties) : undefined}
+          onClick={(e) => { setUnseenDownloads(false); setMenu({ kind: 'downloads', anchor: e.currentTarget }) }}
+        >
+          <Icon.download />
+        </button>
         <span className="flex-1" />
         <button type="button" className="web-ico" title="Back (⌘[)" aria-label="Back" disabled={!cur.back} onClick={() => act((v) => v.goBack())}><Icon.back /></button>
         <button type="button" className="web-ico" title="Forward (⌘])" aria-label="Forward" disabled={!cur.fwd} onClick={() => act((v) => v.goForward())}><Icon.forward /></button>
@@ -833,7 +946,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           <>
             {current.url.startsWith('https://') ? <Icon.lock className="web-url-lock" /> : <Icon.alert className="web-url-lock warn" />}
             <span className="web-url-host">{hostOf(current.url)}</span>
-            {cur.zoom && cur.zoom !== 1 && <button type="button" className="web-zoom" title="Reset zoom (⌘0)" onClick={(e) => { e.stopPropagation(); setZoom(1) }}>{Math.round(cur.zoom * 100)}%</button>}
+            {st.zoom && st.zoom !== 1 && <button type="button" className="web-zoom" title="Zoom for every page; click to reset (⌘0)" onClick={(e) => { e.stopPropagation(); setZoom(1) }}>{Math.round(st.zoom * 100)}%</button>}
+            <button type="button" className="web-url-more web-url-key" title="Fill from 1Password (⌘⇧L)" aria-label="Fill from 1Password" onClick={(e) => { e.stopPropagation(); openFill() }}><Icon.key /></button>
             <button type="button" className="web-url-more" aria-label="Page actions" onClick={(e) => { e.stopPropagation(); setMenu({ kind: 'page', anchor: e.currentTarget }) }}><Icon.more /></button>
           </>
         ) : (
@@ -849,8 +963,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               key={t.id}
               type="button"
               className={`web-fav ${t.id === current?.id ? 'on' : ''} ${live.includes(t.id) ? '' : 'asleep'} ${dropCls(t.id)}`}
-              title={`${t.title || hostOf(t.homeUrl ?? t.url)}\n${t.url || t.homeUrl}${home && home.id !== space.id ? `\nSigned in as in ${home.name}` : ''}`}
-              aria-label={`Favorite ${t.title}`}
+              title={`${tabLabel(t)}${keyFor(t)}\n${t.url || t.homeUrl}${home && home.id !== space.id ? `\nUses the logins of ${home.name}` : ''}`}
+              aria-label={`Favorite ${tabLabel(t)}`}
               onClick={() => activate(t.id)}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
               {...dragProps(t, 'favorite')}
@@ -860,7 +974,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
             </button>
           )
         })}
-        {!favorites.length && <span className="web-favs-hint">{dragging ? 'Drop to add to Favorites' : <>Favorites: drag a tab here or press <kbd className="web-kbd">⌘⇧D</kbd></>}</span>}
+        {!favorites.length && <span className="web-favs-hint">{dragging ? 'Drop to add to Favorites' : <>Drag tabs here for Favorites, or <kbd className="web-kbd">⌘⇧D</kbd></>}</span>}
       </div>
 
       <div className="web-space-head" onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'space', id: space.id, anchor: e.currentTarget }) }}>
@@ -876,7 +990,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         <div className="web-services">
           {SPACE_SERVICES.map((svc) => (
             <button key={svc.id} type="button" className="web-service" title={`${svc.name} (${space.name})`} onClick={() => go(svc.url(space.region ?? 'us-east-1'), true)}>
-              <ServiceBadge id={svc.id} size={24} />
+              <ServiceBadge id={svc.id} size={22} />
             </button>
           ))}
         </div>
@@ -942,6 +1056,18 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     <div className={`browser ${hidden ? 'side-hidden' : ''}`} data-accent={space.color}>
       {sidebar}
       {hidden && !peek && <div className="web-peek-zone" onMouseEnter={() => setPeek(true)} />}
+      {/* Pages swallow mouse events, so a drag across them is tracked on a shield over the whole browser. */}
+      {resizing && (
+        <div
+          className="web-resize-shield"
+          onMouseMove={(e) => {
+            const w = Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, resizing.width + e.clientX - resizing.x)))
+            if (w !== sideWidth) update((x) => ({ ...x, sidebarWidth: w }))
+          }}
+          onMouseUp={() => setResizing(null)}
+          onMouseLeave={() => setResizing(null)}
+        />
+      )}
 
       <div className="web-main">
         <div className="web-card">
@@ -1034,6 +1160,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
 
       {menu?.kind === 'tab' && tabMenuFor && (
         <Popover anchor={menu.anchor} width={236} onClose={() => setMenu(null)}>
+          {(tabMenuFor.favorite || tabMenuFor.pinned) && (
+            <MenuItem onClick={() => { setTabDraft({ name: tabMenuFor.name ?? '', url: tabMenuFor.homeUrl ?? tabMenuFor.url }); setMenu({ kind: 'editTab', id: tabMenuFor.id, anchor: menu.anchor }) }}>Edit name and address…</MenuItem>
+          )}
           <MenuItem onClick={() => { setMenu(null); toggleFavorite(tabMenuFor.id) }} hint="⌘⇧D">{tabMenuFor.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</MenuItem>
           {!tabMenuFor.favorite && <MenuItem onClick={() => { setMenu(null); togglePin(tabMenuFor.id) }} hint="⌘D">{tabMenuFor.pinned ? 'Unpin' : `Pin to ${spaceOf(tabMenuFor.spaceId)?.name ?? 'the space'}`}</MenuItem>}
           {(tabMenuFor.pinned || tabMenuFor.favorite) && tabMenuFor.homeUrl && tabMenuFor.url && tabMenuFor.url !== tabMenuFor.homeUrl && (
@@ -1073,7 +1202,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           <MenuItem onClick={() => { setMenu(null); sharePage() }}>Share…</MenuItem>
           <MenuSep />
           <MenuItem onClick={() => zoomStep(-1)} hint="⌘−">Zoom out</MenuItem>
-          <MenuItem onClick={() => setZoom(1)} hint="⌘0">Actual size ({Math.round((cur.zoom ?? 1) * 100)}%)</MenuItem>
+          <MenuItem onClick={() => setZoom(1)} hint="⌘0">Actual size ({Math.round((st.zoom ?? 1) * 100)}%, all pages)</MenuItem>
           <MenuItem onClick={() => zoomStep(1)} hint="⌘+">Zoom in</MenuItem>
           <MenuSep />
           <MenuItem onClick={() => { setMenu(null); act((v) => v.reloadIgnoringCache()) }} hint="⌘⇧R">Reload without cache</MenuItem>
@@ -1106,6 +1235,53 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               )}
             </>
           )}
+        </Popover>
+      )}
+
+      {menu?.kind === 'fill' && (
+        <Popover anchor={menu.anchor} width={320} onClose={() => setMenu(null)}>
+          <OnePassword
+            pageUrl={findTab(menu.tabId)?.url ?? ''}
+            webContentsId={safely(() => views.current.get(menu.tabId)?.getWebContentsId() ?? 0, 0)}
+            onDone={() => { setMenu(null); act((v) => v.focus(), menu.tabId) }}
+          />
+        </Popover>
+      )}
+
+      {menu?.kind === 'downloads' && (
+        <Popover anchor={menu.anchor} width={300} onClose={() => setMenu(null)}>
+          <Downloads
+            items={st.downloads ?? []}
+            onClear={() => update((s) => ({ ...s, downloads: (s.downloads ?? []).filter((d) => d.state === 'progressing') }))}
+            onDone={() => setMenu(null)}
+          />
+        </Popover>
+      )}
+
+      {menu?.kind === 'editTab' && findTab(menu.id) && (
+        <Popover anchor={menu.anchor} width={270} onClose={() => setMenu(null)}>
+          <form
+            className="space-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const error = saveTabEdit(menu.id, tabDraft.name, tabDraft.url)
+              if (error) setTabDraft({ ...tabDraft, error })
+              else setMenu(null)
+            }}
+          >
+            <div className="section-title">{findTab(menu.id)!.favorite ? 'Edit favorite' : 'Edit pinned tab'}</div>
+            <label className="space-field">
+              <span>Name</span>
+              <input className="input" autoFocus placeholder={findTab(menu.id)!.title || 'Page title'} value={tabDraft.name} onChange={(e) => setTabDraft({ ...tabDraft, name: e.target.value })} />
+            </label>
+            <label className="space-field">
+              <span>Address</span>
+              <input className="input" spellCheck={false} placeholder="https://…" value={tabDraft.url} onChange={(e) => setTabDraft({ ...tabDraft, url: e.target.value, error: undefined })} />
+            </label>
+            {tabDraft.error && <p className="text-[11px]" style={{ color: 'var(--err)' }}>{tabDraft.error}</p>}
+            <p className="muted text-[10.5px]">The address is where it opens and where ⌘W brings it back. Leave the name empty to use the page's title.</p>
+            <button type="submit" className="btn btn-primary btn-sm">Save</button>
+          </form>
         </Popover>
       )}
 

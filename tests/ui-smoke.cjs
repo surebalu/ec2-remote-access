@@ -110,6 +110,12 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'browser:save': browserSaved = args[0]; return
     case 'browser:consoleUrl': return `http://127.0.0.1:${webPort}/fed?d=${encodeURIComponent(args[1])}`
     case 'shell:open': return
+    case 'browser:openDownload': case 'browser:cancelDownload': return
+    case 'browser:logins': return [
+      { id: 'i1', account: 'u1', accountName: 'my.1password.com', title: 'Fixture login', username: 'me@example.com', vault: 'Private', urls: [`http://127.0.0.1:${webPort}/`], matches: true },
+      { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
+    ]
+    case 'browser:fill': return ['username', 'password']
     case 'ssh:listShells': return [
       { name: 'ec2ra-old1', label: 'debug', user: '3dxadmin', args: 'bash', preview: '3dxadmin@ip-10-1-2-144:/etc/systemd/system$', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
       { name: 'ec2ra-other', label: '', user: 'root', args: 'tail -f /var/log/messages', preview: 'Oct 17 21:40:01 ip-10-1-2-144 systemd[1]: Started Session 42.', command: 'tail', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
@@ -768,6 +774,7 @@ app.whenReady().then(async () => {
     const bjs = (code) => bwin.webContents.executeJavaScript(code)
     const buntil = async (code, what = code) => {
       for (let n = 0; n < 200; n++) { if (await bjs(code)) { if (process.env.UI_TRACE) console.log('[browser ok]', what.slice(0, 70)); return } await new Promise((r) => setTimeout(r, 30)) }
+      if (process.env.UI_TRACE) console.log('[browser state]', await bjs(`JSON.stringify({ key: !!document.querySelector('.web-url-key'), op: !!document.querySelector('.op'), pop: !!document.querySelector('.popover'), toasts: document.querySelector('.toasts')?.textContent, url: document.querySelector('.web-url-host')?.textContent })`))
       throw new Error(`Timed out (browser): ${what}`)
     }
     const bshot = async (name) => { await bjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 250)); writeFileSync(join(output, name), (await bwin.webContents.capturePage()).toPNG()) }
@@ -840,7 +847,8 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('.web-pinned .web-tab.on') !== null`, 'pinned tab active in General')
     g1 = guestAt('/two')
     const before = g1.id
-    await bkey('1')
+    // ⌘1 belongs to the browser's tabs here; ⌘⇧[ goes to the previous app tab (Hosts).
+    await bkey('{', { shiftKey: true })
     await buntil(`!document.querySelector('.browser') || document.querySelector('.browser').getClientRects().length === 0`, 'hosts shown')
     await bjs(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('Browser')).click()`)
     await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
@@ -867,6 +875,73 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`)
     for (let n = 0; n < 60 && !guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
     assert.ok(guestAt('/one'), 'the favorite loads again where it was showing')
+    // ⌘1…⌘9 follow the sidebar: Favorites, then Pinned, then Today.
+    await bkey('2')
+    await buntil(`!!document.querySelector('.web-pinned .web-tab.on')`, '⌘2 selects the pinned tab')
+    await bkey('1')
+    await buntil(`!!document.querySelector('.web-fav.on')`, '⌘1 selects the favorite')
+    // One zoom for every page: ⌘+ on one page zooms the other open pages too, and ⌘0 resets them all.
+    await bkey('=')
+    await buntil(`document.querySelector('.web-zoom')?.textContent === '110%'`, 'zoom badge')
+    for (let n = 0; n < 50 && guestAt('/two')?.getZoomFactor() !== 1.1; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(guestAt('/one').getZoomFactor(), 1.1)
+    assert.equal(guestAt('/two').getZoomFactor(), 1.1, 'the page in the background zooms too')
+    await bkey('0')
+    await buntil(`!document.querySelector('.web-zoom')`, 'zoom reset')
+    assert.equal(guestAt('/two').getZoomFactor(), 1)
+    // Edit a favorite's name.
+    await bjs(`document.querySelector('.web-fav').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await bjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith('Edit name')).click()`)
+    await buntil(`!!document.querySelector('.popover form.space-form')`, 'edit form')
+    await typeIn('.popover form.space-form input', 'My fixture')
+    await bjs(`document.querySelector('.popover form.space-form').requestSubmit()`)
+    await buntil(`!!document.querySelector('.web-fav[aria-label="Favorite My fixture"]') && !document.querySelector('.popover')`, 'favorite renamed')
+    // The sidebar fits three favorites a row; dragging its edge wider fits four, double-click restores it.
+    const favCols = () => bjs(`getComputedStyle(document.querySelector('.web-favs')).gridTemplateColumns.split(' ').length`)
+    assert.equal(await favCols(), 3)
+    await bjs(`(() => { const h = document.querySelector('.web-side-resize'); const r = h.getBoundingClientRect(); h.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: 300 })) })()`)
+    await buntil(`!!document.querySelector('.web-resize-shield')`)
+    await bjs(`(() => { const h = document.querySelector('.web-side-resize').getBoundingClientRect(); const s = document.querySelector('.web-resize-shield'); s.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: h.left + 64, clientY: 300 })); s.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: h.left + 64, clientY: 300 })) })()`)
+    await buntil(`!document.querySelector('.web-resize-shield') && document.querySelector('.web-side').getBoundingClientRect().width === 268`, 'sidebar resized')
+    assert.equal(await favCols(), 4)
+    await bjs(`document.querySelector('.web-side-resize').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await buntil(`document.querySelector('.web-side').getBoundingClientRect().width === 208`, 'default width again')
+    // A sideways two-finger swipe on the sidebar switches space, once per gesture.
+    const swipeSide = (dx) => bjs(`(() => { const a = document.querySelector('.web-side'); for (let i = 0; i < 6; i++) a.dispatchEvent(new WheelEvent('wheel', { deltaX: ${dx}, deltaY: 0, bubbles: true, cancelable: true })) })()`)
+    await swipeSide(40)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira'`, 'swipe to the next space')
+    await new Promise((r) => setTimeout(r, 300))
+    await swipeSide(-40)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'General'`, 'swipe back')
+    // Fill from 1Password (⌘⇧L): this site's logins first, the others by search; Enter fills the selected one.
+    await bkey('l', { shiftKey: true })
+    await buntil(`document.querySelector('.op .op-title')?.textContent === 'Fixture login' && document.querySelectorAll('.op-row').length === 1`, '1Password picker')
+    await bshot('browser-1password.png')
+    await bjs(`document.querySelector('.op-search input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`)
+    await buntil(`!document.querySelector('.op') && document.querySelector('.toasts')?.textContent.includes('Filled the username and password')`, 'filled')
+    const fillCall = calls.filter((c) => c.channel === 'browser:fill').at(-1).args
+    assert.deepEqual(fillCall.slice(1), ['u1', 'i1', false])
+    assert.equal(fillCall[0], guestAt('/one').id, 'fills the page on screen')
+    // A click inside the page (which this document never sees) closes an open menu.
+    await bjs(`document.querySelector('.web-url-more[aria-label="Page actions"]').click()`)
+    await buntil(`!!document.querySelector('.popover')`, 'page menu open')
+    bwin.webContents.send('web:pointer', { webContentsId: guestAt('/one').id }) // what main/webviews.ts reports
+    await buntil(`!document.querySelector('.popover')`, 'clicking into the page closes the menu')
+    // Downloads: a ring while a file downloads, a dot when it finishes, and the list with View all downloads.
+    const dl = { id: 'd1', name: 'report.pdf', path: '/fixture/Downloads/report.pdf', at: Date.now(), total: 2048 }
+    bwin.webContents.send('web:download', { ...dl, state: 'progressing', received: 512 })
+    await buntil(`document.querySelector('.web-dl.busy')?.style.getPropertyValue('--p') === '25%'`, 'download progress ring')
+    bwin.webContents.send('web:download', { ...dl, state: 'completed', received: 2048 })
+    await buntil(`!!document.querySelector('.web-dl.unseen:not(.busy)')`, 'download finished dot')
+    await bjs(`document.querySelector('.web-dl').click()`)
+    await buntil(`document.querySelector('.dl-row.done .dl-name')?.textContent === 'report.pdf' && document.querySelector('.dl-sub').textContent === 'pdf · 2 KB'`, 'downloads list')
+    await bshot('browser-downloads.png')
+    await bjs(`document.querySelector('.dl-act[aria-label^="Show"]').click()`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'browser:openDownload').at(-1).args, [dl.path, 'reveal'])
+    await bjs(`document.querySelector('.web-dl').click()`)
+    await buntil(`!!document.querySelector('.dl-all')`)
+    await bjs(`document.querySelector('.dl-all').click()`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'browser:openDownload').at(-1).args, [null, 'open'])
     // State is saved (never with a sign-in link) and comes back after a reload.
     for (let n = 0; n < 60 && !(browserSaved?.spaces.some((x) => x.name === 'Jira') && browserSaved.tabs.length === 4 && browserSaved.activeSpace === 'general' && browserSaved.tabs.some((t) => t.favorite)); n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(browserSaved.tabs.length, 4)
