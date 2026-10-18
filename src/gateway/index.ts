@@ -1,7 +1,7 @@
 /**
  * Headless gateway: runs the connection engine as a Node service and serves the same UI to a browser.
  *
- *   node out/gateway/index.js [--host 0.0.0.0] [--port 8321] [--data-dir DIR] [--token T] [--static DIR]
+ *   node out/gateway/index.js [--host 0.0.0.0] [--port 8321] [--data-dir DIR] [--token T] [--static DIR] [--allow-terminals]
  *
  * Environment equivalents: EC2RA_GATEWAY_HOST, EC2RA_GATEWAY_PORT, EC2RA_DATA_DIR, EC2RA_GATEWAY_TOKEN.
  * Defaults bind 127.0.0.1 only; use --host 0.0.0.0 (or your Tailscale IP) to reach it from a phone.
@@ -21,6 +21,7 @@ import { ensureProxy, stopProxy } from '../main/rdp/cleanpath'
 import { createGatewayHost } from './host'
 import { initLog } from '../main/log'
 import { createGatewayServer } from './server'
+import { closeAllLocal } from '../main/localterm'
 
 function arg(name: string, env: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`)
@@ -54,13 +55,16 @@ async function main(): Promise<void> {
   initLog(join(dataDir, 'logs'))
   const log = (l: string): void => console.log(l)
 
-  const gateway = createGatewayServer({ handlers, token, staticDir, rdpTarget: ensureProxy, log })
+  // Shells on this machine for paired devices: only when whoever runs the gateway says so (scripts/deploy-pi.sh ALLOW_TERMINALS=1).
+  const allowTerminals = process.argv.includes('--allow-terminals') || process.env.EC2RA_ALLOW_TERMINALS === '1'
+  const gateway = createGatewayServer({ handlers, token, staticDir, rdpTarget: ensureProxy, log, allowTerminals: () => allowTerminals })
   setHost(createGatewayHost(dataDir, gateway.broadcast, log))
 
   if (!existsSync(join(staticDir, 'index.html'))) log(`[gateway] warning: no built UI at ${staticDir}; run \`pnpm build\` first (API only until then)`)
   const bound = await gateway.listen(port, host)
   log(`[gateway] data dir ${dataDir}`)
   log(`[gateway] listening on ${bound.host}:${bound.port}`)
+  if (allowTerminals) log('[gateway] paired devices may open terminals on this machine (--allow-terminals)')
   const hosts = bound.host === '0.0.0.0' || bound.host === '::'
     ? Object.values(networkInterfaces()).flat().filter((i) => i && !i.internal && i.family === 'IPv4').map((i) => i!.address)
     : [bound.host]
@@ -72,6 +76,7 @@ async function main(): Promise<void> {
     if (closing) return
     closing = true
     log('[gateway] shutting down')
+    closeAllLocal()
     Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels()])
       .then(() => stopProxy())
       .catch(() => undefined)

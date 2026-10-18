@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { allInstances, routeOf, useStore, type Tab } from '../store'
-import { hasBrowser, openFilesFor, openInConsole, openRdpFor, openSshFor } from '../quickConnect'
+import { openFilesFor, openInConsole, openRdpFor, openSshFor } from '../quickConnect'
 import { Icon } from './icons'
 
 /** Opens (creating on first use) a host's note in the Notes tab, beside `tabId` when given. */
@@ -44,7 +44,7 @@ export default function HostActions({ instanceKey, current, tabId }: { instanceK
       <button className={`btn btn-sm ${noteBeside ? 'on' : ''}`} title={noteBeside ? 'Close the note beside this session' : "This host's note, beside this session (kept in your notes folder)"} aria-pressed={noteBeside} onClick={() => (noteBeside ? void s.closeTab(notesTab!.id) : openHostNote(instanceKey, tabId))}>
         <Icon.note /> Note
       </button>
-      {!i.manual && hasBrowser() && (
+      {!i.manual && (
         <button className="btn btn-sm btn-icon" title={`Open ${i.name} in the ${i.profile} AWS console (Browser tab, signed in)`} aria-label="Open in AWS console" onClick={() => openInConsole(i)}>
           <Icon.globe />
         </button>

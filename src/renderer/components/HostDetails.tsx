@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { HostHealth, Instance } from '@shared/types'
 import { allInstances, routeOf, useStore } from '../store'
 import { groupKeyOf, metaFor } from '../colors'
-import { hasBrowser, openDefaultFor, openFilesFor, openInConsole } from '../quickConnect'
+import { openDefaultFor, openFilesFor, openInConsole } from '../quickConnect'
 import { Icon } from './icons'
 
 function ago(iso?: string): string | undefined {
@@ -124,7 +124,7 @@ export default function HostDetails(): ReactElement | null {
         <button className="btn" disabled={!available} onClick={() => openFilesFor(i.key)}><Icon.folder /> Files</button>
         <button className="btn" disabled={i.state !== 'running'} onClick={() => s.set({ connectFor: { kind: i.platform === 'windows' ? 'rdp' : 'ssh', key: i.key } })}>Connection options</button>
         {!i.manual && <button className="btn" disabled={!i.ssmOnline || i.state !== 'running'} title={i.ssmOnline ? 'Forward a local port through SSM' : 'Needs an online SSM agent'} onClick={() => s.set({ portForwardFor: { key: i.key } })}><Icon.plug /> Forward port</button>}
-        {!i.manual && hasBrowser() && <button className="btn" title={`This instance in the ${i.profile} AWS console, signed in, in the Browser tab`} onClick={() => openInConsole(i)}><Icon.globe /> AWS console</button>}
+        {!i.manual && <button className="btn" title={`This instance in the ${i.profile} AWS console, signed in`} onClick={() => openInConsole(i)}><Icon.globe /> AWS console</button>}
         <button className="btn" onClick={() => void s.toggleFavorite(i.key)}><Icon.star filled={s.isFavorite(i.key)} />{s.isFavorite(i.key) ? 'Unfavorite' : 'Favorite'}</button>
       </div>
       <HealthSection i={i} />

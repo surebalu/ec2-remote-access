@@ -106,6 +106,8 @@ export interface IpcApi {
   /** A one-time sign-in link to the AWS console of `profile` (SSO credentials), landing on `destination`. */
   'browser:consoleUrl': (profile: string, destination: string) => Promise<string>
   /** Local terminals (the Terminal tab). Desktop only: the gateway refuses term:* calls and never forwards term:* events. */
+  /** Whether this page may open terminals: always in the Mac app; on a paired device only when the computer allows it. */
+  'term:available': () => Promise<boolean>
   'term:open': (req: LocalTermOpen) => Promise<LocalTermInfo>
   'term:write': (id: string, data: string) => Promise<void>
   'term:resize': (id: string, cols: number, rows: number) => Promise<void>
@@ -132,6 +134,8 @@ export interface IpcApi {
   'app:paths': () => Promise<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }>
   'phone:status': () => Promise<PhoneAccessStatus>
   /** Saves enabled/port/bind and (re)starts or stops the in-app gateway accordingly. */
+  /** Lets paired devices open terminals on this Mac, or stops that (closing the ones they have open). Desktop only. */
+  'phone:terminals': (allow: boolean) => Promise<PhoneAccessStatus>
   'phone:configure': (patch: Partial<Pick<Settings, 'phoneAccessEnabled' | 'phoneAccessPort' | 'phoneAccessBind'>>) => Promise<PhoneAccessStatus>
   'phone:rotateToken': () => Promise<PhoneAccessStatus>
   /** Tail of main.log for "Copy diagnostics"; `filter` is a case-insensitive regular expression. */

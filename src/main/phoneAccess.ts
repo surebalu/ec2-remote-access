@@ -69,7 +69,7 @@ export function phoneStatus(): PhoneAccessStatus {
   return {
     enabled: s.phoneAccessEnabled, running: !!gateway, port: bound?.port ?? s.phoneAccessPort, bind: s.phoneAccessBind,
     tailscaleAvailable: addrs.tailscale.length > 0 || !!ts?.running, tailscaleHostname: ts?.dnsName,
-    tailscaleHttps: (ts?.certDomains.length ?? 0) > 0, urls, token, clients, error: lastError
+    tailscaleHttps: (ts?.certDomains.length ?? 0) > 0, urls, token, clients, terminals: s.phoneTerminals === true, error: lastError
   }
 }
 
@@ -116,6 +116,7 @@ export async function startPhoneAccess(): Promise<PhoneAccessStatus> {
   const gw = createGatewayServer({
     handlers, token: phoneToken(), staticDir: join(__dirname, '../renderer'), rdpTarget: ensureProxy,
     onClientsChanged: (list) => { clients = list; host().broadcast('phone:changed', phoneStatus()) },
+    allowTerminals: () => getSettings().phoneTerminals === true,
     log: (l) => console.log(l)
   })
   try {
@@ -156,6 +157,15 @@ export async function configurePhoneAccess(patch: Partial<Pick<Settings, 'phoneA
   await stopPhoneAccess()
   if (getSettings().phoneAccessEnabled) return startPhoneAccess()
   return phoneStatus()
+}
+
+/** Lets paired devices open terminals on this Mac; turning it off closes the ones they have open. */
+export function setPhoneTerminals(allow: boolean): PhoneAccessStatus {
+  setSettings({ phoneTerminals: allow })
+  if (!allow) gateway?.closeTerminals()
+  const st = phoneStatus()
+  host().broadcast('phone:changed', st)
+  return st
 }
 
 /** New token; already-paired phones must scan again. */

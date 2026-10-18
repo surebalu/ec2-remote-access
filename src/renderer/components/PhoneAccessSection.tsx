@@ -55,6 +55,20 @@ export default function PhoneAccessSection({ onPatch }: { onPatch: (p: Patch) =>
           <span className="muted">{st.running ? `Running on :${st.port} · ${st.clients.length} connected` : st.error ? 'Failed' : 'Off'}</span>
         </span>
       </label>
+      <label className="flex items-start gap-2 text-[12px]">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={st.terminals}
+          disabled={busy}
+          aria-label="Let paired devices open terminals on this Mac"
+          onChange={async (e) => { setBusy(true); try { setSt(await window.api.invoke('phone:terminals', e.target.checked)) } finally { setBusy(false) } }}
+        />
+        <span>
+          <span className="font-medium">Terminals</span>: let paired phones and tablets open shells on this Mac (the Terminal tab).
+          <span className="muted block text-[11px]">Off by default. Anyone with the pairing link could then run commands as you on this Mac; only this window can turn it on, and turning it off closes the shells they have open.</span>
+        </span>
+      </label>
       {st.error && <div className="text-[11px] text-red-500">{st.error}{st.bind === 'https' && st.running ? ' Plain HTTP on 127.0.0.1 is up meanwhile; phones cannot reach it until HTTPS is enabled.' : ''}</div>}
 
       <div className="grid grid-cols-[auto_90px_auto_minmax(0,1fr)] items-center gap-2 text-[11px]">

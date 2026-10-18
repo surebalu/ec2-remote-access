@@ -39,11 +39,20 @@ function ensureSpawnHelper(): void {
   }
 }
 
+const unwrap = (m: unknown): PtyModule => ((m as { default?: PtyModule }).default ?? m) as PtyModule
+
+/**
+ * node-pty ships prebuilt binaries for macOS only; on Linux (the Pi gateway, installed without build scripts) its
+ * native module is missing, so the API-identical @lydell/node-pty with prebuilt Linux binaries stands in.
+ */
 function pty(): Promise<PtyModule> {
-  ptyModule ??= import('node-pty').then((m) => {
-    ensureSpawnHelper()
-    return ((m as unknown as { default?: PtyModule }).default ?? m) as PtyModule
-  })
+  ptyModule ??= import('node-pty')
+    .then((m) => {
+      ensureSpawnHelper()
+      return unwrap(m)
+    })
+    .catch(() => import('@lydell/node-pty').then(unwrap))
+  ptyModule.catch(() => { ptyModule = null })
   return ptyModule
 }
 

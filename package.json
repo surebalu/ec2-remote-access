@@ -40,6 +40,7 @@
     "@devolutions/iron-remote-desktop": "^0.11.0",
     "@devolutions/iron-remote-desktop-rdp": "^0.7.0",
     "@lezer/highlight": "^1.2.5",
+    "@lydell/node-pty": "1.2.0-beta.15",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",

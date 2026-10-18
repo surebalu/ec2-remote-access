@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccentColor, TermTabState, TerminalState } from '@shared/types'
 import { folderName, tildify } from '@shared/termIntegration'
 import { useStore, type Tab } from '../../store'
+import { isMobile } from '../../mobile'
 import { ACCENTS, metaFor } from '../../colors'
 import { setTabKeys, type TabKey } from '../../shortcuts'
 import { layoutRects, neighbor, paneIds, removePane, resizeSplit, splitPane, type Direction } from '../../termLayout'
@@ -22,12 +23,18 @@ const SIDE_WIDTH = { default: 230, min: 170, max: 440 }
 const newId = (p: string): string => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 
 export default function TerminalApp({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
-  if (!inElectron) {
+  // On a paired phone or tablet the computer decides (Settings → Phone access → Terminals, or the gateway's flag).
+  const [allowed, setAllowed] = useState<boolean | null>(inElectron ? true : null)
+  useEffect(() => {
+    if (!inElectron) window.api.invoke('term:available').then(setAllowed, () => setAllowed(false))
+  }, [])
+  if (allowed === null) return <div className="term-app" />
+  if (!allowed) {
     return (
       <div className="browser-unavailable">
         <Icon.console />
-        <div className="text-[15px] font-semibold">The terminal lives in the Mac app</div>
-        <p className="muted">Local shells run in EC2 Remote Access on your Mac. Here, open an SSH session to a host instead.</p>
+        <div className="text-[15px] font-semibold">Terminals from this device are off</div>
+        <p className="muted">They open a shell on the computer running the app, so the computer has to allow it: on the Mac, Settings → Phone access → Terminals; for the Pi gateway, deploy with ALLOW_TERMINALS=1. SSH sessions to your hosts work either way.</p>
       </div>
     )
   }
@@ -273,7 +280,8 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     const panes = paneIds(t.root).length
     return [running ? `▶ ${running}` : tildify(cwdOf(t.activePane) ?? '', home), panes > 1 ? `${panes} panes` : ''].filter(Boolean).join(' · ')
   }
-  const vertical = (st.tabBar ?? 'vertical') === 'vertical'
+  // A phone has no room for the side list.
+  const vertical = (st.tabBar ?? 'vertical') === 'vertical' && !isMobile()
   const sideWidth = st.tabBarWidth ?? SIDE_WIDTH.default
 
   const dragProps = (t: TermTabState) => ({

@@ -1002,6 +1002,8 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .tpane.focused::before { content: ''; position: absolute; z-index: 8; inset: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); pointer-events: none; }
 .tpane-term { position: absolute; inset: 0; }
 .tpane-term.with-dock { bottom: 62px; }
+.tpane-term.with-keys { bottom: 46px; }
+.tpane-keys { position: absolute; z-index: 4; right: 0; bottom: 0; left: 0; }
 .tpane-xterm { position: absolute; inset: 8px 6px 4px 14px; }
 .tpane-xterm .xterm { height: 100%; }
 .tblocks { position: absolute; z-index: 3; inset: 0; pointer-events: none; }

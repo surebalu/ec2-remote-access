@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { isSession, useStore, type Tab } from '../../store'
 import { nativeApp, postNative, setLayoutPreference, trackVisualViewport, WIDE_QUERY } from '../../mobile'
+import { consoleHomeFor, openConsoleOnDevice } from '../../quickConnect'
+import { metaFor, initials } from '../../colors'
 import { SessionPanes } from '../TerminalTabs'
 import AuthBanner from '../AuthBanner'
 import { Icon } from '../icons'
@@ -228,6 +230,26 @@ function MobileMore(): ReactElement {
           </span>
         </button>
       </div>
+      {s.profiles.some((p) => p.enabled && p.kind !== 'static') && (
+        <>
+          <h3 className="m-group-title">AWS console</h3>
+          <div className="m-card-list">
+            {s.profiles.filter((p) => p.enabled && p.kind !== 'static').map((p) => {
+              const m = metaFor(p.name, s.settings)
+              return (
+                <button key={p.name} className="m-host" onClick={() => openConsoleOnDevice(p.name, consoleHomeFor(p.name))}>
+                  <span className="avatar sm" data-accent={m.color}>{initials(m.label)}</span>
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="m-host-name">{m.label}</span>
+                    <span className="m-host-meta">Opens the console signed in, in Safari · {p.region}</span>
+                  </span>
+                  <Icon.external className="muted" />
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
       <h3 className="m-group-title">Appearance</h3>
       <div className="m-segment" role="radiogroup" aria-label="Theme">
         {(['system', 'light', 'dark'] as const).map((t) => (
@@ -245,6 +267,11 @@ function MobileMore(): ReactElement {
             <Icon.chevron className="muted" />
           </button>
         )}
+        <button className="m-host" onClick={() => s.openTerminal()}>
+          <span className="m-host-os"><Icon.console /></span>
+          <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Terminal</span><span className="m-host-meta">Shells on the computer running the app, when it allows them</span></span>
+          <Icon.chevron className="muted" />
+        </button>
         <button className="m-host" onClick={() => s.openNotes()}>
           <span className="m-host-os"><Icon.note /></span>
           <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Notes</span><span className="m-host-meta">Markdown notes on the computer running the app, a note per host</span></span>

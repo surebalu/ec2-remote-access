@@ -89,6 +89,8 @@ export interface PhoneAccessStatus {
   token: string
   /** Connected browsers: remote address and when they attached. */
   clients: { address: string; since: number }[]
+  /** Paired devices may open shells on this Mac (Settings.phoneTerminals). */
+  terminals: boolean
   error?: string
 }
 
@@ -165,6 +167,8 @@ export interface Settings {
   phoneAccessEnabled: boolean
   phoneAccessPort: number
   phoneAccessBind: PhoneAccessBind
+  /** Paired devices may open terminals (shells) on this Mac. Off by default; only this Mac's own window can change it. */
+  phoneTerminals?: boolean
   sshAgentSock: string
   defaultIdentityFile: string
   pemFile: string

@@ -3,7 +3,7 @@ import { matchesHost } from '@shared/hostSearch'
 import { consoleHome } from '@shared/browser'
 import type { Instance } from '@shared/types'
 import { routeOf, useStore, visibleInstances } from '../store'
-import { hasBrowser, openDefaultFor, openFilesFor, openInConsole, openSshFor } from '../quickConnect'
+import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
 import { terminalAction } from '../shortcuts'
@@ -63,10 +63,10 @@ function commands(): Command[] {
     { id: 'broadcast', title: s.broadcastInput ? 'Stop broadcasting input' : 'Broadcast input to all panes in the split', hint: '⌘⇧I', icon: Icon.broadcast, run: () => s.set({ broadcastInput: !s.broadcastInput }), when: s.splitGroup.includes(s.activeTab) },
     { id: 'find', title: 'Find in terminal', hint: '⌘F', icon: Icon.search, run: () => terminalAction(active!.id, 'find'), when: active?.kind === 'ssh' }
   ]
+  for (const p of s.profiles.filter((x) => x.enabled && x.kind !== 'static')) {
+    cmds.push({ id: `console:${p.name}`, title: `AWS console: ${p.name}`, keywords: 'aws console browser web account', icon: Icon.globe, run: () => openAccountConsole(p.name, consoleHome(p.region)) })
+  }
   if (hasBrowser()) {
-    for (const p of s.profiles.filter((x) => x.enabled && x.kind !== 'static')) {
-      cmds.push({ id: `console:${p.name}`, title: `AWS console: ${p.name}`, keywords: 'aws console browser web account', icon: Icon.globe, run: () => s.openBrowser({ profile: p.name, url: consoleHome(p.region) }) })
-    }
     for (const p of s.profiles.filter((x) => x.enabled)) {
       cmds.push({ id: `term:${p.name}`, title: `Terminal with AWS profile: ${p.name}`, keywords: 'local shell aws_profile cli terminal', icon: Icon.console, run: () => s.openTerminal({ profile: p.name }) })
     }

@@ -9,6 +9,9 @@ import { isDarkMode, useStore } from '../../store'
 import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../../terminalThemes'
 import { Icon } from '../icons'
 import InputDock, { type Chips } from './InputDock'
+import KeyBar from '../mobile/KeyBar'
+import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../../mobile'
+import { applyStickyMods, keySequence, type StickyMods } from '../../terminalKeys'
 import { addHistory, loadHistory } from './history'
 
 /** What a pane tells the Terminal tab: for titles, new tabs in the same folder, and the layout it saves. */
@@ -40,6 +43,7 @@ interface Block {
   endedAt?: number
 }
 
+const NO_MODS: StickyMods = { ctrl: false, alt: false }
 const MAX_BLOCKS = 400
 const NOTIFY_AFTER_MS = 10_000
 const RUNNING_BAR_AFTER_MS = 300
@@ -87,6 +91,12 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   const [findText, setFindText] = useState<string | null>(null)
   const [focusKey, setFocusKey] = useState(0)
   const [, redraw] = useReducer((n: number) => n + 1, 0)
+  // On a phone: the key bar (Esc, Ctrl, arrows…) for typing into a running program; Ctrl/Alt shape the next key.
+  const mobile = isMobile()
+  const keyboardOpen = useKeyboardOpen()
+  const [mods, setModsState] = useState<StickyMods>(NO_MODS)
+  const modsRef = useRef<StickyMods>(NO_MODS)
+  const setMods = (m: StickyMods): void => { modsRef.current = m; setModsState(m) }
 
   const props = useRef({ visible, notify, onInfo, onExit, onReveal, inputMode })
   props.current = { visible, notify, onInfo, onExit, onReveal, inputMode }
@@ -190,7 +200,11 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
       if (ev.type === 'data') term.write(ev.data)
       else props.current.onExit(id)
     })
-    term.onData((d) => void window.api.invoke('term:write', id, d))
+    term.onData((d) => {
+      const m = modsRef.current
+      if (m.ctrl || m.alt) { d = applyStickyMods(d, m); setMods(NO_MODS) }
+      void window.api.invoke('term:write', id, d)
+    })
     term.onResize(({ cols, rows }) => { if (opened.current) void window.api.invoke('term:resize', id, cols, rows) })
     term.buffer.onBufferChange((b) => setAlt(b.type === 'alternate'))
 
@@ -390,7 +404,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     >
       <div
         ref={area}
-        className={`tpane-term ${dockMode ? 'with-dock' : ''}`}
+        className={`tpane-term ${dockMode ? 'with-dock' : mobile ? 'with-keys' : ''}`}
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
         onMouseUp={() => {
@@ -449,6 +463,24 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
           </div>
         )}
       </div>
+      {mobile && !dockMode && (
+        <div className="tpane-keys">
+          <KeyBar
+            mods={mods}
+            onMods={(m) => { setMods(m); termRef.current?.focus() }}
+            onKey={(k) => {
+              const t = termRef.current
+              if (!t) return
+              const m = modsRef.current
+              setMods(NO_MODS)
+              void window.api.invoke('term:write', id, applyStickyMods(keySequence(k, t.modes.applicationCursorKeysMode), m))
+            }}
+            keyboardOpen={keyboardOpen}
+            onKeyboard={() => { if (keyboardOpen) termRef.current?.blur(); else termRef.current?.focus() }}
+            onPaste={() => pasteFromClipboard((text) => termRef.current?.paste(text), (text) => { if (text) termRef.current?.paste(text) })}
+          />
+        </div>
+      )}
       {dockMode && (
         <InputDock
           mode={dockMode}

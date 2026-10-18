@@ -24,7 +24,7 @@ import { listTunnels, closeTunnel } from './tunnels'
 import { openPortForward } from './portForward'
 import { hostHealth } from './aws/health'
 import { findBinary } from './util'
-import { phoneStatus, configurePhoneAccess, rotatePhoneToken } from './phoneAccess'
+import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
 
 type Handler<K extends keyof IpcApi> = (...args: Parameters<IpcApi[K]>) => ReturnType<IpcApi[K]>
@@ -154,6 +154,7 @@ export const handlers: Handlers = {
     else await host().openPath(target)
   },
   'browser:cancelDownload': async (id) => host().cancelDownload(id),
+  'term:available': async () => true,
   'term:open': (req) => openLocal(req),
   'term:write': async (id, data) => writeLocal(id, data),
   'term:resize': async (id, cols, rows) => resizeLocal(id, cols, rows),
@@ -179,6 +180,7 @@ export const handlers: Handlers = {
   }),
   'phone:status': async () => phoneStatus(),
   'phone:configure': (patch) => configurePhoneAccess(patch),
+  'phone:terminals': async (allow) => setPhoneTerminals(allow),
   'phone:rotateToken': () => rotatePhoneToken(),
   'diag:log': async (opts) => {
     const r = recentLog(opts?.lines, opts?.filter)

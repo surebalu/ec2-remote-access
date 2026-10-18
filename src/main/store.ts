@@ -43,6 +43,7 @@ export const defaultSettings: Settings = {
   phoneAccessEnabled: false,
   phoneAccessPort: 8321,
   phoneAccessBind: 'tailscale',
+  phoneTerminals: false,
   sshAgentSock: existsSync(onePasswordSock) ? onePasswordSock : (process.env.SSH_AUTH_SOCK ?? ''),
   defaultIdentityFile: '',
   pemFile: guessPem(),
