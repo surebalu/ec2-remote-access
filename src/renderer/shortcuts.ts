@@ -33,7 +33,7 @@ export const SHORTCUTS: ShortcutInfo[] = [
 export const TERMINAL_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌃`', label: 'Open the Terminal tab (from anywhere)' },
   { keys: '⌘T / ⌘⇧T', label: 'New terminal tab (same folder) / reopen the last closed one' },
-  { keys: '⌘1 … ⌘8 / ⌘9', label: 'Terminal tab 1 … 8 / the last one' },
+  { keys: '⌘1 … ⌘8 / ⌘9', label: 'Terminal tab 1 … 8 / the last one (top to bottom in the side list)' },
   { keys: '⌃Tab / ⌃⇧Tab', label: 'Next / previous terminal tab' },
   { keys: '⌘D / ⌘⇧D', label: 'Split the pane right / down' },
   { keys: '⌥⌘← → ↑ ↓ / ⌘[ ⌘]', label: 'Move to the pane in that direction / previous or next pane' },

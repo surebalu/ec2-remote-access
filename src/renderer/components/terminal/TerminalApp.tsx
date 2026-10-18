@@ -1,7 +1,7 @@
 import type { DragEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccentColor, TermTabState, TerminalState } from '@shared/types'
-import { folderName } from '@shared/termIntegration'
+import { folderName, tildify } from '@shared/termIntegration'
 import { useStore, type Tab } from '../../store'
 import { ACCENTS, metaFor } from '../../colors'
 import { setTabKeys, type TabKey } from '../../shortcuts'
@@ -18,6 +18,7 @@ import Pane, { type PaneApi, type PaneInfo } from './Pane'
  */
 
 const inElectron = /\bElectron\//.test(navigator.userAgent)
+const SIDE_WIDTH = { default: 230, min: 170, max: 440 }
 const newId = (p: string): string => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 
 export default function TerminalApp({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -266,6 +267,14 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     return folderName(cwdOf(t.activePane), home) || 'Terminal'
   }
   const busy = (t: TermTabState): boolean => paneIds(t.root).some((p) => info[p]?.running)
+  /** The second line of a tab in the side list: what runs, else the folder; and how many panes. */
+  const subtitleOf = (t: TermTabState): string => {
+    const running = info[t.activePane]?.running
+    const panes = paneIds(t.root).length
+    return [running ? `▶ ${running}` : tildify(cwdOf(t.activePane) ?? '', home), panes > 1 ? `${panes} panes` : ''].filter(Boolean).join(' · ')
+  }
+  const vertical = (st.tabBar ?? 'vertical') === 'vertical'
+  const sideWidth = st.tabBarWidth ?? SIDE_WIDTH.default
 
   const dragProps = (t: TermTabState) => ({
     draggable: true,
@@ -275,7 +284,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
       if (!dragTab.current || dragTab.current === t.id) return
       e.preventDefault()
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      const after = e.clientX > r.left + r.width / 2
+      const after = vertical ? e.clientY > r.top + r.height / 2 : e.clientX > r.left + r.width / 2
       if (drop?.id !== t.id || drop.after !== after) setDrop({ id: t.id, after })
     },
     onDrop: (e: DragEvent) => {
@@ -316,54 +325,100 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     el.addEventListener('pointerup', up)
   }
 
+  const startSideDrag = (e: ReactPointerEvent): void => {
+    e.preventDefault()
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    const x0 = e.clientX
+    const w0 = sideWidth
+    const move = (ev: PointerEvent): void => {
+      const w = Math.round(Math.min(SIDE_WIDTH.max, Math.max(SIDE_WIDTH.min, w0 + ev.clientX - x0)))
+      update((x) => (x.tabBarWidth === w ? x : { ...x, tabBarWidth: w }))
+    }
+    const up = (): void => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+  }
+
+  const tabRow = (t: TermTabState, i: number): ReactElement => (
+    <div
+      key={t.id}
+      role="tab"
+      aria-selected={t.id === current?.id}
+      className={`term-tab ${t.id === current?.id ? 'on' : ''} ${drop?.id === t.id ? (drop.after ? 'drop-after' : 'drop-before') : ''}`}
+      data-accent={t.color}
+      title={`${titleOf(t)}${t.profile ? ` · AWS ${t.profile}` : ''}${i < 8 ? `  ⌘${i + 1}` : ''}\n${cwdOf(t.activePane) ?? ''}`}
+      onClick={() => activateTab(t.id)}
+      onDoubleClick={() => setRenaming({ id: t.id, value: t.title ?? titleOf(t) })}
+      onAuxClick={(e) => { if (e.button === 1) closeTab(t.id) }}
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
+      {...dragProps(t)}
+    >
+      {t.color && <span className="term-tab-color" />}
+      {busy(t) && t.id !== current?.id ? <span className="term-tab-busy" /> : null}
+      <span className="term-tab-main">
+        {renaming?.id === t.id ? (
+          <input
+            className="term-tab-rename"
+            autoFocus
+            value={renaming.value}
+            onChange={(e) => setRenaming({ id: t.id, value: e.target.value })}
+            onBlur={() => { patchTab(t.id, { title: renaming.value.trim() || undefined }); setRenaming(null) }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { patchTab(t.id, { title: renaming.value.trim() || undefined }); setRenaming(null) }
+              else if (e.key === 'Escape') setRenaming(null)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="term-tab-title">{titleOf(t)}</span>
+        )}
+        {vertical && <span className="term-tab-sub">{subtitleOf(t)}</span>}
+      </span>
+      {t.profile && <span className="term-tab-aws">{t.profile}</span>}
+      {vertical && (i < 8 || i === st.tabs.length - 1) && <span className="term-tab-key">⌘{i < 8 ? i + 1 : 9}</span>}
+      <button type="button" className="term-tab-x" aria-label={`Close ${titleOf(t)}`} onClick={(e) => { e.stopPropagation(); closeTab(t.id) }}><Icon.x /></button>
+    </div>
+  )
+  const moreButton = <button type="button" className="term-tab-more" title="New tab with an AWS profile…" aria-label="New tab options" onClick={(e) => setMenu({ kind: 'new', anchor: e.currentTarget })}><Icon.caret /></button>
+  const splitButton = <button type="button" className="term-tool" title="Split right (⌘D)" aria-label="Split right" onClick={() => split('row')}><Icon.split /></button>
+  const settingsButton = <button type="button" className="term-tool" title="Terminal settings" aria-label="Terminal settings" onClick={(e) => setMenu({ kind: 'settings', anchor: e.currentTarget })}><Icon.settings /></button>
+
   const tabMenu = menu?.kind === 'tab' ? st.tabs.find((t) => t.id === menu.id) : undefined
   const awsProfiles = profiles.filter((p) => p.enabled)
 
   return (
-    <div className="term-app">
-      <div className="term-tabs" role="tablist">
-        {st.tabs.map((t, i) => (
-          <div
-            key={t.id}
-            role="tab"
-            aria-selected={t.id === current?.id}
-            className={`term-tab ${t.id === current?.id ? 'on' : ''} ${drop?.id === t.id ? (drop.after ? 'drop-after' : 'drop-before') : ''}`}
-            data-accent={t.color}
-            title={`${titleOf(t)}${t.profile ? ` · AWS ${t.profile}` : ''}${i < 8 ? `  ⌘${i + 1}` : ''}\n${cwdOf(t.activePane) ?? ''}`}
-            onClick={() => activateTab(t.id)}
-            onDoubleClick={() => setRenaming({ id: t.id, value: t.title ?? titleOf(t) })}
-            onAuxClick={(e) => { if (e.button === 1) closeTab(t.id) }}
-            onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
-            {...dragProps(t)}
-          >
-            {t.color && <span className="term-tab-color" />}
-            {busy(t) && t.id !== current?.id ? <span className="term-tab-busy" /> : null}
-            {renaming?.id === t.id ? (
-              <input
-                className="term-tab-rename"
-                autoFocus
-                value={renaming.value}
-                onChange={(e) => setRenaming({ id: t.id, value: e.target.value })}
-                onBlur={() => { patchTab(t.id, { title: renaming.value.trim() || undefined }); setRenaming(null) }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { patchTab(t.id, { title: renaming.value.trim() || undefined }); setRenaming(null) }
-                  else if (e.key === 'Escape') setRenaming(null)
-                }}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <span className="term-tab-title">{titleOf(t)}</span>
-            )}
-            {t.profile && <span className="term-tab-aws">{t.profile}</span>}
-            <button type="button" className="term-tab-x" aria-label={`Close ${titleOf(t)}`} onClick={(e) => { e.stopPropagation(); closeTab(t.id) }}><Icon.x /></button>
+    <div className={`term-app ${vertical ? 'vertical' : ''}`}>
+      {vertical ? (
+        <aside className="term-side" style={{ width: sideWidth }}>
+          <div className="term-side-head">
+            <span className="term-side-title">Terminals</span>
+            <span className="flex-1" />
+            {splitButton}
+            {settingsButton}
           </div>
-        ))}
-        <button type="button" className="term-tab-add" title="New tab (⌘T)" aria-label="New tab" onClick={() => openTab()}><Icon.plus /></button>
-        <button type="button" className="term-tab-more" title="New tab with an AWS profile…" aria-label="New tab options" onClick={(e) => setMenu({ kind: 'new', anchor: e.currentTarget })}><Icon.caret /></button>
-        <span className="flex-1" />
-        <button type="button" className="term-tool" title="Split right (⌘D)" aria-label="Split right" onClick={() => split('row')}><Icon.split /></button>
-        <button type="button" className="term-tool" title="Terminal settings" aria-label="Terminal settings" onClick={(e) => setMenu({ kind: 'settings', anchor: e.currentTarget })}><Icon.settings /></button>
-      </div>
+          <div className="term-side-newrow">
+            <button type="button" className="term-side-new" title="New tab in the same folder (⌘T)" onClick={() => openTab()}><Icon.plus /> New tab <kbd className="term-side-kbd">⌘T</kbd></button>
+            {moreButton}
+          </div>
+          <div className="term-side-list" role="tablist" aria-orientation="vertical">
+            {st.tabs.map(tabRow)}
+          </div>
+          <div className="term-side-edge" title="Drag to resize · double-click for the default width" onPointerDown={startSideDrag} onDoubleClick={() => update((x) => ({ ...x, tabBarWidth: undefined }))} />
+        </aside>
+      ) : (
+        <div className="term-tabs" role="tablist">
+          {st.tabs.map(tabRow)}
+          <button type="button" className="term-tab-add" title="New tab (⌘T)" aria-label="New tab" onClick={() => openTab()}><Icon.plus /></button>
+          {moreButton}
+          <span className="flex-1" />
+          {splitButton}
+          {settingsButton}
+        </div>
+      )}
 
       <div ref={body} className="term-body">
         {allPanes.map(({ id, tab: t }) => {
@@ -454,6 +509,10 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
 
       {menu?.kind === 'settings' && (
         <Popover anchor={menu.anchor} align="right" width={270} onClose={() => setMenu(null)}>
+          <MenuLabel>Tabs</MenuLabel>
+          <MenuItem on={vertical} onClick={() => update((s) => ({ ...s, tabBar: 'vertical' }))}>Down the side</MenuItem>
+          <MenuItem on={!vertical} onClick={() => update((s) => ({ ...s, tabBar: 'horizontal' }))}>Across the top</MenuItem>
+          <MenuSep />
           <MenuLabel>Typing commands</MenuLabel>
           <MenuItem on={inputMode === 'editor'} onClick={() => update((s) => ({ ...s, input: 'editor' }))}>Input box (Warp style)</MenuItem>
           <MenuItem on={inputMode === 'shell'} onClick={() => update((s) => ({ ...s, input: 'shell' }))}>Straight into the shell</MenuItem>

@@ -381,6 +381,9 @@ export interface TerminalState {
   input?: 'editor' | 'shell'
   /** Notify when a command that ran 10 s or more finishes while you are elsewhere. */
   notify?: boolean
+  /** Tabs down the left side (default) or across the top, and the side list's width in px. */
+  tabBar?: 'vertical' | 'horizontal'
+  tabBarWidth?: number
 }
 
 /** A 1Password login as the browser's Fill menu lists it: no secrets, only what identifies it. */
