@@ -21,7 +21,7 @@ pnpm gateway -- --host 0.0.0.0 --port 8321   # run the headless gateway (serves 
 pnpm dist                    # build + electron-builder DMG/zip for arm64 and x64 -> dist/
 pnpm dist:arm64              # arm64 only (faster local packaging)
 scripts/release.sh --bump patch [--publish]   # bump, typecheck, build; --publish uploads to S3 (needs UPDATE_URL, S3_URI)
-scripts/deploy-pi.sh user@host   # build + install/update the headless gateway on an arm64 Linux box (systemd, tailscale serve); idempotent
+scripts/deploy-pi.sh user@host   # build + install/update the headless gateway on an arm64 Linux box (systemd, tailscale serve); idempotent; ALLOW_TERMINALS=1|0 (unset keeps the machine's setting)
 ```
 
 No linter is configured. `pnpm typecheck` is the gate `scripts/release.sh` runs before building; run it after touching `src/shared/` since both tsconfig projects include that directory.

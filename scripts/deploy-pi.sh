@@ -5,7 +5,8 @@
 #   scripts/deploy-pi.sh user@host        # first install, and every later update (restarts the service)
 #   SKIP_BUILD=1 scripts/deploy-pi.sh …   # reuse the existing out/ build
 #   NODE_MAJOR=24 PORT=8321               # Node line to install on the machine, local port of the gateway
-#   ALLOW_TERMINALS=1                     # let paired devices open shells on this machine (the Terminal tab); off by default
+#   ALLOW_TERMINALS=1 | 0                 # let paired devices open shells on this machine (the Terminal tab), or stop that;
+#                                         # unset keeps what the machine has (off on a first install)
 #
 # Everything lives in the user's home directory (Node in ~/.local/node, the app in ~/ec2-remote-access, data in
 # ~/.config/ec2-remote-access) except the systemd unit and AWS's session-manager-plugin package, which need sudo.
@@ -18,7 +19,7 @@ TARGET="${1:-}"
 [ -n "$TARGET" ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 PORT="${PORT:-8321}"
 NODE_MAJOR="${NODE_MAJOR:-24}"
-ALLOW_TERMINALS="${ALLOW_TERMINALS:-0}"
+ALLOW_TERMINALS="${ALLOW_TERMINALS:-keep}"
 PNPM_VERSION="${PNPM_VERSION:-$(pnpm -v)}"
 SERVICE=ec2-remote-gateway
 
@@ -75,6 +76,10 @@ fi
 
 DATA="$HOME/.config/ec2-remote-access"
 mkdir -p "$DATA"
+# An update keeps the machine's terminal setting unless ALLOW_TERMINALS says otherwise.
+if [ "$ALLOW_TERMINALS" = keep ]; then
+  if grep -q -- '--allow-terminals' "/etc/systemd/system/$SERVICE.service" 2>/dev/null; then ALLOW_TERMINALS=1; else ALLOW_TERMINALS=0; fi
+fi
 sudo tee "/etc/systemd/system/$SERVICE.service" >/dev/null <<UNIT
 [Unit]
 Description=EC2 Remote Access gateway
