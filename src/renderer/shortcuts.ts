@@ -67,7 +67,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
     return true
   }
   if (modalOpen()) return false
-  const order = ['hosts', ...st.tabs.map((t) => t.id)]
+  const order = ['hosts', ...st.tabs.filter((t) => !t.transient).map((t) => t.id)]
   if (k === '0' && !e.shiftKey) return go(() => st.showGrid(!st.gridView))
   if (/^[1-9]$/.test(k) && !e.shiftKey) {
     const n = Number(k)

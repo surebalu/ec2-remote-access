@@ -121,7 +121,7 @@ export default function QuickSwitcher(): ReactElement {
     const hosts = visible.filter((i) => matchesHost(i, query)).sort((a, b) =>
       recentRank(a.key) - recentRank(b.key) || Number(s.isFavorite(b.key)) - Number(s.isFavorite(a.key)) || a.name.localeCompare(b.name)
     )
-    const tabs = s.tabs.filter((t) => `${t.title} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
+    const tabs = s.tabs.filter((t) => !t.transient && `${t.title} ${t.shellLabel ?? ''} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
     results = [
       ...hostVerbs(query, visible),
       ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: `Open ${t.kind.toUpperCase()} session · ${t.status}`, key: t.instanceKey, icon: t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : Icon.terminal, action: () => s.setActive(t.id), hint: 'Switch' })),

@@ -12,7 +12,7 @@ import HostActions from './HostActions'
 import TerminalAppearancePane from './TerminalAppearancePane'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 import { Icon } from './icons'
-import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../mobile'
+import { isMobile, pasteFromClipboard, useKeyboardOpen, WIDE_QUERY } from '../mobile'
 import KeyBar from './mobile/KeyBar'
 import { applyStickyMods, keySequence, type StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
@@ -205,6 +205,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         if (info.persistent) shellRef.current = { name: info.shellName ?? sh.name, shown: true }
         setDetached(info.detached ?? [])
         setNamePrompt(!!info.persistent && !info.resumed && !info.shellLabel)
+        if (info.shellName) updateTab(id, { shellName: info.shellName })
         updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent, shellLabel: info.shellLabel || undefined })
         if (useStore.getState().activeTab === id) term.focus()
       } catch (error) {
@@ -369,7 +370,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     window.api.invoke('ssh:switchShell', tab.id, name, { endPrevious: true }).then(
       (r) => {
         shellRef.current = { name: r.name, shown: true }
-        updateTab(tab.id, { shellLabel: r.label || undefined })
+        updateTab(tab.id, { shellLabel: r.label || undefined, shellName: r.name })
         termRef.current?.focus()
       },
       (e: Error) => toast('error', e.message)
@@ -409,7 +410,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     window.api.invoke('ssh:switchShell', tab.id, sh?.name ?? null, { label }).then(
       (r) => {
         shellRef.current = { name: r.name, shown: true }
-        updateTab(tab.id, { shellLabel: r.label || undefined })
+        updateTab(tab.id, { shellLabel: r.label || undefined, shellName: r.name })
         setDetached([])
         termRef.current?.focus()
       },
@@ -441,8 +442,17 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       (e: Error) => toast('error', e.message)
     )
   }
+  /** Every session of this host as live tiles on one screen (temporary tabs on this tab's connection). */
+  const showAllShells = (): void => {
+    setMenu(null)
+    setShellSheet(false)
+    const skipped = useStore.getState().showHostGrid(tab.id, shells ?? [])
+    if (skipped) toast('info', `${skipped} session${skipped === 1 ? ' is' : 's are'} open on another device and ${skipped === 1 ? 'is' : 'are'} not shown here.`)
+  }
+  // Tiles need room: offered on the desktop and on wide touch screens, not on a phone.
+  const tilesFit = !mobile || window.matchMedia(WIDE_QUERY).matches
   const shellList = (variant: 'menu' | 'sheet'): ReactElement => (
-    <ShellList shells={shells} variant={variant} onSwitch={(sh) => switchShell(sh)} onNew={(label) => switchShell(null, label)} onRename={renameShell} onOpenInTab={openShellInTab} onEnd={endOtherShell} />
+    <ShellList shells={shells} variant={variant} onSwitch={(sh) => switchShell(sh)} onNew={(label) => switchShell(null, label)} onRename={renameShell} onOpenInTab={openShellInTab} onEnd={endOtherShell} onShowAll={tilesFit ? showAllShells : undefined} />
   )
   const detach = (): void => void useStore.getState().closeTab(tab.id, { detach: true })
 

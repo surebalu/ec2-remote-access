@@ -40,6 +40,8 @@ function tabTooltip(t: Tab): string {
 /** Tab strip rendered inside the title bar. Tabs that do not fit collapse into a "»" menu; the active tab always stays visible. */
 export default function TerminalTabs(): ReactElement {
   const s = useStore()
+  // A host grid's transient tabs are tiles, not tabs.
+  const tabs = s.tabs.filter((t) => !t.transient)
   const stripRef = useRef<HTMLDivElement>(null)
   const hostsRef = useRef<HTMLButtonElement>(null)
   const gridRef = useRef<HTMLButtonElement>(null)
@@ -61,7 +63,7 @@ export default function TerminalTabs(): ReactElement {
     const strip = stripRef.current
     if (!strip) return
     const widthOf = (id: string): number => (tabRefs.current.get(id)?.offsetWidth ?? 0) + GAP
-    const order = s.tabs.map((t) => t.id)
+    const order = tabs.map((t) => t.id)
     const fit = (avail: number): string[] => {
       const out: string[] = []
       let used = 0
@@ -84,7 +86,7 @@ export default function TerminalTabs(): ReactElement {
     setHidden((prev) => (prev.join('|') === next.join('|') ? prev : next))
   }
 
-  const tabKey = s.tabs.map((t) => `${t.id}:${t.title}`).join('|')
+  const tabKey = tabs.map((t) => `${t.id}:${t.title}`).join('|')
   useLayoutEffect(measure, [tabKey, s.activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const ro = new ResizeObserver(measure)
@@ -100,18 +102,18 @@ export default function TerminalTabs(): ReactElement {
   }, [menuOpen])
 
   const hiddenSet = new Set(hidden)
-  const visibleTabs = [...s.tabs.filter((t) => !hiddenSet.has(t.id))]
+  const visibleTabs = [...tabs.filter((t) => !hiddenSet.has(t.id))]
   // The active tab is rendered last when it was pulled forward past hidden ones, matching the measurement.
   const activeIdx = visibleTabs.findIndex((t) => t.id === s.activeTab)
-  if (activeIdx >= 0 && hidden.length && s.tabs.findIndex((t) => t.id === s.activeTab) > s.tabs.findIndex((t) => t.id === hidden[0])) {
+  if (activeIdx >= 0 && hidden.length && tabs.findIndex((t) => t.id === s.activeTab) > tabs.findIndex((t) => t.id === hidden[0])) {
     const [a] = visibleTabs.splice(activeIdx, 1)
     visibleTabs.push(a)
   }
-  const hiddenTabs = s.tabs.filter((t) => hiddenSet.has(t.id))
+  const hiddenTabs = tabs.filter((t) => hiddenSet.has(t.id))
   // With several sessions open the title bar's brand gives its width to the strip (see styles.css). This keys off the
   // tab count, not overflow: shrinking the brand makes the tabs fit, which would clear an overflow-based flag and
   // re-grow the brand, and the strip would flip between the two layouts forever.
-  const crowded = s.tabs.length >= CROWDED_AT
+  const crowded = tabs.length >= CROWDED_AT
   useEffect(() => {
     document.documentElement.toggleAttribute('data-tabs-crowded', crowded)
   }, [crowded])
@@ -160,10 +162,10 @@ export default function TerminalTabs(): ReactElement {
         <Icon.cloud />
         Hosts
       </button>
-      {s.tabs.length > 0 && (
-        <button ref={gridRef} className={`tab no-drag ${s.gridView ? 'on' : ''}`} title="All sessions on one page (⌘0)" aria-pressed={s.gridView} onClick={() => s.showGrid(!s.gridView)}>
+      {tabs.length > 0 && (
+        <button ref={gridRef} className={`tab no-drag ${s.gridView && !s.gridHost ? 'on' : ''}`} title="All sessions on one page (⌘0)" aria-pressed={s.gridView && !s.gridHost} onClick={() => s.showGrid(!s.gridView || !!s.gridHost)}>
           <Icon.grid />
-          All <span className="mono text-[11px]">{s.tabs.length}</span>
+          All <span className="mono text-[11px]">{tabs.length}</span>
         </button>
       )}
       {visibleTabs.map((t) => renderTab(t))}
@@ -233,10 +235,12 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
   const s = useStore()
   const width = useWindowWidth()
   const tiled = grid && s.tabs.length > 0
+  // A host grid tiles only that machine's terminals (every shell kept on it); the All grid tiles every tab.
+  const inGrid = (t: Tab): boolean => !s.gridHost || (t.instanceKey === s.gridHost && t.kind === 'ssh')
   const split = !tiled && s.splitGroup.includes(s.activeTab) ? s.splitGroup : []
-  const shown = (id: string): boolean => tiled || id === s.activeTab || split.includes(id)
+  const shown = (id: string): boolean => (tiled ? inGrid(s.tabs.find((t) => t.id === id)!) : id === s.activeTab || split.includes(id))
   const anyShown = s.tabs.some((t) => shown(t.id))
-  const n = s.tabs.length
+  const n = tiled ? s.tabs.filter(inGrid).length : s.tabs.length
   const cols = Math.max(1, Math.min(n <= 3 ? n : Math.ceil(Math.sqrt(n)), Math.floor(width / 380)))
   const focus = (id: string): void => {
     if (s.activeTab !== id) s.set({ activeTab: id })
@@ -264,7 +268,8 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
               {t.status === 'connected' && t.route && <span className={`route-chip ${t.route}`}>{t.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
               <span className="muted min-w-0 flex-1 truncate">{t.message ?? t.status}</span>
               <button className="btn btn-ghost btn-sm btn-icon" title="Open full size" aria-label={`Open ${t.title}`} onClick={() => s.setActive(t.id)}><Icon.maximize /></button>
-              <button className="btn btn-ghost btn-sm btn-icon" title="Close" aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id)}><Icon.x /></button>
+              {/* Closing a tile never ends a persistent shell: that stays a deliberate End in the Sessions list. */}
+              <button className="btn btn-ghost btn-sm btn-icon" title={t.persistent ? 'Close this tile (the session keeps running on the host)' : 'Close'} aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id, { detach: !!t.persistent })}><Icon.x /></button>
             </div>
             <div className="tile-body relative flex min-h-0 flex-1 flex-col">
               {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
@@ -278,6 +283,22 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/** Title strip over a host's session grid: which machine, how many sessions, and the way back. */
+export function HostGridBar(): ReactElement | null {
+  const s = useStore()
+  if (!s.gridView || !s.gridHost) return null
+  const host = s.tabs.filter((t) => t.instanceKey === s.gridHost && t.kind === 'ssh')
+  return (
+    <div className="host-grid-bar panel flex items-center gap-2 border-b px-3 py-1.5 text-[12px]" style={{ borderColor: 'var(--border)' }}>
+      <Icon.grid className="muted" />
+      <b className="truncate">{host[0]?.title ?? 'Sessions'}</b>
+      <span className="muted">{host.length} session{host.length === 1 ? '' : 's'} on this machine · click a tile to type in it, Open to keep one as a tab</span>
+      <span className="flex-1" />
+      <button className="btn btn-sm" onClick={() => s.showGrid(false)}>Done</button>
     </div>
   )
 }

@@ -227,6 +227,33 @@ app.whenReady().then(async () => {
     assert.deepEqual([openedReq.shellName, openedReq.shellHistory, openedReq.reuseSessionId], ['ec2ra-other', true, shellTab])
     await key('w', { metaKey: true })
     await until(`document.querySelectorAll('.tab').length === ${tabsBeforeOpen}`)
+    // All sessions of this host on one screen: the other shell gets a transient tab (kept out of the tab bar) on this
+    // tab's connection; Done closes it, Open keeps one as a normal tab.
+    const tabsBeforeHostGrid = await js(`document.querySelectorAll('.tab').length`)
+    // Every terminal already open to this machine is a tile too, plus one transient tab for the background shell.
+    const hostTiles = (await js(`document.querySelectorAll('.session-panes > .session-pane').length`)) + 1
+    await click('Sessions')
+    await until(`!!document.querySelector('.popover .shell-all-btn')`)
+    await js(`document.querySelector('.popover .shell-all-btn').click()`)
+    await until(`!!document.querySelector('.host-grid-bar') && document.querySelectorAll('.session-grid > .session-pane:not(.hidden)').length === ${hostTiles}`)
+    assert.equal(await js(`document.querySelectorAll('.tab').length`), tabsBeforeHostGrid, 'transient tiles stay out of the tab bar')
+    const tileReq = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0]
+    assert.deepEqual([tileReq.shellName, tileReq.shellHistory, tileReq.reuseSessionId], ['ec2ra-other', true, shellTab])
+    assert.match(await js(`document.querySelector('.host-grid-bar').textContent`), new RegExp(`${hostTiles} sessions on this machine`))
+    await screenshot('host-grid.png')
+    const tileId = tileReq.sessionId
+    await click('Done')
+    await until(`!document.querySelector('.host-grid-bar') && !document.querySelector('[data-tab-id="${tileId}"]')`)
+    assert.ok(calls.some((c) => c.channel === 'ssh:close' && c.args[0] === tileId && !c.args[1]?.endShell), 'leaving the grid detaches the tile, the session keeps running')
+    await click('Sessions')
+    await until(`!!document.querySelector('.popover .shell-all-btn')`)
+    await js(`document.querySelector('.popover .shell-all-btn').click()`)
+    await until(`document.querySelectorAll('.session-grid > .session-pane:not(.hidden)').length === ${hostTiles}`)
+    const keepId = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].sessionId
+    await js(`document.querySelector('[data-tab-id="${keepId}"] .tile-head button[aria-label^="Open"]').click()`)
+    await until(`!document.querySelector('.session-grid') && document.querySelectorAll('.tab').length === ${tabsBeforeHostGrid + 1}`)
+    await key('w', { metaKey: true })
+    await until(`document.querySelectorAll('.tab').length === ${tabsBeforeHostGrid}`)
     // A dropped tab cannot reach its host's shells, so Sessions waits until the connection is back.
     const sessionsShown = `[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Sessions' && b.getClientRects().length)`
     win.webContents.send('ssh:event', { sessionId: shellTab, type: 'closed', message: 'Disconnected' })

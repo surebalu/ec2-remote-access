@@ -612,3 +612,6 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .name-bar.mobile .input { flex: 1; width: auto; min-width: 0; height: 34px !important; }
 .name-bar.mobile .btn-sm { height: 32px; }
 .session-grid .name-bar { display: none; }
+.shell-all-btn { display: flex; align-items: center; gap: 8px; margin: 2px 10px 6px; padding: 7px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; }
+.shell-all-btn:hover { background: var(--accent); color: #fff; }
+.shell-list.sheet .shell-all-btn { margin: 2px 0 8px; padding: 12px; font-size: 15px; }
