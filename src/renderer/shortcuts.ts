@@ -29,6 +29,16 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘/', label: 'Keyboard shortcuts' }
 ]
 
+/** Formatting in the Notes editor (the toolbar has the rest: colour, link, table, divider, clear formatting). */
+export const NOTES_SHORTCUTS: ShortcutInfo[] = [
+  { keys: '⌘B / ⌘I / ⌘⇧X', label: 'Bold / italic / strikethrough' },
+  { keys: '⌘⇧H / ⌘E', label: 'Highlight / inline code' },
+  { keys: '⌥⌘1 … ⌥⌘3 / ⌥⌘0', label: 'Heading 1 … 3 / body text' },
+  { keys: '⌘⇧8 / ⌘⇧7 / ⌘⇧9', label: 'Bulleted / numbered list / checklist' },
+  { keys: '⌘⇧.', label: 'Quote' },
+  { keys: '⌘-click', label: 'Open a link or [[note]]' }
+]
+
 /** Shortcuts of the Terminal tab (local shells) while it is the active tab; ⌃` opens it from anywhere. */
 export const TERMINAL_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌃`', label: 'Open the Terminal tab (from anywhere)' },
@@ -119,6 +129,8 @@ export function isAppShortcut(e: KeyboardEvent): boolean {
 
 /** Returns true when the event was a shortcut and has been handled. */
 export function handleAppShortcut(e: KeyboardEvent): boolean {
+  // A focused editor that used the key (formatting in Notes) keeps it.
+  if (e.defaultPrevented) return false
   const st = useStore.getState()
   // ⌃` anywhere: the Terminal tab (local shells), as in editors.
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '`' || e.code === 'Backquote') && !modalOpen()) {

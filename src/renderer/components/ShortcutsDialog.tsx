@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useStore } from '../store'
-import { BROWSER_SHORTCUTS, SHORTCUTS, TERMINAL_SHORTCUTS, type ShortcutInfo } from '../shortcuts'
+import { BROWSER_SHORTCUTS, NOTES_SHORTCUTS, SHORTCUTS, TERMINAL_SHORTCUTS, type ShortcutInfo } from '../shortcuts'
 import Modal from './Modal'
 
 const list = (items: ShortcutInfo[]): ReactElement => (
@@ -21,6 +21,8 @@ export default function ShortcutsDialog(): ReactElement {
       {list(SHORTCUTS)}
       <div className="section-title mb-2 mt-5">In the terminal</div>
       {list(TERMINAL_SHORTCUTS)}
+      <div className="section-title mb-2 mt-5">In notes</div>
+      {list(NOTES_SHORTCUTS)}
       <div className="section-title mb-2 mt-5">In the browser</div>
       {list(BROWSER_SHORTCUTS)}
       <p className="muted mt-4 text-[11px]">In the quick switcher, start with <span className="mono">&gt;</span> for commands, or type <span className="mono">start</span>, <span className="mono">stop</span> or <span className="mono">forward</span> followed by a host name. Close the window with ⌘⇧W.</p>

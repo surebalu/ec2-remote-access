@@ -44,6 +44,8 @@ export const defaultSettings: Settings = {
   phoneAccessPort: 8321,
   phoneAccessBind: 'tailscale',
   phoneTerminals: false,
+  notesFont: 'Monaco',
+  notesFontSize: 14,
   sshAgentSock: existsSync(onePasswordSock) ? onePasswordSock : (process.env.SSH_AUTH_SOCK ?? ''),
   defaultIdentityFile: '',
   pemFile: guessPem(),

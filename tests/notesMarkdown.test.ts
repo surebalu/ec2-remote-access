@@ -24,3 +24,9 @@ test('a wiki link resolves by path or by file name anywhere', () => {
   assert.equal(resolveWikiLink('Daily/2026-10-18', paths), 'Daily/2026-10-18.md')
   assert.equal(resolveWikiLink('missing', paths), null)
 })
+
+test('==highlight== renders as a mark, and coloured spans pass through for the sanitiser to keep', () => {
+  assert.match(noteToHtml('a ==key fact== b'), /<mark>key fact<\/mark>/)
+  assert.doesNotMatch(noteToHtml('a == b == c'), /<mark>/)
+  assert.match(noteToHtml('<span style="color:#e5484d">red</span>'), /<span style="color:#e5484d">red<\/span>/)
+})

@@ -6,7 +6,7 @@ import { useStore, type Tab } from '../../store'
 import { isMobile } from '../../mobile'
 import { ACCENTS, metaFor } from '../../colors'
 import { setTabKeys, type TabKey } from '../../shortcuts'
-import { layoutRects, neighbor, paneIds, removePane, resizeSplit, splitPane, type Direction } from '../../termLayout'
+import { layoutRects, neighbor, paneIds, presetLayout, PRESET_PANES, removePane, resizeSplit, splitPane, type Direction, type Preset } from '../../termLayout'
 import { Icon } from '../icons'
 import Popover, { MenuItem, MenuLabel, MenuSep } from '../Popover'
 import Pane, { type PaneApi, type PaneInfo } from './Pane'
@@ -45,6 +45,7 @@ type Menu =
   | { kind: 'tab'; id: string; anchor: HTMLElement }
   | { kind: 'new'; anchor: HTMLElement }
   | { kind: 'settings'; anchor: HTMLElement }
+  | { kind: 'layout'; anchor: HTMLElement }
 
 function freshTab(opts: { profile?: string; color?: AccentColor } = {}): TermTabState {
   const pane = newId('p')
@@ -138,6 +139,30 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
       ...s,
       tabs: s.tabs.map((x) => (x.id === t.id ? { ...x, root: splitPane(x.root, x.activePane, pane, dir), activePane: pane, maximized: undefined } : x)),
       cwds: cwd ? { ...s.cwds, [pane]: cwd } : s.cwds
+    }))
+  }
+  /**
+   * A ready-made layout for the current tab: its panes are kept in reading order and new ones start in the focused
+   * pane's folder. A layout with fewer panes closes the extra ones (their shells end), after asking.
+   */
+  const applyLayout = (kind: Preset): void => {
+    const t = currentRef.current
+    if (!t) return
+    const ids = paneIds(t.root)
+    const need = PRESET_PANES[kind]
+    // The focused pane goes first, so "one pane" keeps the one you are working in.
+    const ordered = [t.activePane, ...ids.filter((p) => p !== t.activePane)]
+    const kept = ordered.slice(0, need)
+    const dropped = ordered.slice(need)
+    if (dropped.length && !window.confirm(`This layout shows ${need} pane${need === 1 ? '' : 's'}; ${dropped.length} other pane${dropped.length === 1 ? '' : 's'} will close and ${dropped.length === 1 ? 'its shell ends' : 'their shells end'}. Continue?`)) return
+    const fresh = Array.from({ length: Math.max(0, need - kept.length) }, () => newId('p'))
+    // With nothing dropped, the existing panes keep their reading order (top-left first) and new ones follow.
+    const order = dropped.length ? kept : [...ids, ...fresh]
+    const cwd = cwdOf(t.activePane)
+    update((s) => ({
+      ...s,
+      tabs: s.tabs.map((x) => (x.id === t.id ? { ...x, root: presetLayout(kind, order), activePane: t.activePane, maximized: undefined } : x)),
+      cwds: Object.fromEntries([...Object.entries(s.cwds).filter(([p]) => !dropped.includes(p)), ...(cwd ? fresh.map((p) => [p, cwd]) : [])])
     }))
   }
   const closePane = (pane: string): void => {
@@ -392,7 +417,12 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     </div>
   )
   const moreButton = <button type="button" className="term-tab-more" title="New tab with an AWS profile…" aria-label="New tab options" onClick={(e) => setMenu({ kind: 'new', anchor: e.currentTarget })}><Icon.caret /></button>
-  const splitButton = <button type="button" className="term-tool" title="Split right (⌘D)" aria-label="Split right" onClick={() => split('row')}><Icon.split /></button>
+  const splitButton = (
+    <>
+      <button type="button" className="term-tool" title="Layout: 2, 3 or 4 panes" aria-label="Pane layout" onClick={(e) => setMenu({ kind: 'layout', anchor: e.currentTarget })}><Icon.grid /></button>
+      <button type="button" className="term-tool" title="Split right (⌘D)" aria-label="Split right" onClick={() => split('row')}><Icon.split /></button>
+    </>
+  )
   const settingsButton = <button type="button" className="term-tool" title="Terminal settings" aria-label="Terminal settings" onClick={(e) => setMenu({ kind: 'settings', anchor: e.currentTarget })}><Icon.settings /></button>
 
   const tabMenu = menu?.kind === 'tab' ? st.tabs.find((t) => t.id === menu.id) : undefined
@@ -512,6 +542,24 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
               ))}
             </>
           )}
+        </Popover>
+      )}
+
+      {menu?.kind === 'layout' && current && (
+        <Popover anchor={menu.anchor} align={vertical ? 'left' : 'right'} width={250} onClose={() => setMenu(null)}>
+          <MenuLabel>Panes in this tab</MenuLabel>
+          {([
+            ['single', 'One pane'],
+            ['columns', 'Two side by side'],
+            ['rows', 'Two stacked'],
+            ['main', 'One big, two on the right'],
+            ['grid', 'Four in a grid']
+          ] as const).map(([kind, label]) => (
+            <MenuItem key={kind} onClick={() => { setMenu(null); applyLayout(kind) }} hint={`${PRESET_PANES[kind]}`}>
+              <span className="inline-flex items-center gap-2.5"><span className={`tl-icon ${kind}`}>{Array.from({ length: PRESET_PANES[kind] }, (_, i) => <span key={i} />)}</span>{label}</span>
+            </MenuItem>
+          ))}
+          <div className="muted px-3 pb-1.5 pt-1 text-[10.5px] leading-snug">Move between panes with ⌥⌘ + arrows or ⌘[ / ⌘]; ⌘⇧↵ shows one pane alone. Drag the borders to resize.</div>
         </Popover>
       )}
 

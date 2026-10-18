@@ -167,6 +167,9 @@ export interface Settings {
   phoneAccessEnabled: boolean
   phoneAccessPort: number
   phoneAccessBind: PhoneAccessBind
+  /** Font and text size of the Notes editor and preview (see components/NotesToolbar.tsx NOTE_FONTS). */
+  notesFont?: string
+  notesFontSize?: number
   /** Paired devices may open terminals (shells) on this Mac. Off by default; only this Mac's own window can change it. */
   phoneTerminals?: boolean
   sshAgentSock: string

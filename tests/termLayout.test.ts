@@ -43,3 +43,16 @@ test('dividers resize within limits, and focus moves to the touching pane', () =
   assert.equal(neighbor(tree, 'c', 'up'), 'b')
   assert.equal(neighbor(tree, 'a', 'left'), null)
 })
+
+test('presets lay panes out in reading order: two side by side, one big and two, and a 2×2 grid', async () => {
+  const { presetLayout, PRESET_PANES } = await import('../src/renderer/termLayout.ts')
+  const grid = presetLayout('grid', ['a', 'b', 'c', 'd'])
+  assert.deepEqual(paneIds(grid), ['a', 'b', 'c', 'd'])
+  const { panes } = layoutRects(grid)
+  assert.deepEqual(panes.a, { x: 0, y: 0, w: 0.5, h: 0.5 })
+  assert.deepEqual(panes.d, { x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
+  assert.equal(neighbor(grid, 'a', 'down'), 'c')
+  assert.equal(neighbor(grid, 'c', 'right'), 'd')
+  assert.deepEqual(layoutRects(presetLayout('main', ['a', 'b', 'c'])).panes.c, { x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
+  assert.equal(PRESET_PANES.grid, 4)
+})

@@ -126,3 +126,20 @@ export function neighbor(root: PaneNode, from: string, dir: Direction): string |
   }
   return best
 }
+
+/** Ready-made layouts for a Terminal tab, by how many panes they show. */
+export type Preset = 'single' | 'columns' | 'rows' | 'main' | 'grid'
+export const PRESET_PANES: Record<Preset, number> = { single: 1, columns: 2, rows: 2, main: 3, grid: 4 }
+
+/** A preset's tree over `ids` (in reading order: left to right, top to bottom); needs PRESET_PANES[kind] ids. */
+export function presetLayout(kind: Preset, ids: string[]): PaneNode {
+  const p = (i: number): PaneNode => ({ type: 'pane', id: ids[i] })
+  const split = (dir: 'row' | 'column', children: PaneNode[]): PaneNode => ({ type: 'split', dir, children, sizes: children.map(() => 1 / children.length) })
+  switch (kind) {
+    case 'single': return p(0)
+    case 'columns': return split('row', [p(0), p(1)])
+    case 'rows': return split('column', [p(0), p(1)])
+    case 'main': return split('row', [p(0), split('column', [p(1), p(2)])])
+    case 'grid': return split('column', [split('row', [p(0), p(1)]), split('row', [p(2), p(3)])])
+  }
+}

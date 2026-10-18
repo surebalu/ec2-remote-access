@@ -1,10 +1,10 @@
-import type { ReactElement } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { markdown } from '@codemirror/lang-markdown'
+import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown'
 import { yamlFrontmatter } from '@codemirror/lang-yaml'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
@@ -15,6 +15,8 @@ import { isMobile } from '../mobile'
 import { noteToHtml, resolveWikiLink } from '../notesMarkdown'
 import { Icon } from './icons'
 import Popover, { MenuItem, MenuSep } from './Popover'
+import NotesToolbar, { DEFAULT_NOTE_FONT, DEFAULT_NOTE_SIZE, FORMAT_KEYS, noteFontStack, runFormat } from './NotesToolbar'
+import { Highlight, highlightTag, livePreview } from '../notesLive'
 
 /**
  * The Notes tab: the notes folder (by default the Obsidian vault, see main/notes.ts) as a tree with search, and one
@@ -27,6 +29,7 @@ type Mode = 'edit' | 'split' | 'preview'
 const MODE_KEY = 'ui.notesMode'
 const RECENT_KEY = 'ui.notesRecent'
 const COLLAPSED_KEY = 'ui.notesCollapsed'
+const LIVE_KEY = 'ui.notesLive'
 
 function readPref<T>(key: string, fallback: T): T {
   try {
@@ -55,11 +58,14 @@ const highlight = HighlightStyle.define([
   { tag: [tags.link, tags.url], color: 'var(--accent)' },
   { tag: tags.monospace, fontFamily: "'SF Mono', ui-monospace, Menlo, monospace", color: 'var(--text-2)' },
   { tag: tags.quote, color: 'var(--muted)', fontStyle: 'italic' },
-  { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator, tags.list], color: 'var(--muted)' }
+  { tag: highlightTag, backgroundColor: 'rgba(255, 213, 0, .38)', borderRadius: '2px' },
+  // Marks (#, -, >, **) are dim; a list's text (tagged as a whole) keeps the normal colour.
+  { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator], color: 'var(--muted)' }
 ])
 const editorTheme = EditorView.theme({
-  '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)', fontSize: '14px' },
-  '.cm-scroller': { fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif", lineHeight: '1.65' },
+  // Font and size come from the toolbar (Settings.notesFont / notesFontSize) through CSS variables on the tab.
+  '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)', fontSize: 'var(--notes-size, 14px)' },
+  '.cm-scroller': { fontFamily: 'var(--notes-font, Monaco, monospace)', lineHeight: '1.65' },
   '.cm-content': { padding: '18px 24px 40vh', maxWidth: '880px', caretColor: 'var(--text)' },
   '&.cm-focused': { outline: 'none' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--accent-soft-2) !important' },
@@ -97,6 +103,17 @@ function buildTree(entries: NoteEntry[]): Folder {
 export default function NotesTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const toast = useStore((s) => s.toast)
   const updateTab = useStore((s) => s.updateTab)
+  const noteFont = useStore((s) => s.settings?.notesFont) ?? DEFAULT_NOTE_FONT
+  const noteSize = useStore((s) => s.settings?.notesFontSize) ?? DEFAULT_NOTE_SIZE
+  /** Live mode: Markdown marks hidden except on the line being edited (off = the raw Markdown everywhere). */
+  const [live, setLiveState] = useState<boolean>(() => readPref<boolean>(LIVE_KEY, true))
+  const liveConf = useRef(new Compartment()).current
+  const liveOn = useRef(false)
+  const selectionSubs = useRef(new Set<() => void>())
+  const subscribe = useCallback((fn: () => void) => { selectionSubs.current.add(fn); return () => { selectionSubs.current.delete(fn) } }, [])
+  /** What a ⌘-click on a link in the editor opens (kept current for the editor, which is built once per note). */
+  const openLink = useRef<(link: { note?: string; url?: string }) => void>(() => undefined)
+  const liveExtension = (): ReturnType<typeof livePreview> => livePreview((l) => openLink.current(l))
   const mobile = isMobile()
   const inElectron = /\bElectron\//.test(navigator.userAgent)
   const [info, setInfo] = useState<NotesInfo | null>(null)
@@ -185,15 +202,26 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
       extensions: [
         history(),
         drawSelection(),
-        keymap.of([{ key: 'Mod-s', run: () => { void save(); return true } }, indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-        // Frontmatter (a host note's ec2_key, tags) is YAML, not a setext heading.
-        yamlFrontmatter({ content: markdown() }),
+        keymap.of([
+          ...FORMAT_KEYS.map(({ key, fn }) => ({ key, run: (v: EditorView) => { runFormat(v, fn); return true } })),
+          { key: 'Mod-s', run: () => { void save(); return true } },
+          // Enter continues a list or quote (and ends it on an empty item), Backspace removes its mark.
+          ...markdownKeymap,
+          indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap
+        ]),
+        // Frontmatter (a host note's ec2_key, tags) is YAML, not a setext heading. GitHub-flavoured Markdown gives
+        // ~~strikethrough~~, task lists and tables; Highlight adds Obsidian's ==highlight==.
+        yamlFrontmatter({ content: markdown({ base: markdownLanguage, extensions: [Highlight] }) }),
+        liveConf.of(liveOn.current ? liveExtension() : []),
         syntaxHighlighting(highlight),
         highlightSelectionMatches(),
         EditorView.lineWrapping,
         placeholder('Start writing… Markdown, [[links]] to other notes.'),
         editorTheme,
-        EditorView.updateListener.of((u) => { if (u.docChanged) onEdit() })
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged) onEdit()
+          if (u.docChanged || u.selectionSet) for (const fn of selectionSubs.current) fn()
+        })
       ]
     })
 
@@ -272,6 +300,17 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
     return () => ro.disconnect()
   }, [mobile])
   const view: Mode = compact && mode === 'split' ? 'edit' : mode
+
+  // Live mode in Edit; Split shows the raw Markdown beside its preview.
+  const wantLive = live && view === 'edit'
+  useEffect(() => {
+    liveOn.current = wantLive
+    viewRef.current?.dispatch({ effects: liveConf.reconfigure(wantLive ? liveExtension() : []) })
+  }, [wantLive]) // eslint-disable-line react-hooks/exhaustive-deps
+  const setLive = (on: boolean): void => { setLiveState(on); writePref(LIVE_KEY, on) }
+  const setNoteLook = (patch: { notesFont?: string; notesFontSize?: number }): void => {
+    void window.api.invoke('settings:set', patch).then((next) => useStore.getState().set({ settings: next }), (e: Error) => toast('error', e.message))
+  }
 
   // Changes made elsewhere (Obsidian, another device): reload a clean note, offer a choice for one with unsaved edits.
   useEffect(() => {
@@ -452,6 +491,17 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
     if (/^https?:\/\//i.test(href)) void window.api.invoke('shell:open', href)
   }
 
+  openLink.current = (link) => {
+    if (link.note) {
+      const found = resolveWikiLink(link.note, entries.map((x) => x.path))
+      if (found) open(found)
+      else window.api.invoke('notes:create', `${link.note}.md`).then((p) => { refreshList(); open(p) }, (err: Error) => toast('error', err.message))
+    } else if (link.url && /^https?:\/\//i.test(link.url)) {
+      if (inElectron) useStore.getState().openBrowser({ url: link.url })
+      else void window.api.invoke('shell:open', link.url)
+    }
+  }
+
   const html = useMemo(() => DOMPurify.sanitize(noteToHtml(previewText)), [previewText])
   const tree = useMemo(() => buildTree(entries), [entries])
   const files = useMemo(() => entries.filter((e) => !e.folder), [entries])
@@ -619,6 +669,18 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
           <button className="btn btn-primary btn-sm" onClick={() => { setConflict(null); void save(true) }}>Keep mine</button>
         </div>
       )}
+      {current && view !== 'preview' && (
+        <NotesToolbar
+          view={viewRef.current}
+          subscribe={subscribe}
+          font={noteFont}
+          size={noteSize}
+          live={live}
+          onFont={(id) => setNoteLook({ notesFont: id })}
+          onSize={(n) => setNoteLook({ notesFontSize: n })}
+          onLive={setLive}
+        />
+      )}
       <div className={`notes-body mode-${view}`}>
         <div className="notes-editor" ref={editorHost} style={{ display: current && view !== 'preview' ? undefined : 'none' }} />
         {current && view !== 'edit' && <div className="notes-preview" title={view === 'preview' ? 'Double-click to edit' : undefined} onClick={onPreviewClick} onDoubleClick={() => { if (view === 'preview') setMode('edit') }} dangerouslySetInnerHTML={{ __html: html }} />}
@@ -655,7 +717,7 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
   )
 
   return (
-    <div ref={rootRef} className={`notes-tab ${mobile ? `mobile view-${mobileView}` : ''} ${compact ? 'compact' : ''} ${listOpen ? 'list-open' : ''}`}>
+    <div ref={rootRef} className={`notes-tab ${mobile ? `mobile view-${mobileView}` : ''} ${compact ? 'compact' : ''} ${listOpen ? 'list-open' : ''}`} style={{ '--notes-font': noteFontStack(noteFont), '--notes-size': `${noteSize}px` } as CSSProperties}>
       {side}
       {main}
       {menuEl}
