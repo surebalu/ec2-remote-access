@@ -4,7 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -83,6 +83,28 @@ export interface IpcApi {
   'ec2:start': (instanceKey: string) => Promise<void>
   'ec2:stop': (instanceKey: string) => Promise<void>
   'ec2:regions': (profile: string) => Promise<string[]>
+  'notes:info': () => Promise<NotesInfo>
+  'notes:list': () => Promise<NoteEntry[]>
+  'notes:read': (path: string) => Promise<NoteFile>
+  /** baseMtime: when the editor loaded it; a newer file on disk comes back as `conflict` instead of being overwritten. */
+  'notes:write': (path: string, text: string, baseMtime?: number) => Promise<{ mtime: number; conflict?: NoteFile }>
+  'notes:stat': (path: string) => Promise<number | null>
+  'notes:create': (path: string) => Promise<string>
+  /** The host's note (created on first use); returns its path. */
+  'notes:hostNote': (instanceKey: string) => Promise<string>
+  'notes:daily': () => Promise<string>
+  'notes:append': (path: string, text: string) => Promise<void>
+  'notes:search': (query: string) => Promise<NoteHit[]>
+  'notes:pickFolder': () => Promise<string | null>
+  'notes:mkdir': (path: string) => Promise<string>
+  /** Renames or moves a note or folder; returns the new path. Never replaces an existing one. */
+  'notes:rename': (from: string, to: string) => Promise<string>
+  /** Moves a note or folder to the Trash. */
+  'notes:delete': (path: string) => Promise<void>
+  'browser:load': () => Promise<BrowserState | null>
+  'browser:save': (state: BrowserState) => Promise<void>
+  /** A one-time sign-in link to the AWS console of `profile` (SSO credentials), landing on `destination`. */
+  'browser:consoleUrl': (profile: string, destination: string) => Promise<string>
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
@@ -105,6 +127,13 @@ export interface IpcEvents {
   'profiles:status': ProfileStatus
   'instances:updated': Instance[]
   'phone:changed': PhoneAccessStatus
+  /** A page asked for a new window (target=_blank, window.open) or "Open link in new tab": open it as a tab. */
+  'web:window': { webContentsId: number; url: string; background: boolean }
+  /** A browser shortcut pressed while a page had the keyboard (pages swallow keys before the app sees them). */
+  'web:shortcut': { webContentsId: number; key: string; shift: boolean; alt: boolean }
+  /** A page context-menu action the app carries out (Add to note). */
+  'web:menu': { webContentsId: number; action: 'note'; url: string; title: string }
+  'web:download': { name: string; path: string; state: 'completed' | 'cancelled' | 'interrupted' }
 }
 
 export type IpcChannel = keyof IpcApi

@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
+import { consoleHome } from '@shared/browser'
 import type { Instance } from '@shared/types'
 import { routeOf, useStore, visibleInstances } from '../store'
-import { openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
+import { hasBrowser, openDefaultFor, openFilesFor, openInConsole, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
+import { openHostNote } from './HostActions'
 import { terminalAction } from '../shortcuts'
 import Modal from './Modal'
 import { Icon } from './icons'
@@ -44,6 +46,10 @@ function commands(): Command[] {
     { id: 'theme-system', title: 'Theme: follow macOS', keywords: 'appearance system auto', icon: Icon.auto, run: () => void s.setTheme('system') },
     { id: 'sidebar', title: s.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar', hint: '⌘B', icon: Icon.panelRight, run: () => s.toggleSidebar() },
     { id: 'hosts', title: 'Go to hosts', hint: '⌘1', icon: Icon.cloud, run: () => s.setActive('hosts') },
+    { id: 'notes', title: 'Open notes', keywords: 'obsidian markdown vault', hint: '⌘⇧N', icon: Icon.note, run: () => s.openNotes() },
+    { id: 'notes-today', title: "Open today's note", keywords: 'daily journal obsidian', icon: Icon.note, run: () => void window.api.invoke('notes:daily').then((p) => s.openNotes(p)) },
+    { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
+    { id: 'notes-host', title: 'Open the note for this host', keywords: 'notes obsidian', icon: Icon.note, run: () => openHostNote(active!.instanceKey, active!.id), when: !!active?.instanceKey },
     { id: 'forward', title: 'Forward a port…', keywords: 'tunnel port forward database', icon: Icon.plug, run: () => s.set({ portForwardFor: {} }) },
     { id: 'snippets', title: 'Edit snippets…', keywords: 'commands saved', icon: Icon.snippet, run: () => s.set({ snippetsOpen: {} }) },
     { id: 'ws-save', title: 'Save open tabs as a workspace…', keywords: 'workspace session layout', icon: Icon.grid, run: () => s.set({ workspaceSaveOpen: true }), when: s.tabs.length > 0 },
@@ -56,6 +62,11 @@ function commands(): Command[] {
     { id: 'broadcast', title: s.broadcastInput ? 'Stop broadcasting input' : 'Broadcast input to all panes in the split', hint: '⌘⇧I', icon: Icon.broadcast, run: () => s.set({ broadcastInput: !s.broadcastInput }), when: s.splitGroup.includes(s.activeTab) },
     { id: 'find', title: 'Find in terminal', hint: '⌘F', icon: Icon.search, run: () => terminalAction(active!.id, 'find'), when: active?.kind === 'ssh' }
   ]
+  if (hasBrowser()) {
+    for (const p of s.profiles.filter((x) => x.enabled && x.kind !== 'static')) {
+      cmds.push({ id: `console:${p.name}`, title: `AWS console: ${p.name}`, keywords: 'aws console browser web account', icon: Icon.globe, run: () => s.openBrowser({ profile: p.name, url: consoleHome(p.region) }) })
+    }
+  }
   for (const w of s.settings?.workspaces ?? []) {
     cmds.push({ id: `ws:${w.id}`, title: `Open workspace: ${w.name}`, keywords: 'workspace', hint: `${w.tabs.length} tabs`, icon: Icon.grid, run: () => s.openWorkspace(w.id) })
   }
@@ -124,7 +135,7 @@ export default function QuickSwitcher(): ReactElement {
     const tabs = s.tabs.filter((t) => !t.transient && `${t.title} ${t.shellLabel ?? ''} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
     results = [
       ...hostVerbs(query, visible),
-      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: `Open ${t.kind.toUpperCase()} session · ${t.status}`, key: t.instanceKey, icon: t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : Icon.terminal, action: () => s.setActive(t.id), hint: 'Switch' })),
+      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: t.kind === 'notes' || t.kind === 'browser' ? 'Open tab' : `Open ${t.kind.toUpperCase()} session · ${t.status}`, key: t.instanceKey || undefined, icon: t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'notes' ? Icon.note : t.kind === 'browser' ? Icon.globe : Icon.terminal, action: () => s.setActive(t.id), hint: 'Switch' })),
       ...hosts.map((i) => {
         const available = ['ssm', 'direct'].includes(routeOf(i, s.settings).route)
         return { id: i.key, title: i.name, subtitle: `${i.profile} · ${i.region} · ${i.instanceId}${i.staleReason ? ' · cached' : ''}`, key: i.key,

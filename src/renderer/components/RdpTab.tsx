@@ -3,7 +3,7 @@ import '@devolutions/iron-remote-desktop'
 import { displayControl, enableCredssp, init as initWasm } from '@devolutions/iron-remote-desktop-rdp'
 import type { UserInteraction, NewSessionInfo } from '@devolutions/iron-remote-desktop'
 import { useStore, type Tab } from '../store'
-import HostActions from './HostActions'
+import HostActions, { openHostNote } from './HostActions'
 import { Icon } from './icons'
 import { isMobile, isKeyboardOpen, pasteFromClipboard, useKeyboardOpen } from '../mobile'
 import { attachTouchGestures, captureSessions, NAMED_KEYS, RdpInput, type NamedKey, type Session as WasmSession } from '../rdpInput'
@@ -811,6 +811,7 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
             </SheetItem>
             <SheetItem icon={<Icon.grid />} hint={res(resolution)} onClick={() => changeResolution(RESOLUTIONS[(RESOLUTIONS.indexOf(resolution) + 1) % RESOLUTIONS.length])}>Desktop size</SheetItem>
             {(phase === 'failed' || phase === 'closed') && <SheetItem icon={<Icon.refresh />} onClick={() => { setMobileMenu(false); ctl.current.reconnect?.() }}>Reconnect</SheetItem>}
+            <SheetItem icon={<Icon.note />} onClick={() => { setMobileMenu(false); openHostNote(tab.instanceKey) }}>Host note</SheetItem>
             <SheetItem icon={<Icon.activity />} onClick={() => { setMobileMenu(false); void copyDiagnostics() }}>Copy diagnostics</SheetItem>
             <SheetItem icon={<Icon.x />} danger onClick={() => { setMobileMenu(false); void useStore.getState().closeTab(tab.id) }}>Disconnect</SheetItem>
           </Sheet>
@@ -884,7 +885,7 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
           <Icon.maximize />
         </button>
         <span className="mx-1 h-4 border-l" style={{ borderColor: 'var(--border)' }} />
-        <HostActions instanceKey={tab.instanceKey} current="rdp" />
+        <HostActions instanceKey={tab.instanceKey} current="rdp" tabId={tab.id} />
         <button className="btn !py-0.5" onClick={() => void useStore.getState().closeTab(tab.id)}>
           Disconnect
         </button>

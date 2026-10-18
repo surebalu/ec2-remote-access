@@ -2,7 +2,7 @@ import type { ReactElement } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Instance } from '@shared/types'
 import { allInstances, filteredInstances, routeOf, useStore, visibleInstances } from '../store'
-import { openDefaultFor, openFilesFor, openRdpFor, openSshFor } from '../quickConnect'
+import { hasBrowser, openDefaultFor, openFilesFor, openInConsole, openRdpFor, openSshFor } from '../quickConnect'
 import { Icon } from './icons'
 import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
@@ -440,6 +440,7 @@ function ContextMenu({
       {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), i.state !== 'running')}
       {!i.manual && item('Forward a port…', () => s.set({ portForwardFor: { key: i.key } }), !i.ssmOnline || i.state !== 'running')}
       {i.platform === 'windows' && !i.manual && item('Get Windows password', () => s.set({ passwordFor: i.key }))}
+      {!i.manual && hasBrowser() && item('Open in AWS console', () => openInConsole(i))}
       {i.manual && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}
       {i.manual &&
         item('Remove server', async () => {

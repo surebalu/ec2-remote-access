@@ -30,6 +30,8 @@ export default function App(): ReactElement {
   const init = useStore((s) => s.init)
   const activeTab = useStore((s) => s.activeTab)
   const gridView = useStore((s) => s.gridView)
+  // The browser brings its own sidebar (spaces and tabs); the hosts sidebar steps aside while it is in front.
+  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && t.kind === 'browser' && !s.splitGroup.includes(t.id)))
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)
@@ -118,10 +120,12 @@ export default function App(): ReactElement {
           <span>EC2 Remote Access</span>
         </div>
         <TerminalTabs />
+        <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Browser: AWS console spaces and web tabs" aria-label="Browser" onClick={() => useStore.getState().openBrowser()}><Icon.globe /></button>
+        <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Notes (⌘⇧N)" aria-label="Notes" onClick={() => useStore.getState().openNotes()}><Icon.note /></button>
         <button className="btn btn-ghost no-drag mr-3 shrink-0" title="Find a host or session (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().openQuickSwitcher()}><Icon.search /><kbd>⌘K</kbd></button>
       </header>
       <div className="flex min-h-0 flex-1">
-        <Sidebar />
+        <div className={browserInFront ? 'hidden' : 'contents'}><Sidebar /></div>
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />
           <div className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>

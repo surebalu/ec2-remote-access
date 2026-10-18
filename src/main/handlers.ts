@@ -7,6 +7,8 @@ import { enabledRegions, scanAll, setInstanceState, findInstance } from './aws/i
 import { windowsPassword } from './aws/passwords'
 import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
+import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
+import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
@@ -118,6 +120,23 @@ export const handlers: Handlers = {
     if (!p) throw new Error(`Unknown profile ${profile}`)
     return enabledRegions(profile, p.region)
   },
+  'notes:info': async () => notesInfo(),
+  'notes:list': () => listNotes(),
+  'notes:read': (path) => readNote(path),
+  'notes:write': (path, text, baseMtime) => writeNote(path, text, baseMtime),
+  'notes:stat': (path) => statNote(path),
+  'notes:create': (path) => createNote(path),
+  'notes:hostNote': (key) => hostNote(key),
+  'notes:daily': () => dailyNote(),
+  'notes:append': (path, text) => appendNote(path, text),
+  'notes:search': (query) => searchNotes(query),
+  'notes:pickFolder': () => pickNotesFolder(),
+  'notes:mkdir': (path) => createFolder(path),
+  'notes:rename': (from, to) => renameEntry(from, to),
+  'notes:delete': (path) => deleteEntry(path),
+  'browser:load': async () => loadBrowserState(),
+  'browser:save': (state) => saveBrowserState(state),
+  'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
   'clipboard:write': async (text) => {
     if (!host().clipboardWrite(text)) throw new Error('No clipboard on this host')
   },

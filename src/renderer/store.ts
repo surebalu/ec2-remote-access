@@ -14,7 +14,7 @@ export interface RdpTabRequest {
 
 export interface Tab {
   id: string
-  kind: 'ssh' | 'rdp' | 'sftp'
+  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser'
   instanceKey: string
   title: string
   route?: Route
@@ -38,6 +38,8 @@ export interface Tab {
   shellName?: string
   /** Opened only to show a shell as a tile of a host's session grid: kept out of the tab bar, closed with the grid. */
   transient?: boolean
+  /** Notes tab: the note it shows (relative to the notes folder). */
+  notesPath?: string
 }
 
 export interface Toast {
@@ -98,6 +100,12 @@ interface State {
   duplicateTab: (id: string, split?: boolean) => void
   /** Opens a persistent shell of a tab's host in a new tab, on that tab's connection. */
   openShellTab: (fromId: string, shell: HostShell) => void
+  /** Shows the Notes tab (there is one), on `path` when given; `beside` shows it next to that tab in a split. */
+  openNotes: (path?: string, opts?: { beside?: string }) => void
+  /** Shows the Browser tab (there is one), opening `url` in a new web tab when given: in the AWS account space of `profile`. */
+  openBrowser: (req?: { url?: string; profile?: string }) => void
+  /** The latest open request for the Browser tab to carry out (nonce makes repeats distinct). */
+  browserRequest: { url?: string; profile?: string; nonce: number } | null
   portForwardFor: { key?: string; presetId?: string } | null
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
@@ -193,8 +201,10 @@ export const useStore = create<State>((set, get) => ({
   showGrid: (on) => set((s) => {
     // Either way the host grid's transient tabs go (unmounting a tab detaches its shell; it keeps running).
     const tabs = s.tabs.filter((t) => !t.transient)
-    if (!on || !tabs.length) return { gridView: false, gridHost: null, tabs }
-    return { gridView: true, gridHost: null, tabs, activeTab: tabs.some((t) => t.id === s.activeTab) ? s.activeTab : tabs[0].id }
+    // Tiles are sessions, so the Notes tab neither counts nor takes the focus.
+    const sessions = tabs.filter(isSession)
+    if (!on || !sessions.length) return { gridView: false, gridHost: null, tabs }
+    return { gridView: true, gridHost: null, tabs, activeTab: sessions.some((t) => t.id === s.activeTab) ? s.activeTab : sessions[0].id }
   }),
   gridHost: null,
   showHostGrid: (fromId, shells) => {
@@ -240,6 +250,31 @@ export const useStore = create<State>((set, get) => ({
     rest.splice(at < 0 ? rest.length : at, 0, tab)
     return { tabs: rest }
   }),
+  browserRequest: null,
+  openBrowser: (req) => {
+    const st = get()
+    let browser = st.tabs.find((t) => t.kind === 'browser')
+    if (!browser) {
+      browser = { id: `browser-${Date.now().toString(36)}`, kind: 'browser', instanceKey: '', title: 'Browser', status: 'connected' }
+      const created = browser
+      set((s) => ({ tabs: [...s.tabs, created] }))
+    }
+    if (req?.url || req?.profile) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
+    get().setActive(browser.id)
+  },
+  openNotes: (path, opts) => {
+    const st = get()
+    let notes = st.tabs.find((t) => t.kind === 'notes')
+    if (!notes) {
+      notes = { id: `notes-${Date.now().toString(36)}`, kind: 'notes', instanceKey: '', title: 'Notes', status: 'connected', notesPath: path }
+      const created = notes
+      set((s) => ({ tabs: [...s.tabs, created] }))
+    } else if (path) st.updateTab(notes.id, { notesPath: path })
+    if (opts?.beside && opts.beside !== notes.id && st.tabs.some((t) => t.id === opts.beside)) {
+      set({ gridView: false, gridHost: null })
+      get().splitWith(opts.beside, notes.id)
+    } else get().setActive(notes.id)
+  },
   openShellTab: (fromId, shell) => {
     const st = get()
     const tab = st.tabs.find((t) => t.id === fromId)
@@ -659,6 +694,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser') { /* nothing in main to close: both save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
@@ -670,7 +706,7 @@ export const useStore = create<State>((set, get) => ({
       const activeTab = s.activeTab === id ? next : s.activeTab
       // The host grid ends with the last of its host's terminals.
       const hostGrid = !!s.gridHost && tabs.some((t) => t.instanceKey === s.gridHost && t.kind === 'ssh')
-      return { tabs, activeTab, gridView: s.gridView && tabs.length > 0 && (!s.gridHost || hostGrid), gridHost: hostGrid ? s.gridHost : null, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
+      return { tabs, activeTab, gridView: s.gridView && tabs.some(isSession) && (!s.gridHost || hostGrid), gridHost: hostGrid ? s.gridHost : null, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
     })
   },
   toggleTerminalPane: (open) => {
@@ -686,6 +722,11 @@ export const useStore = create<State>((set, get) => ({
   }))
 }))
 
+
+/** Remote sessions, as opposed to the Notes and Browser tabs: only sessions are tiles, counted, or saved in workspaces. */
+export function isSession(t: Tab): boolean {
+  return t.kind !== 'notes' && t.kind !== 'browser'
+}
 
 /** A tab that attaches one of a host's persistent shells on another tab's connection, replaying its scrollback. */
 function shellTab(from: Tab, shell: HostShell, transient: boolean): Tab {
@@ -719,7 +760,7 @@ function openWorkspaceTab(t: WorkspaceTab): void {
 export function workspaceTabOf(t: Tab): WorkspaceTab {
   const r = t.kind === 'ssh' ? t.request : t.kind === 'sftp' ? t.sftpRequest : undefined
   if (t.kind === 'rdp') return { kind: 'rdp', instanceKey: t.instanceKey, user: t.rdpRequest?.user, port: t.rdpRequest?.port, forceRoute: t.rdpRequest?.forceRoute }
-  return { kind: t.kind, instanceKey: t.instanceKey, user: r?.user, port: r?.port, identityFile: r?.identityFile, useAgent: r?.useAgent, forceRoute: r?.forceRoute, initCommand: t.kind === 'ssh' ? t.request?.initCommand : undefined }
+  return { kind: t.kind === 'sftp' ? 'sftp' : 'ssh', instanceKey: t.instanceKey, user: r?.user, port: r?.port, identityFile: r?.identityFile, useAgent: r?.useAgent, forceRoute: r?.forceRoute, initCommand: t.kind === 'ssh' ? t.request?.initCommand : undefined }
 }
 
 function readRecentHosts(): string[] {

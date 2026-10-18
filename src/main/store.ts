@@ -38,6 +38,8 @@ export const defaultSettings: Settings = {
   defaultWindowsUser: 'Administrator',
   sshInitCommand: '',
   persistentShells: true,
+  notesDir: '',
+  notesHostFolder: 'EC2 Remote/Hosts',
   phoneAccessEnabled: false,
   phoneAccessPort: 8321,
   phoneAccessBind: 'tailscale',
