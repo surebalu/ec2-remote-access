@@ -1,7 +1,9 @@
 import type { ReactNode, ReactElement } from 'react'
 import { useEffect, useId, useRef } from 'react'
+import { Icon } from './icons'
 
-export default function Modal({ title, onClose, children, width = 'max-w-lg' }: { title: string; onClose: () => void; children: ReactNode; width?: string }): ReactElement {
+/** `bare` drops the padding and the title row for dialogs with their own layout (Settings); the title stays for screen readers. */
+export default function Modal({ title, onClose, children, width = 'max-w-lg', bare = false }: { title: string; onClose: () => void; children: ReactNode; width?: string; bare?: boolean }): ReactElement {
   const ref = useRef<HTMLDivElement>(null)
   const previousFocus = useRef(document.activeElement as HTMLElement | null)
   const titleId = useId()
@@ -30,13 +32,17 @@ export default function Modal({ title, onClose, children, width = 'max-w-lg' }: 
   }, [])
   return (
     <div className="modal-backdrop fixed inset-0 z-40 flex items-center justify-center" onMouseDown={onClose}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`panel modal max-h-[calc(100vh-32px)] overflow-y-auto w-full ${width} border p-5`} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 id={titleId} className="text-sm font-semibold tracking-tight">{title}</h2>
-          <button className="btn btn-ghost btn-sm btn-icon" aria-label="Close dialog" onClick={onClose}>
-            ✕
-          </button>
-        </div>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`panel modal max-h-[calc(100vh-32px)] w-full ${width} border ${bare ? 'modal-bare overflow-hidden' : 'overflow-y-auto p-5'}`} onMouseDown={(e) => e.stopPropagation()}>
+        {bare ? (
+          <h2 id={titleId} className="sr-only">{title}</h2>
+        ) : (
+          <div className="mb-4 flex items-center justify-between">
+            <h2 id={titleId} className="text-sm font-semibold tracking-tight">{title}</h2>
+            <button className="btn btn-ghost btn-sm btn-icon" aria-label="Close dialog" onClick={onClose}>
+              <Icon.x />
+            </button>
+          </div>
+        )}
         {children}
       </div>
     </div>

@@ -13,7 +13,7 @@ const authColor: Record<string, string> = {
   unknown: 'var(--muted)'
 }
 
-export default function Sidebar(): ReactElement {
+export default function Sidebar(): ReactElement | null {
   const s = useStore()
   const counts = new Map<string, number>()
   let running = 0
@@ -30,19 +30,6 @@ export default function Sidebar(): ReactElement {
   const errorsFor = (p: string): string[] => s.scanErrors.filter((e) => e.profile === p).map((e) => `${e.region}: ${e.message}`)
   const scanned = Object.values(s.progress)
   const done = scanned.filter((p) => p.status !== 'running').length
-
-  // Cmd+B toggles the sidebar. Listened on document so the RDP key guard on window cannot swallow it.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      // An editor that used ⌘B (bold in Notes) has the key.
-      if (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !e.defaultPrevented) {
-        e.preventDefault()
-        useStore.getState().toggleSidebar()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [])
 
   /** Filter clicks always land on the Hosts view, even while a session tab is in front. */
   const nav = (patch: Parameters<typeof s.set>[0]): void => s.set({ selectedKey: null, detailsFor: null, ...patch, activeTab: 'hosts' })
@@ -146,92 +133,8 @@ export default function Sidebar(): ReactElement {
     )
   }
 
-  const themeIcon = s.settings?.theme === 'light' ? <Icon.sun /> : s.settings?.theme === 'dark' ? <Icon.moon /> : <Icon.auto />
-  const cycleTheme = (): void => {
-    const order = ['system', 'light', 'dark'] as const
-    const cur = s.settings?.theme ?? 'system'
-    void s.setTheme(order[(order.indexOf(cur) + 1) % order.length])
-  }
-
-  if (s.sidebarCollapsed) {
-    const favCount = (s.settings?.favorites ?? []).filter((k) => instances.some((i) => i.key === k)).length
-    return (
-      <aside className="sidebar panel flex shrink-0 flex-col overflow-y-auto border-r py-2" style={{ borderColor: 'var(--border)' }}>
-        <button className="rail-btn no-drag" title="Expand sidebar (⌘B)" onClick={() => s.toggleSidebar(false)}>
-          <Icon.chevron />
-        </button>
-        <div className="rail-sep" />
-        <button className={`rail-btn ${s.profileFilter === null && !s.favoritesOnly ? 'on' : ''}`} title={`All accounts · ${instances.length} hosts`} onClick={() => nav({ profileFilter: null, favoritesOnly: false })}>
-          <Icon.cloud />
-          {instances.length > 0 && <span className="count">{instances.length}</span>}
-        </button>
-        <button className={`rail-btn ${s.favoritesOnly ? 'on' : ''}`} title={`Favorites · ${favCount}`} onClick={() => nav({ favoritesOnly: !s.favoritesOnly })}>
-          <Icon.star filled={s.favoritesOnly} />
-          {favCount > 0 && <span className="count">{favCount}</span>}
-        </button>
-        {s.profiles.map((p) => {
-          const st = s.statuses[p.name]
-          const state = st?.state ?? 'unknown'
-          const m = metaFor(p.name, s.settings)
-          return (
-            <button
-              key={p.name}
-              className={`rail-btn ${s.profileFilter === p.name ? 'on' : ''} ${p.enabled ? '' : 'opacity-50'}`}
-              data-accent={m.color}
-              title={`${m.label}${m.label.toLowerCase() !== p.name.toLowerCase() ? ` (${p.name})` : ''} · ${st?.accountId ?? p.accountId ?? p.kind} · ${p.region}\nCredentials: ${state}${counts.get(p.name) ? ` · ${counts.get(p.name)} hosts` : ''}`}
-              onClick={() => nav({ profileFilter: p.name, favoritesOnly: false })}
-            >
-              <span className="relative">
-                <span className="avatar">{m.label.slice(0, 2).toUpperCase()}</span>
-                <span
-                  className="dot absolute -right-0.5 -bottom-0.5 ring-2"
-                  style={{ background: authColor[state], animation: state === 'checking' ? 'pulse 1.2s infinite' : undefined, ['--tw-ring-color' as string]: 'var(--panel)' }}
-                />
-              </span>
-            </button>
-          )
-        })}
-        {(manualCount > 0 || s.folders().length > 0) && <div className="rail-sep" />}
-        {manualCount > 0 && (
-          <button className={`rail-btn ${s.profileFilter === MANUAL_PROFILE ? 'on' : ''}`} title={`Other servers · ${manualCount}`} onClick={() => nav({ profileFilter: MANUAL_PROFILE, favoritesOnly: false })}>
-            <Icon.server />
-            <span className="count">{manualCount}</span>
-          </button>
-        )}
-        {s.folders().map((f) => {
-          const m = metaFor(`group:${f}`, s.settings)
-          const key = `group:${f}`
-          const n = (s.settings?.manualHosts ?? []).filter((h) => h.group === f).length
-          return (
-            <button key={f} className={`rail-btn ${s.profileFilter === key ? 'on' : ''}`} data-accent={m.color} title={`${f} · ${n} server(s)`} onClick={() => nav({ profileFilter: key, favoritesOnly: false })}>
-              <span className="avatar sm">{f.slice(0, 2).toUpperCase()}</span>
-            </button>
-          )
-        })}
-        {workspaces.length > 0 && <div className="rail-sep" />}
-        {workspaces.map((w) => (
-          <button key={w.id} className="rail-btn" title={`Workspace: ${w.name} · ${w.tabs.length} sessions`} onClick={() => s.openWorkspace(w.id)}>
-            <Icon.grid />
-          </button>
-        ))}
-        <div className="mt-auto">
-          <div className="rail-sep" />
-          <button className="rail-btn" disabled={s.scanning} title={s.scanning ? `Scanning… ${done}/${scanned.length} regions` : 'Rescan'} onClick={() => void s.scan()}>
-            <Icon.refresh className={s.scanning ? 'animate-spin' : ''} />
-          </button>
-          <button className="rail-btn" disabled={s.loggingIn} title={s.loggingIn ? 'Waiting for SSO login…' : 'Refresh token (aws sso login)'} onClick={() => void s.refreshToken()}>
-            <Icon.key />
-          </button>
-          <button className="rail-btn" title={`Theme: ${s.settings?.theme ?? 'system'} (click to switch)`} onClick={cycleTheme}>
-            {themeIcon}
-          </button>
-          <button className="rail-btn" title="Settings" onClick={() => s.set({ settingsOpen: true })}>
-            <Icon.settings />
-          </button>
-        </div>
-      </aside>
-    )
-  }
+  // Hidden with ⌘B (the app rail and the title bar keep everything else in reach).
+  if (s.sidebarCollapsed) return null
 
   return (
     <aside className="sidebar panel flex shrink-0 flex-col overflow-y-auto border-r" style={{ borderColor: 'var(--border)' }}>
@@ -476,45 +379,21 @@ export default function Sidebar(): ReactElement {
         </>
       )}
 
-      {/* Footer */}
-      <div className="mt-auto space-y-2 border-t p-3" style={{ borderColor: 'var(--border)' }}>
-        <div className="muted flex items-center justify-between text-[11px]">
-          {s.scanning ? (
-            <span>
-              Scanning… {done}/{scanned.length} regions
-            </span>
-          ) : s.scannedAt ? (
-            <span>Last scan {new Date(s.scannedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          ) : (
-            <span>Not scanned yet</span>
-          )}
-          <span className="flex items-center gap-0.5">
-            <button className="btn btn-ghost btn-sm btn-icon" title={`Theme: ${s.settings?.theme ?? 'system'} (click to switch)`} onClick={cycleTheme}>
-              {themeIcon}
-            </button>
-            <button className="btn btn-ghost btn-sm btn-icon" title="Settings" onClick={() => s.set({ settingsOpen: true })}>
-              <Icon.settings />
-            </button>
-            <button className="btn btn-ghost btn-sm btn-icon" title="Collapse sidebar (⌘B)" onClick={() => s.toggleSidebar(true)}>
-              <span className="inline-flex" style={{ transform: 'rotate(180deg)' }}>
-                <Icon.chevron />
-              </span>
-            </button>
+      {/* Footer: when the inventory was last read, and the two ways to refresh it. */}
+      <div className="side-footer">
+        {s.scanning && <div className="side-progress" role="progressbar" aria-valuemin={0} aria-valuemax={scanned.length} aria-valuenow={done}><span style={{ width: `${scanned.length ? Math.max(6, Math.round((done / scanned.length) * 100)) : 6}%` }} /></div>}
+        <div className="flex items-center gap-1">
+          <span className="dot" style={{ background: s.scanning || s.scanErrors.length ? 'var(--warn)' : s.scannedAt ? 'var(--ok)' : 'var(--muted)', animation: s.scanning ? 'pulse 1.2s infinite' : undefined }} />
+          <span className="side-scan-text">
+            {s.scanning ? `Scanning ${done}/${scanned.length} regions` : s.scannedAt ? `Updated ${new Date(s.scannedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Not scanned yet'}
           </span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button className="btn btn-primary" disabled={s.scanning} onClick={() => void s.scan()}>
+          <span className="flex-1" />
+          <button className="btn btn-ghost btn-sm" disabled={s.scanning} title="Read every account's instances again" onClick={() => void s.scan()}>
             <Icon.refresh className={s.scanning ? 'animate-spin' : ''} />
             {s.scanning ? 'Scanning' : 'Rescan'}
           </button>
-          <button
-            className="btn"
-            disabled={s.loggingIn}
-            title="Run `aws sso login` for the shared SSO session (your aws-login alias), then re-check accounts and rescan"
-            onClick={() => void s.refreshToken()}
-          >
+          <button className="btn btn-ghost btn-sm btn-icon" disabled={s.loggingIn} title={s.loggingIn ? 'Waiting for you to approve the sign-in…' : 'Sign in to AWS again (refreshes the SSO token), then re-check accounts and rescan'} aria-label="Sign in to AWS again" onClick={() => void s.refreshToken()}>
             <Icon.key />
-            {s.loggingIn ? 'Waiting…' : 'Refresh token'}
           </button>
         </div>
       </div>

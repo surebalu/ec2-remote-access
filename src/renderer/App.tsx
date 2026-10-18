@@ -1,6 +1,7 @@
 import { useEffect, type ReactElement } from 'react'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
+import AppRail from './components/AppRail'
 import InstanceTable from './components/InstanceTable'
 import TerminalTabs, { HostGridBar, SessionPanes } from './components/TerminalTabs'
 import ConnectDialog from './components/ConnectDialog'
@@ -22,9 +23,10 @@ import PortForwardDialog from './components/PortForwardDialog'
 import SnippetsDialog from './components/SnippetsDialog'
 import WorkspaceDialog from './components/WorkspaceDialog'
 import ShortcutsDialog from './components/ShortcutsDialog'
+import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
-import { hasBrowser } from './quickConnect'
 import { isMobile } from './mobile'
+import { openDefaultFor } from './quickConnect'
 import MobileApp from './components/mobile/MobileApp'
 
 export default function App(): ReactElement {
@@ -45,9 +47,11 @@ export default function App(): ReactElement {
   const snippetsOpen = useStore((s) => s.snippetsOpen)
   const workspaceSaveOpen = useStore((s) => s.workspaceSaveOpen)
   const shortcutsOpen = useStore((s) => s.shortcutsOpen)
+  const runCommandFor = useStore((s) => s.runCommandFor)
   const profiles = useStore((s) => s.profiles)
   const manualCount = useStore((s) => s.settings?.manualHosts.length ?? 0)
   const settingsLoaded = useStore((s) => !!s.settings)
+  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
   const showWelcome = settingsLoaded && profiles.length === 0 && manualCount === 0
 
   useEffect(() => {
@@ -67,6 +71,27 @@ export default function App(): ReactElement {
         return
       }
       handleAppShortcut(e)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  // The menu-bar icon (src/main/tray.ts) asks the window to connect to a favorite, find a host or rescan.
+  useEffect(() => window.api.on('app:command', (c) => {
+    const st = useStore.getState()
+    if (c.kind === 'connect') openDefaultFor(c.key)
+    else if (c.kind === 'switcher') { if (!st.quickSwitcherOpen) st.openQuickSwitcher() }
+    else if (c.kind === 'scan') void st.scan()
+  }), [])
+
+  // ⌘B shows or hides the hosts sidebar. Here rather than in the sidebar, which unmounts while hidden; on document so
+  // the RDP key guard on window cannot swallow it, and never when an editor used the key (bold in Notes).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === 'b' && !e.defaultPrevented) {
+        e.preventDefault()
+        useStore.getState().toggleSidebar()
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -108,6 +133,7 @@ export default function App(): ReactElement {
       {snippetsOpen && <SnippetsDialog />}
       {workspaceSaveOpen && <WorkspaceDialog />}
       {shortcutsOpen && <ShortcutsDialog />}
+      {runCommandFor && <RunCommandDialog key={runCommandFor.runId ?? runCommandFor.keys.join('|')} />}
       <Toasts />
     </>
   )
@@ -118,16 +144,23 @@ export default function App(): ReactElement {
       <header className="titlebar drag">
         <div className="brand">
           <span className="brand-mark">&gt;_</span>
-          <span>EC2 Remote Access</span>
+          <span className="brand-name">EC2 Remote Access</span>
+          <span className="flex-1" />
+          {!browserInFront && (
+            <button className="titlebar-btn no-drag" title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Collapse sidebar (⌘B)'} aria-label={sidebarCollapsed ? 'Show sidebar' : 'Collapse sidebar'} aria-pressed={!sidebarCollapsed} onClick={() => useStore.getState().toggleSidebar()}>
+              <Icon.sidebar />
+            </button>
+          )}
         </div>
         <TerminalTabs />
-        {hasBrowser() && <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Terminal: shells on this Mac (⌃`)" aria-label="Terminal" onClick={() => useStore.getState().openTerminal()}><Icon.console /></button>}
-        <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Browser: AWS console spaces and web tabs" aria-label="Browser" onClick={() => useStore.getState().openBrowser()}><Icon.globe /></button>
-        <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Whiteboard: a scratch pad for brainstorming" aria-label="Whiteboard" onClick={() => useStore.getState().openBoard()}><Icon.board /></button>
-        <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Notes (⌘⇧N)" aria-label="Notes" onClick={() => useStore.getState().openNotes()}><Icon.note /></button>
-        <button className="btn btn-ghost no-drag mr-3 shrink-0" title="Find a host or session (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().openQuickSwitcher()}><Icon.search /><kbd>⌘K</kbd></button>
+        <button className="search-pill no-drag" title="Find a host, session or command (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().openQuickSwitcher()}>
+          <Icon.search />
+          <span className="search-pill-text">Search hosts, sessions, commands</span>
+          <kbd>⌘K</kbd>
+        </button>
       </header>
       <div className="flex min-h-0 flex-1">
+        <AppRail />
         <div className={browserInFront ? 'hidden' : 'contents'}><Sidebar /></div>
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />

@@ -44,13 +44,10 @@ function tabTooltip(t: Tab): string {
 /** Tab strip rendered inside the title bar. Tabs that do not fit collapse into a "»" menu; the active tab always stays visible. */
 export default function TerminalTabs(): ReactElement {
   const s = useStore()
-  // A host grid's transient tabs are tiles, not tabs.
-  const tabs = s.tabs.filter((t) => !t.transient)
-  // The All grid tiles sessions; the Notes tab is not one.
-  const sessions = tabs.filter(isSession).length
+  // Only remote sessions are tabs here: Hosts, the sessions grid and the tools (Terminal, Browser, Notes, Whiteboard)
+  // are in the app rail. A host grid's transient tabs are tiles, not tabs.
+  const tabs = s.tabs.filter((t) => !t.transient && isSession(t))
   const stripRef = useRef<HTMLDivElement>(null)
-  const hostsRef = useRef<HTMLButtonElement>(null)
-  const gridRef = useRef<HTMLButtonElement>(null)
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
   const [hidden, setHidden] = useState<string[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
@@ -85,7 +82,7 @@ export default function TerminalTabs(): ReactElement {
       }
       return out
     }
-    const total = strip.clientWidth - (hostsRef.current?.offsetWidth ?? 0) - (gridRef.current ? gridRef.current.offsetWidth + GAP : 0) - GAP - 8
+    const total = strip.clientWidth - GAP - 8
     let visible = fit(total)
     if (visible.length < order.length) visible = fit(total - OVERFLOW_W)
     const next = order.filter((id) => !visible.includes(id))
@@ -164,16 +161,6 @@ export default function TerminalTabs(): ReactElement {
 
   return (
     <div ref={stripRef} className="drag relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden px-2">
-      <button ref={hostsRef} className={`tab no-drag ${s.activeTab === 'hosts' ? 'on' : ''}`} onClick={() => s.setActive('hosts')}>
-        <Icon.cloud />
-        Hosts
-      </button>
-      {sessions > 0 && (
-        <button ref={gridRef} className={`tab no-drag ${s.gridView && !s.gridHost ? 'on' : ''}`} title="All sessions on one page (⌘0)" aria-pressed={s.gridView && !s.gridHost} onClick={() => s.showGrid(!s.gridView || !!s.gridHost)}>
-          <Icon.grid />
-          All <span className="mono text-[11px]">{sessions}</span>
-        </button>
-      )}
       {visibleTabs.map((t) => renderTab(t))}
       {/* Hidden tabs stay in the DOM (invisible) so their widths can be measured. */}
       {hiddenTabs.map((t) => renderTab(t, true))}

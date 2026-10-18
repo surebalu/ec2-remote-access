@@ -1,62 +1,74 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { Icon } from './icons'
 
-/** Shown instead of the hosts table when no AWS profiles and no manual servers exist yet. */
+type Paths = { sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }
+
+const FEATURES: { icon: ReactNode; title: string; text: string }[] = [
+  { icon: <Icon.cloud />, title: 'Every account at once', text: 'Finds the instances in all your AWS profiles and regions, and keeps them in one list.' },
+  { icon: <Icon.terminal />, title: 'SSH, RDP and files built in', text: 'Terminal tabs, remote desktops and drag-and-drop transfers, with no bastion or VPN.' },
+  { icon: <Icon.broadcast />, title: 'Made for fleets', text: 'Run a command on many hosts, forward ports, keep notes per host, and see it all at once.' }
+]
+
+/** Shown instead of the hosts table until there is an AWS account or a server to show. */
 export default function Welcome(): ReactElement {
-  const s = useStore()
-  const [paths, setPaths] = useState<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean } | null>(null)
+  const set = useStore((s) => s.set)
+  const [paths, setPaths] = useState<Paths | null>(null)
   useEffect(() => {
     void window.api.invoke('app:paths').then(setPaths)
   }, [])
-  const row = (ok: boolean | null, label: string, detail: string, link?: string): ReactElement => (
-    <div className="flex items-center gap-3 py-2">
-      <span className="dot" style={{ background: ok === null ? 'var(--muted)' : ok ? 'var(--ok)' : 'var(--warn)' }} />
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium">{label}</div>
-        <div className="muted text-[11px]">{detail}</div>
+  const req = (ok: boolean | null, label: string, detail: string, link?: string, optional = false): ReactElement => (
+    <div className="welcome-req">
+      <span className={`welcome-req-dot ${ok === null ? '' : ok ? 'ok' : optional ? 'opt' : 'warn'}`}>{ok ? <Icon.check /> : null}</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12.5px] font-medium">{label}{optional && <span className="muted font-normal"> · optional</span>}</div>
+        <div className="muted truncate text-[11.5px]">{detail}</div>
       </div>
-      {ok === false && link && (
-        <button className="btn btn-sm" onClick={() => void window.api.invoke('shell:open', link)}>
-          Install
-        </button>
-      )}
+      {ok === false && link && <button className="btn btn-sm" onClick={() => void window.api.invoke('shell:open', link)}>How to install</button>}
     </div>
   )
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="panel w-full max-w-xl rounded-2xl border p-8" style={{ borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)' }}>
-        <div className="mb-1 flex items-center gap-3">
-          <span className="brand-mark" style={{ width: 36, height: 36, fontSize: 15, lineHeight: '36px', borderRadius: 10 }}>
-            &gt;_
-          </span>
-          <div>
-            <div className="text-lg font-semibold tracking-tight">Welcome to EC2 Remote Access</div>
-            <div className="muted text-[12px]">One place for SSH and RDP to every server you manage.</div>
-          </div>
+    <div className="welcome">
+      <div className="welcome-card">
+        <div className="welcome-hero">
+          <span className="brand-mark welcome-mark">&gt;_</span>
+          <h1 className="welcome-title">Welcome to EC2 Remote Access</h1>
+          <p className="welcome-lede">SSH, remote desktop and files for every EC2 instance in every AWS account, from one Mac app. Private instances connect through SSM Session Manager.</p>
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-3">
-          <button className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--accent)]" style={{ borderColor: 'var(--border)', background: 'var(--accent-soft)' }} onClick={() => s.set({ addAccountOpen: true })}>
-            <div className="mb-1 flex items-center gap-2 font-semibold">
-              <Icon.cloud /> Add AWS account
+        <div className="welcome-features">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="welcome-feature">
+              <span className="welcome-feature-icon">{f.icon}</span>
+              <div className="text-[12.5px] font-semibold">{f.title}</div>
+              <div className="muted text-[11.5px] leading-snug">{f.text}</div>
             </div>
-            <div className="muted text-[11.5px]">Sign in with IAM Identity Center or access keys. EC2 instances appear automatically.</div>
+          ))}
+        </div>
+        <div className="welcome-actions">
+          <button className="welcome-action primary" onClick={() => set({ addAccountOpen: true })}>
+            <span className="welcome-action-icon"><Icon.cloud /></span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block text-[13.5px] font-semibold">Add an AWS account</span>
+              <span className="block text-[11.5px] opacity-85">Sign in with IAM Identity Center (SSO) or access keys</span>
+            </span>
+            <Icon.chevron />
           </button>
-          <button className="panel-2 rounded-xl border p-4 text-left transition-colors hover:border-[var(--accent)]" style={{ borderColor: 'var(--border)' }} onClick={() => s.set({ manualHostEditor: 'new' })}>
-            <div className="mb-1 flex items-center gap-2 font-semibold">
-              <Icon.server /> Add a server
-            </div>
-            <div className="muted text-[11.5px]">Any Linux or Windows machine reachable from this Mac.</div>
+          <button className="welcome-action" onClick={() => set({ manualHostEditor: 'new' })}>
+            <span className="welcome-action-icon"><Icon.server /></span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block text-[13.5px] font-semibold">Add a server</span>
+              <span className="muted block text-[11.5px]">Any Linux or Windows machine this Mac can reach</span>
+            </span>
+            <Icon.chevron />
           </button>
         </div>
-        <div className="mt-6">
-          <div className="section-title mb-1">Prerequisites</div>
-          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-            {row(paths ? !!paths.sessionManagerPlugin : null, 'AWS Session Manager plugin', paths?.sessionManagerPlugin ?? 'Needed for private instances without a public IP. brew install --cask session-manager-plugin', 'https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html')}
-            {row(paths ? paths.windowsApp : null, 'Windows App', paths?.windowsApp ? 'Installed' : 'Optional. Only for handing RDP off to Microsoft\'s client; the built-in RDP works without it.', 'https://apps.apple.com/app/windows-app/id1295203466')}
-            {row(true, 'AWS CLI', paths?.awsCli ? paths.awsCli : 'Optional. Not required; SSO login is built in.')}
-          </div>
+        <div className="welcome-reqs">
+          <div className="welcome-reqs-title">Before you connect</div>
+          {req(paths ? !!paths.sessionManagerPlugin : null, 'AWS Session Manager plugin', paths?.sessionManagerPlugin ?? 'For private instances: brew install --cask session-manager-plugin', 'https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html')}
+          {req(paths ? !!paths.awsCli : null, 'AWS CLI', paths?.awsCli ?? 'Not required: sign-in is built in', undefined, true)}
+          {req(paths ? paths.windowsApp : null, 'Windows App', paths?.windowsApp ? 'Installed' : 'Only for handing desktops to Microsoft’s client; the built-in RDP works without it', 'https://apps.apple.com/app/windows-app/id1295203466', true)}
         </div>
+        <p className="welcome-privacy"><Icon.lock /> Your AWS credentials stay in <span className="mono">~/.aws</span> on this Mac. No analytics, no telemetry.</p>
       </div>
     </div>
   )

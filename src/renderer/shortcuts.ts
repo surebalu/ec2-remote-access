@@ -26,6 +26,7 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘⇧I', label: 'Broadcast typing to every pane in the split' },
   { keys: '⌘F', label: 'Find in terminal' },
   { keys: '⌘B', label: 'Show / hide the sidebar' },
+  { keys: '⌘,', label: 'Settings' },
   { keys: '⌘/', label: 'Keyboard shortcuts' }
 ]
 
@@ -141,7 +142,7 @@ export function isAppShortcut(e: KeyboardEvent): boolean {
   if (e.ctrlKey && !e.metaKey && (e.key === '`' || e.code === 'Backquote')) return true
   if (!e.metaKey || e.altKey || e.ctrlKey) return false
   const k = e.key.toLowerCase()
-  return /^[0-9]$/.test(k) || ['n', 'w', 't', 'd', 'f', 'b', '/', '[', ']', '{', '}', 'p', 'i'].includes(k)
+  return /^[0-9]$/.test(k) || ['n', 'w', 't', 'd', 'f', 'b', '/', ',', '[', ']', '{', '}', 'p', 'i'].includes(k)
 }
 
 /** Returns true when the event was a shortcut and has been handled. */
@@ -191,6 +192,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   if (k === 't' && !e.shiftKey) return go(() => st.openQuickSwitcher())
   if (k === 'p' && e.shiftKey) return go(() => st.openQuickSwitcher('>'))
   if (k === '/') return go(() => st.set({ shortcutsOpen: true }))
+  if (k === ',') return go(() => st.set({ settingsOpen: true }))
   // A second RDP login as the same user would take over the first desktop, so RDP tabs are not duplicated.
   if (k === 'd' && active && active.kind !== 'rdp' && isSession(active)) return go(() => st.duplicateTab(active.id, !e.shiftKey))
   if (k === 'i' && e.shiftKey && st.splitGroup.includes(st.activeTab)) return go(() => st.set({ broadcastInput: !st.broadcastInput }))

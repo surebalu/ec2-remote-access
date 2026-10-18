@@ -4,8 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary
-} from './types'
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -141,6 +140,15 @@ export interface IpcApi {
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
   'app:paths': () => Promise<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }>
+  /** Sends a command to many hosts with SSM Run Command; poll run:status for results (pushed events can be missed). */
+  'run:start': (req: RunCommandRequest) => Promise<RunState>
+  'run:status': (id: string) => Promise<RunState | null>
+  'run:cancel': (id: string) => Promise<void>
+  /** Recent runs, newest first. */
+  'run:list': () => Promise<RunState[]>
+  'app:about': () => Promise<AppAbout>
+  /** Shows the app's data or log folder in Finder. */
+  'app:reveal': (which: 'data' | 'logs') => Promise<void>
   'phone:status': () => Promise<PhoneAccessStatus>
   /** Saves enabled/port/bind and (re)starts or stops the in-app gateway accordingly. */
   /** Lets paired devices open terminals on this Mac, or stops that (closing the ones they have open). Desktop only. */
@@ -153,6 +161,7 @@ export interface IpcApi {
 
 /** Push channels (main -> renderer) */
 export interface IpcEvents {
+  'app:command': AppCommand
   'scan:progress': ScanProgress
   'ssh:event': SshEvent
   'sftp:transfer': SftpTransfer

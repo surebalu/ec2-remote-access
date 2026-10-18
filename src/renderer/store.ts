@@ -112,6 +112,8 @@ interface State {
   /** Shows the Whiteboard tab (there is one). */
   openBoard: () => void
   portForwardFor: { key?: string; presetId?: string } | null
+  /** Open Run Command dialog: the hosts it starts with (editable there), or a past run to show. */
+  runCommandFor: { keys: string[]; runId?: string } | null
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
   workspaceSaveOpen: boolean
@@ -321,6 +323,7 @@ export const useStore = create<State>((set, get) => ({
     if (split) get().splitWith(id, nid)
   },
   portForwardFor: null,
+  runCommandFor: null,
   openPortForward: async (req) => {
     try {
       const t = await window.api.invoke('tunnels:open', req)

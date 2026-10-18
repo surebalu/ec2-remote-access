@@ -17,6 +17,8 @@ module.exports = {
   npmRebuild: false,
   // node-pty's native module and its spawn-helper must be real files for the local terminals.
   asarUnpack: ['node_modules/ssh2/**', 'node_modules/node-pty/**'],
+  // The menu-bar icon is read at run time (src/main/tray.ts), so it ships beside the app's resources.
+  extraResources: [{ from: 'resources/trayTemplate.png', to: 'trayTemplate.png' }, { from: 'resources/trayTemplate@2x.png', to: 'trayTemplate@2x.png' }],
   afterPack: 'build/afterPack.cjs',
   afterSign: 'build/afterSign.cjs',
   mac: {

@@ -31,6 +31,8 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+// First run: no AWS profiles, no servers, nothing scanned.
+let emptyScenario = false
 // Notes vault for the Notes tab.
 const noteFolders = new Set(['Projects'])
 const notes = {
@@ -67,6 +69,15 @@ app.on('session-created', (ses) => {
 })
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
+// Run Command: runs the fixture "sent", and how they come back (the production host succeeds, the others fail).
+const runsSent = []
+const runState = (r) => {
+  const done = Date.now() - r.startedAt > 900
+  const targets = r.targets.map((t) => (!done ? { ...t, status: 'running' } : t.name === 'web-prod-01'
+    ? { ...t, status: 'success', exitCode: 0, stdout: ' 10:42:01 up 3 days,  2:11,  0 users,  load average: 0.08, 0.03, 0.01\n', startedAt: r.startedAt, endedAt: r.startedAt + 900 }
+    : { ...t, status: 'failed', exitCode: 1, stderr: 'df: /data: No such file or directory\n', startedAt: r.startedAt, endedAt: r.startedAt + 900 }))
+  return { ...r, targets, finishedAt: done ? r.startedAt + 900 : undefined }
+}
 // Whiteboards main has saved (boards:*), and the images added to notes.
 const boardsSaved = {}
 const noteImages = []
@@ -88,9 +99,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
   switch (channel) {
     case 'settings:get': return settings
     case 'settings:set': settings = { ...settings, ...args[0] }; return settings
-    case 'inventory:cached': return cached
-    case 'inventory:scan': cached = { ...cached, instances: cached.instances.map((i) => ({ ...i, staleReason: undefined, lastSeenAt: Date.now() })), errors: [], scannedAt: Date.now() }; return cached
-    case 'profiles:list': return ssoScenario ? [ssoProfile] : browserScenario ? [...profiles, awsProfile] : profiles
+    case 'inventory:cached': return emptyScenario ? null : cached
+    case 'inventory:scan': if (emptyScenario) return { instances: [], errors: [], scannedAt: Date.now() }
+      cached = { ...cached, instances: cached.instances.map((i) => ({ ...i, staleReason: undefined, lastSeenAt: Date.now() })), errors: [], scannedAt: Date.now() }; return cached
+    case 'profiles:list': return emptyScenario ? [] : ssoScenario ? [ssoProfile] : browserScenario ? [...profiles, awsProfile] : profiles
     case 'profiles:check':
       if (ssoScenario) return [{ profile: ssoProfile.name, state: ssoTokenWritten ? 'ok' : 'login-required', accountId: ssoProfile.accountId, checkedAt: Date.now() }]
       return [...profiles, ...(browserScenario ? [awsProfile] : [])].map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
@@ -101,6 +113,8 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'sso:loginSession': return { flowId: 'flow-1', userCode: 'ABCD-EFGH', verificationUri: 'https://device.sso.example/', verificationUriComplete: 'https://device.sso.example/?user_code=ABCD-EFGH', expiresIn: 600 }
     case 'sso:cancel': return
     case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', awsCli: null, windowsApp: false }
+    case 'app:about': return { version: '1.0.0', electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: 'darwin', arch: 'arm64', dataDir: '/fixture/data', logsDir: '/fixture/data/logs' }
+    case 'app:reveal': return
     case 'diag:log': return { path: '/fixture/main.log', text: '' }
     case 'phone:status': return { enabled: true, running: true, port: 8321, bind: 'https', tailscaleAvailable: true, tailscaleHostname: 'fixture-mac.tail1234.ts.net', tailscaleHttps: true, urls: ['https://fixture-mac.tail1234.ts.net/#token=fixture-token'], token: 'fixture-token', clients: [{ address: '100.101.102.5', since: Date.now() - 120000 }] }
     case 'ssh:open':
@@ -135,6 +149,14 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
     ]
     case 'browser:fill': return ['username', 'password']
+    case 'run:start': {
+      const r = { id: `run-${runsSent.length + 1}`, command: args[0].command, timeoutSec: args[0].timeoutSec ?? 600, startedAt: Date.now(), targets: args[0].keys.map((k) => { const i = [running, stopped, stale].find((x) => x.key === k); return { key: k, name: i.name, profile: i.profile, region: i.region, instanceId: i.instanceId, platform: 'linux', status: 'pending' } }) }
+      runsSent.push(r)
+      return r
+    }
+    case 'run:status': { const r = runsSent.find((x) => x.id === args[0]); return r ? runState(r) : null }
+    case 'run:list': return runsSent.map(runState).reverse()
+    case 'run:cancel': return
     case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
     case 'boards:load': return boardsSaved[args[0]] ? structuredClone(boardsSaved[args[0]]) : null
     case 'boards:save': boardsSaved[args[0].id] = structuredClone(args[0]); return
@@ -176,12 +198,16 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
 
 app.whenReady().then(async () => {
   app.dock?.hide()
+  // Nothing from a test run may reach the desktop: no notifications from the hidden windows.
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission !== 'notifications')
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, done) => done(permission !== 'notifications'))
   await new Promise((r) => webServer.listen(0, '127.0.0.1', r))
   webPort = webServer.address().port
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
   win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
   win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
-  const js = (code) => win.webContents.executeJavaScript(code)
+  // Names the script when it throws; Electron's own error says only that "a script" failed.
+  const js = (code) => win.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
   const until = async (code) => {
     for (let n = 0; n < 100; n++) { if (await js(code)) return; await new Promise((r) => setTimeout(r, 30)) }
     throw new Error(`Timed out: ${code}`)
@@ -368,7 +394,9 @@ app.whenReady().then(async () => {
     shellScenario = false
 
     // Terminal colour scheme applies live to the open SSH tab and persists through settings:set.
-    await js(`document.querySelector('button[title="Settings"]').click()`)
+    await js(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await until(`!!document.querySelector('.settings-nav [data-section="terminal"]')`)
+    await js(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
     await until(`!!document.querySelector('[role="dialog"] select option[value="dracula"]')`)
     await js(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="dracula"]').closest('select'); sel.value = 'dracula'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
     await until(`getComputedStyle(document.querySelector('.xterm').parentElement).backgroundColor === 'rgb(40, 42, 54)'`)
@@ -478,8 +506,19 @@ app.whenReady().then(async () => {
     await key('Escape')
     await until(`!document.querySelector('[role="dialog"]')`)
     await click('Hosts')
-    await js(`document.querySelector('button[title="Settings"]').click()`)
-    await until(`!!document.querySelector('[role="dialog"]')`)
+    await js(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await until(`!!document.querySelector('.settings-nav [data-section="phone"]')`)
+    // Every section opens from the sidebar.
+    for (const id of ['general', 'accounts', 'ssh', 'notes', 'requirements', 'about']) {
+      await js(`document.querySelector('.settings-nav [data-section="${id}"]').click()`)
+      await until(`document.querySelector('.settings-nav-item.on')?.dataset.section === '${id}' && document.querySelectorAll('.settings-body .set-card').length > 0`)
+    }
+    await until(`document.querySelector('.settings-body').textContent.includes('No analytics')`)
+    await screenshot('settings-about.png')
+    await js(`document.querySelector('.settings-nav [data-section="general"]').click()`)
+    await until(`!!document.querySelector('.settings-body [role="switch"]')`)
+    await screenshot('settings-general.png')
+    await js(`document.querySelector('.settings-nav [data-section="phone"]').click()`)
     await until(`document.body.textContent.includes('Let my phone use this app')`)
     await until(`!!document.querySelector('img[alt="QR code for the phone link"]')`)
     assert.equal(await js(`document.body.textContent.includes('fixture-token')`), false, 'token must be masked in the settings dialog')
@@ -612,7 +651,7 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('.session-grid')`)
     assert.equal(await js(`document.querySelectorAll('.session-grid > .session-pane:not(.hidden)').length`), sessionCount)
     assert.equal(await js(`!!document.querySelector('.session-grid .notes-tab:not(.hidden)') && !document.querySelector('.session-grid .notes-tab').closest('.session-pane').classList.contains('hidden')`), false, 'no Notes tile')
-    assert.match(await js(`document.querySelector('button[title^="All sessions"]').textContent`), new RegExp(`All\\s*${sessionCount}$`))
+    assert.equal(await js(`document.querySelector('button[title^="All sessions"] .rail-badge').textContent`), String(sessionCount), 'the Overview badge counts sessions only')
     await key('0', { metaKey: true })
     await until(`!document.querySelector('.session-grid')`)
     // The host's note beside its terminal, and output added to it.
@@ -726,6 +765,14 @@ app.whenReady().then(async () => {
     await puntil(`!!document.querySelector('.modal')`)
     assert.equal(await pjs(`(() => { const r = document.querySelector('.modal').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 })()`), true, 'dialogs fit the phone screen')
     await pshot('phone-settings.png')
+    await pjs(`document.querySelector('[aria-label="Close dialog"]').click()`)
+    await puntil(`!document.querySelector('.modal')`)
+    // Run Command from the phone's More list fits the screen.
+    await ptap('Run a command')
+    await puntil(`!!document.querySelector('.rc .rc-count')`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.modal').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 1 })()`), true, 'run command fits the phone')
+    assert.equal(await noSideScroll(), true, 'run command: no sideways scrolling')
+    await pshot('phone-run-command.png')
     await pjs(`document.querySelector('[aria-label="Close dialog"]').click()`)
     await puntil(`!document.querySelector('.modal')`)
 
@@ -946,7 +993,7 @@ app.whenReady().then(async () => {
     // ⌘1 belongs to the browser's tabs here; ⌘⇧[ goes to the previous app tab (Hosts).
     await bkey('{', { shiftKey: true })
     await buntil(`!document.querySelector('.browser') || document.querySelector('.browser').getClientRects().length === 0`, 'hosts shown')
-    await bjs(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('Browser')).click()`)
+    await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
     await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
     assert.ok(guestAt('/two') && guestAt('/two').id === before, 'page survives switching app tabs')
     // Favorites: page one becomes a favorite, shown in every space and keeping General's logins; ⌘W only unloads it.
@@ -1097,7 +1144,8 @@ app.whenReady().then(async () => {
     await typeCmd('echo hi')
     await pressIn('Enter')
     await tuntil(`!!document.querySelector('.tblock-gutter.ok')`, 'successful block')
-    assert.ok((await screenText()).includes('hi'))
+    // xterm paints rows on the next frame, so wait for the text rather than reading it once.
+    await tuntil(`[...document.querySelectorAll('.term-slot:not([style*="none"]) .xterm-rows')].some((r) => r.textContent.includes('hi'))`, 'the output is on screen')
     await typeCmd('false')
     await pressIn('Enter')
     await tuntil(`!!document.querySelector('.tblock-gutter.err')`, 'failed block')
@@ -1209,6 +1257,31 @@ app.whenReady().then(async () => {
     for (let n = 0; n < 60 && opens().length < opensBefore + 1; n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'restored shell starts in its folder')
 
+    // Run Command on the hosts listed: a confirmation for production, then each host's result and output; retry the failed.
+    await tjs(`document.querySelector('button[aria-label="Hosts"]').click()`)
+    await tuntil(`!!document.querySelector('[data-host-key]')`, 'hosts view')
+    await tjs(`[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Run command' && !b.closest('tr')).click()`)
+    await tuntil(`!!document.querySelector('.rc .rc-count')`, 'run command dialog')
+    const runnable = Number(await tjs(`document.querySelector('.rc .rc-count').textContent`))
+    assert.ok(runnable >= 1, 'the listed running hosts with SSM are targets')
+    await tjs(`(() => { const a = document.querySelector('.rc-command'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, 'uptime && df -h /data'); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tjs(`window.__confirmed = []; window.confirm = (m) => { window.__confirmed.push(m); return true }; 0`)
+    await tjs(`document.querySelector('.rc-foot .btn-primary').click()`)
+    await tuntil(`document.querySelectorAll('.rc-result').length === ${runnable} && !!document.querySelector('.rc-chip.ok')`, 'results list')
+    assert.match(await tjs(`window.__confirmed[0] ?? ''`), /including production/, 'production asks first')
+    assert.deepEqual(runsSent.at(-1).command, 'uptime && df -h /data')
+    await tuntil(`document.querySelector('.rc-chip.ok')?.textContent.includes('1 succeeded') && !document.querySelector('.rc-chip.run')`, 'run finishes')
+    await tjs(`[...document.querySelectorAll('.rc-result-head')].find((b) => b.textContent.includes('web-prod-01')).click()`)
+    await tuntil(`document.querySelector('.rc-pre')?.textContent.includes('load average')`, 'output shown')
+    await tshot('run-command.png')
+    if (runnable > 1) {
+      await tjs(`[...document.querySelectorAll('.rc-foot button')].find((b) => b.textContent.startsWith('Retry failed')).click()`)
+      await tuntil(`document.querySelectorAll('.rc-result').length === ${runnable - 1}`, 'retry runs only the failed hosts')
+      assert.equal(runsSent.at(-1).targets.length, runnable - 1)
+    }
+    await tjs(`[...document.querySelectorAll('.rc-foot button')].find((b) => b.textContent === 'Done').click()`)
+    await tuntil(`!document.querySelector('.rc')`, 'dialog closes')
+
     // The Whiteboard: pen, shapes, a sticky note, selecting, deleting, undo, saving, a second board, and a PNG into today's note.
     await tjs(`document.querySelector('button[aria-label="Whiteboard"]').click()`)
     await tuntil(`!!document.querySelector('.board-svg') && !!document.querySelector('.board-hint')`, 'whiteboard opens on an empty board')
@@ -1288,6 +1361,26 @@ app.whenReady().then(async () => {
     await tuntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('On the whiteboard')`, 'shortcuts dialog lists the whiteboard keys')
     await tkey('Escape')
     twin.destroy()
+
+    // First run: the welcome screen, in both appearances, and its main action opens Add account.
+    emptyScenario = true
+    const savedTheme = settings.theme
+    const ewin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    ewin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const ejs = (code) => ewin.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
+    const euntil = async (code) => { for (let n = 0; n < 150; n++) { if (await ejs(code)) return; await new Promise((r) => setTimeout(r, 30)) } throw new Error(`Timed out (welcome): ${code}`) }
+    const eshot = async (name) => { await ejs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 150)); writeFileSync(join(output, name), (await ewin.webContents.capturePage()).toPNG()) }
+    for (const theme of ['dark', 'light']) {
+      settings.theme = theme
+      await ewin.loadFile(resolve('out/renderer/index.html'))
+      await euntil(`!!document.querySelector('.welcome .welcome-action.primary') && document.querySelectorAll('.welcome-req').length === 3`)
+      await eshot(`welcome-${theme}.png`)
+    }
+    await ejs(`document.querySelector('.welcome-action.primary').click()`)
+    await euntil(`!!document.querySelector('[role="dialog"]')`)
+    ewin.destroy()
+    settings.theme = savedTheme
+    emptyScenario = false
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)
