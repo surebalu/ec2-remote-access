@@ -11,6 +11,7 @@ import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
 import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
 import { opLogins, opSecrets } from './onepassword'
+import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
 import { loginMatches } from '@shared/browser'
 import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
@@ -153,6 +154,13 @@ export const handlers: Handlers = {
     else await host().openPath(target)
   },
   'browser:cancelDownload': async (id) => host().cancelDownload(id),
+  'term:open': (req) => openLocal(req),
+  'term:write': async (id, data) => writeLocal(id, data),
+  'term:resize': async (id, cols, rows) => resizeLocal(id, cols, rows),
+  'term:close': async (id) => closeLocal(id),
+  'term:history': async () => shellHistory(),
+  'term:loadState': async () => loadTerminalState(),
+  'term:saveState': (state) => saveTerminalState(state),
   'browser:logins': async (pageUrl, refresh) => (await opLogins(refresh)).map((l) => ({ ...l, matches: loginMatches(l.urls, pageUrl) })),
   'browser:fill': async (webContentsId, account, itemId, anySite) => {
     const login = (await opLogins()).find((l) => l.id === itemId && l.account === account)

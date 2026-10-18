@@ -29,6 +29,23 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘/', label: 'Keyboard shortcuts' }
 ]
 
+/** Shortcuts of the Terminal tab (local shells) while it is the active tab; ⌃` opens it from anywhere. */
+export const TERMINAL_SHORTCUTS: ShortcutInfo[] = [
+  { keys: '⌃`', label: 'Open the Terminal tab (from anywhere)' },
+  { keys: '⌘T / ⌘⇧T', label: 'New terminal tab (same folder) / reopen the last closed one' },
+  { keys: '⌘1 … ⌘8 / ⌘9', label: 'Terminal tab 1 … 8 / the last one' },
+  { keys: '⌃Tab / ⌃⇧Tab', label: 'Next / previous terminal tab' },
+  { keys: '⌘D / ⌘⇧D', label: 'Split the pane right / down' },
+  { keys: '⌥⌘← → ↑ ↓ / ⌘[ ⌘]', label: 'Move to the pane in that direction / previous or next pane' },
+  { keys: '⌘⇧↵', label: 'Show the pane alone, or the whole layout again' },
+  { keys: '⌘W', label: 'Close the pane (the tab with its last pane)' },
+  { keys: '⌘↑ / ⌘↓', label: 'Previous / next command block' },
+  { keys: '⌘F', label: 'Find in the pane' },
+  { keys: '⌃R', label: 'Search command history (in the input box)' },
+  { keys: 'Tab / →', label: 'Hand the line to the shell for completion / accept the suggestion' },
+  { keys: '⌘+ / ⌘− / ⌘0', label: 'Text size' }
+]
+
 /** Shortcuts of the Browser tab while it is the active tab (they take over ⌘T, ⌘W, ⌘F, ⌘D and ⌘0 there). */
 export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘T', label: 'New tab (command bar)' },
@@ -49,7 +66,7 @@ export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset (one zoom for every page)' }
 ]
 
-export interface BrowserKey {
+export interface TabKey {
   /** Lower-cased KeyboardEvent.key ('t', '[', 'arrowdown', 'tab'). */
   key: string
   shift: boolean
@@ -58,11 +75,19 @@ export interface BrowserKey {
   ctrl: boolean
 }
 
-let browserKeys: ((k: BrowserKey) => boolean) | null = null
+export type BrowserKey = TabKey
 
-/** The Browser tab claims its keys while it is the active tab; the handler returns whether it used the key. */
-export function setBrowserKeys(fn: ((k: BrowserKey) => boolean) | null): void {
-  browserKeys = fn
+/** The Browser and Terminal tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
+const tabKeys: Partial<Record<'browser' | 'local', (k: TabKey) => boolean>> = {}
+
+/** Registers (or with null removes) the key handler of an app tab kind; it returns whether it used the key. */
+export function setTabKeys(kind: 'browser' | 'local', fn: ((k: TabKey) => boolean) | null): void {
+  if (fn) tabKeys[kind] = fn
+  else delete tabKeys[kind]
+}
+
+export function setBrowserKeys(fn: ((k: TabKey) => boolean) | null): void {
+  setTabKeys('browser', fn)
 }
 
 type TerminalAction = 'find' | 'snippets'
@@ -86,6 +111,7 @@ const modalOpen = (): boolean => !!document.querySelector('.modal-backdrop')
 /** Combinations the app owns while a terminal has focus (Cmd on macOS; Ctrl+K kept for the switcher). */
 export function isAppShortcut(e: KeyboardEvent): boolean {
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') return true
+  if (e.ctrlKey && !e.metaKey && (e.key === '`' || e.code === 'Backquote')) return true
   if (!e.metaKey || e.altKey || e.ctrlKey) return false
   const k = e.key.toLowerCase()
   return /^[0-9]$/.test(k) || ['n', 'w', 't', 'd', 'f', 'b', '/', '[', ']', '{', '}', 'p', 'i'].includes(k)
@@ -94,9 +120,17 @@ export function isAppShortcut(e: KeyboardEvent): boolean {
 /** Returns true when the event was a shortcut and has been handled. */
 export function handleAppShortcut(e: KeyboardEvent): boolean {
   const st = useStore.getState()
-  const browserActive = !!browserKeys && !st.gridView && st.tabs.some((t) => t.id === st.activeTab && t.kind === 'browser')
-  const browserCombo = (e.metaKey && !e.ctrlKey) || (e.ctrlKey && !e.metaKey && e.key === 'Tab')
-  if (browserActive && browserCombo && !e.repeat && !modalOpen() && browserKeys!({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
+  // ⌃` anywhere: the Terminal tab (local shells), as in editors.
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '`' || e.code === 'Backquote') && !modalOpen()) {
+    e.preventDefault()
+    e.stopPropagation()
+    st.openTerminal()
+    return true
+  }
+  const inFront = st.gridView ? undefined : st.tabs.find((t) => t.id === st.activeTab)
+  const tabHandler = inFront && (inFront.kind === 'browser' || inFront.kind === 'local') ? tabKeys[inFront.kind] : undefined
+  const tabCombo = (e.metaKey && !e.ctrlKey) || (e.ctrlKey && !e.metaKey && e.key === 'Tab')
+  if (tabHandler && tabCombo && !e.repeat && !modalOpen() && tabHandler({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
     e.preventDefault()
     e.stopPropagation()
     return true

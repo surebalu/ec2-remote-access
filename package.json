@@ -47,6 +47,7 @@
     "dompurify": "^3.4.17",
     "electron-updater": "^6.8.9",
     "marked": "^15.0.12",
+    "node-pty": "1.1.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

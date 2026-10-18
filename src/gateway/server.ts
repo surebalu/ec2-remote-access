@@ -59,6 +59,15 @@ const SESSION_OPENERS: Record<string, { idFrom: 'args' | 'result'; closer: keyof
 }
 const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) => x.closer))
 
+/**
+ * What stays with the person at the computer, never with whoever holds the pairing link: a shell on this machine
+ * (the Terminal tab), and the desktop browser's 1Password fill, downloads and pages. Remote pages can neither call
+ * these nor receive their events.
+ */
+export function desktopOnly(channel: string): boolean {
+  return channel.startsWith('term:') || channel.startsWith('web:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share'].includes(channel)
+}
+
 export function createGatewayServer(opts: GatewayOptions): Gateway {
   const log = opts.log ?? ((l: string): void => console.log(l))
   const clients = new Map<WebSocket, { address: string; since: number }>()
@@ -163,6 +172,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       try { msg = JSON.parse(raw.toString()) } catch { return }
       if (msg.t !== 'call' || typeof msg.id !== 'number' || typeof msg.channel !== 'string') return
       const { id, channel } = msg
+      if (desktopOnly(channel)) { ws.send(JSON.stringify({ t: 'error', id, message: 'That is only available in the Mac app.' })); return }
       const fn = (opts.handlers as Record<string, AnyHandler | undefined>)[channel]
       if (!fn) { ws.send(JSON.stringify({ t: 'error', id, message: `Unknown channel ${channel}` })); return }
       const args = Array.isArray(msg.args) ? msg.args : []
@@ -217,6 +227,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
   return {
     server,
     broadcast(channel, payload) {
+      if (desktopOnly(channel)) return
       const data = JSON.stringify({ t: 'event', channel, payload })
       for (const c of clients.keys()) if (c.readyState === WebSocket.OPEN) c.send(data)
     },

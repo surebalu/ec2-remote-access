@@ -14,7 +14,7 @@ export interface RdpTabRequest {
 
 export interface Tab {
   id: string
-  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser'
+  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser' | 'local'
   instanceKey: string
   title: string
   route?: Route
@@ -106,6 +106,9 @@ interface State {
   openBrowser: (req?: { url?: string; profile?: string }) => void
   /** The latest open request for the Browser tab to carry out (nonce makes repeats distinct). */
   browserRequest: { url?: string; profile?: string; nonce: number } | null
+  /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
+  openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
+  terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; nonce: number } | null
   portForwardFor: { key?: string; presetId?: string } | null
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
@@ -250,6 +253,17 @@ export const useStore = create<State>((set, get) => ({
     rest.splice(at < 0 ? rest.length : at, 0, tab)
     return { tabs: rest }
   }),
+  terminalRequest: null,
+  openTerminal: (req) => {
+    let term = get().tabs.find((t) => t.kind === 'local')
+    if (!term) {
+      term = { id: `local-${Date.now().toString(36)}`, kind: 'local', instanceKey: '', title: 'Terminal', status: 'connected' }
+      const created = term
+      set((s) => ({ tabs: [...s.tabs, created] }))
+    }
+    if (req) set({ terminalRequest: { ...req, nonce: Date.now() + Math.random() } })
+    get().setActive(term.id)
+  },
   browserRequest: null,
   openBrowser: (req) => {
     const st = get()
@@ -725,7 +739,7 @@ export const useStore = create<State>((set, get) => ({
 
 /** Remote sessions, as opposed to the Notes and Browser tabs: only sessions are tiles, counted, or saved in workspaces. */
 export function isSession(t: Tab): boolean {
-  return t.kind !== 'notes' && t.kind !== 'browser'
+  return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local'
 }
 
 /** A tab that attaches one of a host's persistent shells on another tab's connection, replaying its scrollback. */

@@ -7,7 +7,7 @@ import {
 } from '@shared/browser'
 import { useStore, type Tab } from '../../store'
 import { ACCENTS, metaFor } from '../../colors'
-import { setBrowserKeys, type BrowserKey } from '../../shortcuts'
+import { setBrowserKeys, type TabKey as BrowserKey } from '../../shortcuts'
 import { Icon } from '../icons'
 import Popover, { MenuItem, MenuLabel, MenuSep } from '../Popover'
 import Webview, { type WebviewEl, type WebviewEvents } from './Webview'

@@ -65,6 +65,21 @@ app.on('session-created', (ses) => {
     callback({ cancel: /^(https?|wss?):/.test(details.url) })
   })
 })
+// A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
+let termSaved = null
+const shells = new Map()
+const termOut = (sh, data) => { if (!sh.sender.isDestroyed()) sh.sender.send('term:event', { id: sh.id, type: 'data', data }) }
+const termPrompt = (sh) => termOut(sh, `\x1b]7;file://fixture${sh.cwd}\x07\x1b]633;P;Git=main\x07\x1b]633;P;Aws=${sh.env?.AWS_PROFILE ?? ''}\x07\x1b]133;A\x07fixture ${sh.cwd.replace('/Users/fixture', '~')} % `)
+const termRun = (sh, cmd) => {
+  termOut(sh, `${cmd}\r\n\x1b]633;E;${Buffer.from(cmd).toString('base64')}\x07\x1b]133;C\x07`)
+  const done = (exit) => { termOut(sh, `\x1b]133;D;${exit}\x07`); termPrompt(sh) }
+  if (cmd.startsWith('echo ')) { termOut(sh, `${cmd.slice(5)}\r\n`); done(0) }
+  else if (cmd === 'false') done(1)
+  else if (cmd.startsWith('sleep')) sh.waiting = () => { termOut(sh, '^C\r\n'); done(130) }
+  else if (cmd === 'lines') { for (let i = 1; i <= 80; i++) termOut(sh, `line ${i}\r\n`); done(0) }
+  else if (cmd === '') termPrompt(sh)
+  else { termOut(sh, `zsh: command not found: ${cmd.split(' ')[0]}\r\n`); done(127) }
+}
 ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
   calls.push({ channel, args })
   switch (channel) {
@@ -116,6 +131,29 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
     ]
     case 'browser:fill': return ['username', 'password']
+    case 'local:home': return '/Users/fixture'
+    case 'local:reveal': return
+    case 'term:history': return ['ls -la', 'git status', 'git checkout main', 'npm test']
+    case 'term:loadState': return termSaved
+    case 'term:saveState': termSaved = args[0]; return
+    case 'term:resize': return
+    case 'term:close': shells.delete(args[0]); return
+    case 'term:open': {
+      const sh = { id: args[0].id, cwd: args[0].cwd || '/Users/fixture/proj', env: args[0].env, sender: _e.sender, line: '' }
+      shells.set(sh.id, sh)
+      setTimeout(() => termPrompt(sh), 30)
+      return { shell: '/bin/zsh', integration: true, cwd: sh.cwd }
+    }
+    case 'term:write': {
+      const sh = shells.get(args[0])
+      if (!sh) return
+      let data = String(args[1])
+      if (data === '\x03' && sh.waiting) { const w = sh.waiting; sh.waiting = null; w(); return }
+      if (data.startsWith('\x1b[200~')) data = data.replace('\x1b[200~', '').replace('\x1b[201~', '')
+      sh.line += data
+      if (sh.line.endsWith('\r')) { const cmd = sh.line.slice(0, -1); sh.line = ''; termRun(sh, cmd) }
+      return
+    }
     case 'ssh:listShells': return [
       { name: 'ec2ra-old1', label: 'debug', user: '3dxadmin', args: 'bash', preview: '3dxadmin@ip-10-1-2-144:/etc/systemd/system$', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
       { name: 'ec2ra-other', label: '', user: 'root', args: 'tail -f /var/log/messages', preview: 'Oct 17 21:40:01 ip-10-1-2-144 systemd[1]: Started Session 42.', command: 'tail', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
@@ -972,6 +1010,114 @@ app.whenReady().then(async () => {
     browserScenario = false
     bwin.destroy()
     webServer.close()
+
+    // The Terminal tab: Warp-style tabs, split panes, command blocks and the input box, against a fake zsh.
+    const twin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    twin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const tjs = (code) => twin.webContents.executeJavaScript(code)
+    const tuntil = async (code, what = code) => {
+      for (let n = 0; n < 200; n++) { if (await tjs(code)) { if (process.env.UI_TRACE) console.log('[term ok]', what.slice(0, 70)); return } await new Promise((r) => setTimeout(r, 30)) }
+      if (process.env.UI_TRACE) console.log('[term state]', JSON.stringify(calls.filter((c) => c.channel.startsWith('term:')).slice(-6).map((c) => [c.channel, String(c.args[1] ?? '').slice(0, 30)])), await tjs(`JSON.stringify({ rows: document.querySelector('.xterm-rows')?.textContent.slice(0, 200), gut: document.querySelectorAll('.tblock-gutter').length, screen: !!document.querySelector('.xterm-screen'), h: document.querySelector('.xterm-screen')?.offsetHeight })`))
+      throw new Error(`Timed out (terminal): ${what}`)
+    }
+    const tshot = async (name) => { await tjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 200)); writeFileSync(join(output, name), (await twin.webContents.capturePage()).toPNG()) }
+    const tkey = (k, mods = {}) => tjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const focusedArea = `(document.querySelector('.term-slot:not([style*="none"]) .tpane.focused .tdock textarea') ?? document.querySelector('.term-slot:not([style*="none"]) .tdock textarea'))`
+    const typeCmd = async (text, keyMods = {}) => {
+      await tjs(`(() => { const a = ${focusedArea}; const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; a.focus(); set.call(a, ${JSON.stringify(text)}); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    }
+    const pressIn = (k, mods = {}) => tjs(`${focusedArea}.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const screenText = () => tjs(`[...document.querySelectorAll('.term-slot:not([style*="none"]) .xterm-rows')].map((r) => r.textContent).join('\\n')`)
+    const termWrites = () => calls.filter((c) => c.channel === 'term:write').map((c) => c.args[1])
+    await twin.loadFile(resolve('out/renderer/index.html'))
+    await tuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await tkey('`', { ctrlKey: true, code: 'Backquote' })
+    await tuntil(`document.querySelectorAll('.term-tab').length === 1 && !!document.querySelector('.tdock textarea')`, '⌃` opens the Terminal with the input box')
+    await tuntil(`document.querySelector('.tdock-chips')?.textContent.includes('~/proj') && document.querySelector('.tchip.git')?.textContent === 'main'`, 'folder and branch chips')
+    // A command typed in the input box runs in the shell and becomes a block.
+    await typeCmd('echo hi')
+    await pressIn('Enter')
+    await tuntil(`!!document.querySelector('.tblock-gutter.ok')`, 'successful block')
+    assert.ok((await screenText()).includes('hi'))
+    await typeCmd('false')
+    await pressIn('Enter')
+    await tuntil(`!!document.querySelector('.tblock-gutter.err')`, 'failed block')
+    // Hovering a block shows its actions; Copy output copies just the output.
+    await tjs(`(() => { const g = document.querySelector('.tblock-gutter.ok').getBoundingClientRect(); document.querySelector('.term-slot:not([style*="none"]) .tpane-term').dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: g.left + 200, clientY: g.top + 2 })) })()`)
+    await tuntil(`!!document.querySelector('.tblock-bar')`, 'block toolbar')
+    await tshot('terminal-blocks.png')
+    await tjs(`document.querySelector('.tblock-bar button[title="Copy the output"]').click()`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== 'hi'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'hi')
+    // History on ↑, and a suggestion from history.
+    await typeCmd('')
+    await pressIn('ArrowUp')
+    await tuntil(`${focusedArea}.value === 'false'`, 'history recall')
+    await typeCmd('git c')
+    await tuntil(`document.querySelector('.tdock-ghost-rest')?.textContent === 'heckout main'`, 'history suggestion')
+    await pressIn('ArrowRight')
+    await tuntil(`${focusedArea}.value === 'git checkout main'`, 'suggestion accepted')
+    await typeCmd('')
+    // A long command: the running bar, and ⌃C stops it.
+    await typeCmd('sleep 10')
+    await pressIn('Enter')
+    await tuntil(`!!document.querySelector('.tdock.running')`, 'running bar')
+    await tjs(`document.querySelector('.tdock-btn').click()`)
+    await tuntil(`!!document.querySelector('.tdock textarea') && document.querySelectorAll('.tblock-gutter.err').length === 2`, '⌃C stops it')
+    // Tab hands the line to the shell (its own completion), and the box comes back at the next prompt.
+    await typeCmd('ls')
+    await pressIn('Tab')
+    assert.equal(termWrites().at(-1), 'ls\t')
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock')`, 'the shell has the line')
+    twin.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+    twin.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+    twin.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'input box back at the next prompt')
+    // Splits: ⌘D opens a pane in the same folder, ⌥⌘← moves focus, ⌘W closes the focused pane.
+    const opens = () => calls.filter((c) => c.channel === 'term:open').map((c) => c.args[0])
+    const opensAtSplit = opens().length
+    await tkey('d', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])').length === 2`, 'split right')
+    assert.equal(opens().length, opensAtSplit + 1)
+    assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'the new pane starts in the same folder')
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"]) .tdock textarea').length === 2`)
+    await tshot('terminal-split.png')
+    await tkey('ArrowLeft', { metaKey: true, altKey: true })
+    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tpane.focused') === document.querySelectorAll('.term-slot:not([style*="none"]) .tpane')[0]`, 'focus moves left')
+    await tkey('w', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])').length === 1`, '⌘W closes the pane')
+    // Tabs: ⌘T, ⌘1, rename by double-click, and a tab for an AWS profile.
+    await tkey('t', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-tab').length === 2 && document.querySelectorAll('.term-tab')[1].classList.contains('on')`, 'new tab')
+    await tkey('1', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-tab')[0].classList.contains('on')`, '⌘1')
+    await tjs(`document.querySelectorAll('.term-tab')[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await tuntil(`!!document.querySelector('.term-tab-rename')`)
+    await tjs(`(() => { const i = document.querySelector('.term-tab-rename'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'build'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
+    await tuntil(`document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'renamed')
+    await tjs(`document.querySelector('.term-tab-more').click()`)
+    await tuntil(`!!document.querySelector('.popover')`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes('Production')).click()`)
+    await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelector('.term-tab.on .term-tab-aws')?.textContent === 'production'`, 'AWS profile tab')
+    assert.deepEqual(opens().at(-1).env, { AWS_PROFILE: 'production' })
+    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tchip.aws')?.textContent === 'production'`, 'AWS chip')
+    // Typing straight into the shell instead: no input box.
+    await tjs(`document.querySelector('.term-tool[aria-label="Terminal settings"]').click()`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith('Straight into')).click()`)
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock')`, 'shell input mode')
+    await tkey('Escape')
+    // The layout is saved and the shells start again in their folders after a restart.
+    for (let n = 0; n < 60 && !(termSaved?.tabs.length === 3 && termSaved.input === 'shell'); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.equal(termSaved.tabs.length, 3)
+    assert.equal(termSaved.tabs[0].title, 'build')
+    const opensBefore = opens().length
+    await twin.reload()
+    await tuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await tkey('`', { ctrlKey: true, code: 'Backquote' })
+    await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'restored tabs')
+    for (let n = 0; n < 60 && opens().length < opensBefore + 1; n++) await new Promise((r) => setTimeout(r, 50))
+    assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'restored shell starts in its folder')
+    twin.destroy()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)

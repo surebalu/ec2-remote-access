@@ -203,6 +203,21 @@ export const Icon = {
       <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
     </svg>
   ),
+  /** Window with a prompt: the Terminal tab (local shells). */
+  console: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M7 9l3 3-3 3M12.5 15H17" />
+    </svg>
+  ),
+  branch: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="6" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="7" r="2" />
+      <path d="M6 8v8M18 9c0 5-6 4-11 8" />
+    </svg>
+  ),
   /** Globe: the built-in browser. */
   globe: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

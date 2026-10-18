@@ -188,3 +188,23 @@ test('another page cannot claim sessions, and shutdown closes parked ones', asyn
   await gw.close()
   assert.deepEqual(closed, ['ssh:ssh-a'])
 })
+
+test('a paired page can neither open a shell on this computer nor see one, nor fill or open downloads', async () => {
+  let opened = false
+  const { gw, port } = await start({ 'term:open': async () => { opened = true; return {} }, 'browser:fill': async () => ['password'] })
+  const c = await client(port, 'secret')
+  assert.equal((await c.next()).t, 'hello')
+  for (const channel of ['term:open', 'term:write', 'browser:fill', 'browser:logins', 'browser:openDownload']) {
+    const r = await c.call(channel, { id: 'x', cols: 80, rows: 24 })
+    assert.equal(r.t, 'error', channel)
+    assert.match(r.message ?? '', /only available in the Mac app/)
+  }
+  assert.equal(opened, false)
+  gw.broadcast('term:event', { id: 'x', type: 'data', data: 'secret output' })
+  gw.broadcast('web:download', { name: 'a.pdf' })
+  gw.broadcast('tunnels:changed', [])
+  const m = await c.next()
+  assert.equal(m.channel, 'tunnels:changed', 'only the public event arrives')
+  c.ws.close()
+  await gw.close()
+})

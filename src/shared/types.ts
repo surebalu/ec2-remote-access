@@ -336,6 +336,53 @@ export interface WebHistoryEntry {
   at: number
 }
 
+/** Opens a shell on this computer for a pane of the Terminal tab (main/localterm.ts). */
+export interface LocalTermOpen {
+  /** The pane id; also the session id in later term:* calls and events. */
+  id: string
+  cols: number
+  rows: number
+  cwd?: string
+  /** Added to the environment (AWS_PROFILE for an AWS account tab). */
+  env?: Record<string, string>
+}
+
+export interface LocalTermInfo {
+  shell: string
+  /** Shell integration is loaded: prompts, commands and exit codes are marked (zsh). */
+  integration: boolean
+  cwd: string
+}
+
+export type LocalTermEvent = { id: string; type: 'data'; data: string } | { id: string; type: 'exit'; code: number }
+
+/** A Terminal tab's panes: one pane, or panes side by side ('row') or stacked ('column'), with their shares. */
+export type PaneNode = { type: 'pane'; id: string } | { type: 'split'; dir: 'row' | 'column'; children: PaneNode[]; sizes: number[] }
+
+export interface TermTabState {
+  id: string
+  /** A name the user gave the tab; otherwise it shows the running command or the folder. */
+  title?: string
+  color?: AccentColor
+  /** AWS profile the tab's shells start with (AWS_PROFILE). */
+  profile?: string
+  root: PaneNode
+  activePane: string
+  /** A pane shown alone (⌘⇧↵) until restored. */
+  maximized?: string
+}
+
+/** The Terminal tab's layout, kept between runs (terminal.json beside the settings); shells start again in `cwds`. */
+export interface TerminalState {
+  tabs: TermTabState[]
+  activeTab: string
+  cwds: Record<string, string>
+  /** 'editor' = Warp-style input box at the bottom of each pane; 'shell' = type straight into the shell. */
+  input?: 'editor' | 'shell'
+  /** Notify when a command that ran 10 s or more finishes while you are elsewhere. */
+  notify?: boolean
+}
+
 /** A 1Password login as the browser's Fill menu lists it: no secrets, only what identifies it. */
 export interface WebLogin {
   id: string

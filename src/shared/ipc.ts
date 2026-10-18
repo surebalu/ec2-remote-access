@@ -4,7 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -105,6 +105,15 @@ export interface IpcApi {
   'browser:save': (state: BrowserState) => Promise<void>
   /** A one-time sign-in link to the AWS console of `profile` (SSO credentials), landing on `destination`. */
   'browser:consoleUrl': (profile: string, destination: string) => Promise<string>
+  /** Local terminals (the Terminal tab). Desktop only: the gateway refuses term:* calls and never forwards term:* events. */
+  'term:open': (req: LocalTermOpen) => Promise<LocalTermInfo>
+  'term:write': (id: string, data: string) => Promise<void>
+  'term:resize': (id: string, cols: number, rows: number) => Promise<void>
+  'term:close': (id: string) => Promise<void>
+  /** Recent commands from the shell's history file, oldest first, without repeats. */
+  'term:history': () => Promise<string[]>
+  'term:loadState': () => Promise<TerminalState | null>
+  'term:saveState': (state: TerminalState) => Promise<void>
   /** Opens a downloaded file, shows it in Finder, or opens the Downloads folder (no path). Only inside Downloads. */
   'browser:openDownload': (path: string | null, how: 'open' | 'reveal') => Promise<void>
   'browser:cancelDownload': (id: string) => Promise<void>
@@ -147,6 +156,8 @@ export interface IpcEvents {
   'web:pointer': { webContentsId: number }
   /** A page context-menu action the app carries out (Add to note, Fill from 1Password). */
   'web:menu': { webContentsId: number; action: 'note' | 'fill'; url: string; title: string }
+  /** Output and exit of a local terminal. */
+  'term:event': LocalTermEvent
   /** A download started, progressed or finished (main/webviews.ts). */
   'web:download': WebDownload
 }
