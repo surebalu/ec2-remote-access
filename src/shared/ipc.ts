@@ -4,7 +4,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary
 } from './types'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -93,6 +93,15 @@ export interface IpcApi {
   /** The host's note (created on first use); returns its path. */
   'notes:hostNote': (instanceKey: string) => Promise<string>
   'notes:daily': () => Promise<string>
+  /** Whiteboards (main/boards.ts), newest first. */
+  'boards:list': () => Promise<BoardSummary[]>
+  'boards:load': (id: string) => Promise<Board | null>
+  'boards:save': (board: Board) => Promise<void>
+  'boards:delete': (id: string) => Promise<void>
+  /** Saves a PNG (data: URL) into the notes folder (EC2 Remote/Boards) and returns its path there, for ![[embeds]]. */
+  'notes:saveImage': (name: string, dataUrl: string) => Promise<string>
+  /** Opens a note in the Obsidian app. */
+  'notes:openInObsidian': (path: string) => Promise<void>
   'notes:append': (path: string, text: string) => Promise<void>
   'notes:search': (query: string) => Promise<NoteHit[]>
   'notes:pickFolder': () => Promise<string | null>
@@ -105,12 +114,37 @@ export interface IpcApi {
   'browser:save': (state: BrowserState) => Promise<void>
   /** A one-time sign-in link to the AWS console of `profile` (SSO credentials), landing on `destination`. */
   'browser:consoleUrl': (profile: string, destination: string) => Promise<string>
+  /** Local terminals (the Terminal tab). Desktop only: the gateway refuses term:* calls and never forwards term:* events. */
+  /** Whether this page may open terminals: always in the Mac app; on a paired device only when the computer allows it. */
+  'term:available': () => Promise<boolean>
+  'term:open': (req: LocalTermOpen) => Promise<LocalTermInfo>
+  'term:write': (id: string, data: string) => Promise<void>
+  'term:resize': (id: string, cols: number, rows: number) => Promise<void>
+  'term:close': (id: string) => Promise<void>
+  /** Recent commands from the shell's history file, oldest first, without repeats. */
+  'term:history': () => Promise<string[]>
+  'term:loadState': () => Promise<TerminalState | null>
+  'term:saveState': (state: TerminalState) => Promise<void>
+  /** Opens a downloaded file, shows it in Finder, or opens the Downloads folder (no path). Only inside Downloads. */
+  'browser:openDownload': (path: string | null, how: 'open' | 'reveal') => Promise<void>
+  'browser:cancelDownload': (id: string) => Promise<void>
+  /** 1Password logins (through the 1Password CLI), those saved for `pageUrl`'s site marked `matches`. */
+  'browser:logins': (pageUrl: string, refresh?: boolean) => Promise<WebLogin[]>
+  /**
+   * Types a 1Password login into a page (by its webContents id); returns what was filled ('username', 'password',
+   * 'code'). Refuses a page on another site than the login's unless `anySite` (the user confirmed).
+   */
+  'browser:fill': (webContentsId: number, account: string, itemId: string, anySite?: boolean) => Promise<string[]>
+  /** The system Share menu for a page; false when the host has none (gateway). */
+  'browser:share': (url: string) => Promise<boolean>
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
   'app:paths': () => Promise<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }>
   'phone:status': () => Promise<PhoneAccessStatus>
   /** Saves enabled/port/bind and (re)starts or stops the in-app gateway accordingly. */
+  /** Lets paired devices open terminals on this Mac, or stops that (closing the ones they have open). Desktop only. */
+  'phone:terminals': (allow: boolean) => Promise<PhoneAccessStatus>
   'phone:configure': (patch: Partial<Pick<Settings, 'phoneAccessEnabled' | 'phoneAccessPort' | 'phoneAccessBind'>>) => Promise<PhoneAccessStatus>
   'phone:rotateToken': () => Promise<PhoneAccessStatus>
   /** Tail of main.log for "Copy diagnostics"; `filter` is a case-insensitive regular expression. */
@@ -131,9 +165,14 @@ export interface IpcEvents {
   'web:window': { webContentsId: number; url: string; background: boolean }
   /** A browser shortcut pressed while a page had the keyboard (pages swallow keys before the app sees them). */
   'web:shortcut': { webContentsId: number; key: string; shift: boolean; alt: boolean }
-  /** A page context-menu action the app carries out (Add to note). */
-  'web:menu': { webContentsId: number; action: 'note'; url: string; title: string }
-  'web:download': { name: string; path: string; state: 'completed' | 'cancelled' | 'interrupted' }
+  /** The mouse went down inside a page (the app's document never sees those clicks). */
+  'web:pointer': { webContentsId: number }
+  /** A page context-menu action the app carries out (Add to note, Fill from 1Password). */
+  'web:menu': { webContentsId: number; action: 'note' | 'fill'; url: string; title: string }
+  /** Output and exit of a local terminal. */
+  'term:event': LocalTermEvent
+  /** A download started, progressed or finished (main/webviews.ts). */
+  'web:download': WebDownload
 }
 
 export type IpcChannel = keyof IpcApi

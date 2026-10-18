@@ -34,7 +34,8 @@ export default function Sidebar(): ReactElement {
   // Cmd+B toggles the sidebar. Listened on document so the RDP key guard on window cannot swallow it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      // An editor that used ⌘B (bold in Notes) has the key.
+      if (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !e.defaultPrevented) {
         e.preventDefault()
         useStore.getState().toggleSidebar()
       }

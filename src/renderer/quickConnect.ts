@@ -4,15 +4,49 @@
  * per-host overrides, account defaults, saved RDP credentials) and falls back to the connect dialog otherwise.
  */
 import type { Instance, SftpOpenRequest } from '@shared/types'
-import { ec2InstanceUrl } from '@shared/browser'
+import { consoleHome, ec2InstanceUrl } from '@shared/browser'
 import { allInstances, useStore } from './store'
+import { nativeApp } from './mobile'
 
 /** The built-in browser needs Electron's <webview>; on a phone or the gateway page links open in the device's browser. */
 export const hasBrowser = (): boolean => /\bElectron\//.test(navigator.userAgent)
 
-/** Opens an AWS instance's page in its account's console, signed in, in the Browser tab. */
+/**
+ * Without the Mac app's browser (a phone, a tablet, the gateway page): opens the account's console already signed
+ * in, in Safari, through a one-time sign-in link the computer issues. Safari keeps one set of AWS logins, so the
+ * last account opened is the one signed in there.
+ */
+export function openConsoleOnDevice(profile: string, url: string): void {
+  const app = nativeApp()
+  // A browser opens new windows only straight from a tap, and the link arrives later: open the window first. The
+  // iPhone app hands any page off the gateway to Safari, so there the page simply goes to the link.
+  const win = app ? null : window.open('about:blank', '_blank')
+  window.api.invoke('browser:consoleUrl', profile, url).then(
+    (signin) => {
+      if (win) win.location.href = signin
+      else location.href = signin
+    },
+    (e: Error) => {
+      win?.close()
+      useStore.getState().toast('error', e.message)
+    }
+  )
+}
+
+/** An account's console (or one of its pages), signed in: the Browser tab in the Mac app, Safari elsewhere. */
+export function openAccountConsole(profile: string, url: string): void {
+  if (hasBrowser()) useStore.getState().openBrowser({ profile, url })
+  else openConsoleOnDevice(profile, url)
+}
+
+export function consoleHomeFor(profile: string): string {
+  const p = useStore.getState().profiles.find((x) => x.name === profile)
+  return consoleHome(p?.region ?? 'us-east-1')
+}
+
+/** Opens an AWS instance's page in its account's console, signed in. */
 export function openInConsole(i: Instance): void {
-  useStore.getState().openBrowser({ profile: i.profile, url: ec2InstanceUrl(i.region, i.instanceId) })
+  openAccountConsole(i.profile, ec2InstanceUrl(i.region, i.instanceId))
 }
 
 /** Double-click behaviour: RDP for Windows hosts, SSH for everything else. */

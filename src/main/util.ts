@@ -8,7 +8,8 @@ const candidates: Record<string, string[]> = {
     '/opt/homebrew/bin/session-manager-plugin',
     '/usr/local/sessionmanagerplugin/bin/session-manager-plugin'
   ],
-  aws: ['/usr/local/bin/aws', '/opt/homebrew/bin/aws']
+  aws: ['/usr/local/bin/aws', '/opt/homebrew/bin/aws'],
+  op: ['/opt/homebrew/bin/op', '/usr/local/bin/op']
 }
 
 /** Packaged Electron apps get a minimal PATH, so probe well-known locations first, then the login shell. */

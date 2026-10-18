@@ -4,3 +4,5 @@ allowBuilds:
   cpu-features: false
   ssh2: false
   electron-winstaller: false
+  # Ships prebuilt binaries for macOS; the gateway never loads it (no local terminals there).
+  node-pty: false

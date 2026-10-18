@@ -65,6 +65,24 @@ app.on('session-created', (ses) => {
     callback({ cancel: /^(https?|wss?):/.test(details.url) })
   })
 })
+// A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
+let termSaved = null
+// Whiteboards main has saved (boards:*), and the images added to notes.
+const boardsSaved = {}
+const noteImages = []
+const shells = new Map()
+const termOut = (sh, data) => { if (!sh.sender.isDestroyed()) sh.sender.send('term:event', { id: sh.id, type: 'data', data }) }
+const termPrompt = (sh) => termOut(sh, `\x1b]7;file://fixture${sh.cwd}\x07\x1b]633;P;Git=main\x07\x1b]633;P;Aws=${sh.env?.AWS_PROFILE ?? ''}\x07\x1b]133;A\x07fixture ${sh.cwd.replace('/Users/fixture', '~')} % `)
+const termRun = (sh, cmd) => {
+  termOut(sh, `${cmd}\r\n\x1b]633;E;${Buffer.from(cmd).toString('base64')}\x07\x1b]133;C\x07`)
+  const done = (exit) => { termOut(sh, `\x1b]133;D;${exit}\x07`); termPrompt(sh) }
+  if (cmd.startsWith('echo ')) { termOut(sh, `${cmd.slice(5)}\r\n`); done(0) }
+  else if (cmd === 'false') done(1)
+  else if (cmd.startsWith('sleep')) sh.waiting = () => { termOut(sh, '^C\r\n'); done(130) }
+  else if (cmd === 'lines') { for (let i = 1; i <= 80; i++) termOut(sh, `line ${i}\r\n`); done(0) }
+  else if (cmd === '') termPrompt(sh)
+  else { termOut(sh, `zsh: command not found: ${cmd.split(' ')[0]}\r\n`); done(127) }
+}
 ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
   calls.push({ channel, args })
   switch (channel) {
@@ -106,10 +124,45 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'notes:daily': { const p = 'Journal/2026-10-18.md'; notes[p] ??= { text: '# 2026-10-18\n\n', mtime: Date.now() }; return p }
     case 'notes:append': notes[args[0]].text += `\n${args[1]}\n`; notes[args[0]].mtime = Date.now(); return
     case 'notes:search': return []
+    case 'notes:openInObsidian': return
     case 'browser:load': return browserSaved
     case 'browser:save': browserSaved = args[0]; return
     case 'browser:consoleUrl': return `http://127.0.0.1:${webPort}/fed?d=${encodeURIComponent(args[1])}`
     case 'shell:open': return
+    case 'browser:openDownload': case 'browser:cancelDownload': return
+    case 'browser:logins': return [
+      { id: 'i1', account: 'u1', accountName: 'my.1password.com', title: 'Fixture login', username: 'me@example.com', vault: 'Private', urls: [`http://127.0.0.1:${webPort}/`], matches: true },
+      { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
+    ]
+    case 'browser:fill': return ['username', 'password']
+    case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
+    case 'boards:load': return boardsSaved[args[0]] ? structuredClone(boardsSaved[args[0]]) : null
+    case 'boards:save': boardsSaved[args[0].id] = structuredClone(args[0]); return
+    case 'boards:delete': delete boardsSaved[args[0]]; return
+    case 'notes:saveImage': noteImages.push(args[1]); return `EC2 Remote/Boards/${args[0]}.png`
+    case 'local:home': return '/Users/fixture'
+    case 'local:reveal': return
+    case 'term:history': return ['ls -la', 'git status', 'git checkout main', 'npm test']
+    case 'term:loadState': return termSaved
+    case 'term:saveState': termSaved = args[0]; return
+    case 'term:resize': return
+    case 'term:close': shells.delete(args[0]); return
+    case 'term:open': {
+      const sh = { id: args[0].id, cwd: args[0].cwd || '/Users/fixture/proj', env: args[0].env, sender: _e.sender, line: '' }
+      shells.set(sh.id, sh)
+      setTimeout(() => termPrompt(sh), 30)
+      return { shell: '/bin/zsh', integration: true, cwd: sh.cwd }
+    }
+    case 'term:write': {
+      const sh = shells.get(args[0])
+      if (!sh) return
+      let data = String(args[1])
+      if (data === '\x03' && sh.waiting) { const w = sh.waiting; sh.waiting = null; w(); return }
+      if (data.startsWith('\x1b[200~')) data = data.replace('\x1b[200~', '').replace('\x1b[201~', '')
+      sh.line += data
+      if (sh.line.endsWith('\r')) { const cmd = sh.line.slice(0, -1); sh.line = ''; termRun(sh, cmd) }
+      return
+    }
     case 'ssh:listShells': return [
       { name: 'ec2ra-old1', label: 'debug', user: '3dxadmin', args: 'bash', preview: '3dxadmin@ip-10-1-2-144:/etc/systemd/system$', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
       { name: 'ec2ra-other', label: '', user: 'root', args: 'tail -f /var/log/messages', preview: 'Oct 17 21:40:01 ip-10-1-2-144 systemd[1]: Started Session 42.', command: 'tail', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
@@ -444,7 +497,8 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('button[aria-label="Notes"]').click()`)
     await until(`!!document.querySelector('.notes-tab') && document.querySelectorAll('.notes-file').length >= 2`)
     await js(`[...document.querySelectorAll('.notes-file')].find((b) => b.textContent.includes('Runbook')).click()`)
-    await until(`document.querySelector('.notes-tab .cm-content')?.textContent.includes('see [[PLM upgrade]]')`)
+    // Live mode: the [[ ]] of a link show only on the line being edited.
+    await until(`document.querySelector('.notes-tab .cm-content')?.textContent.includes('see PLM upgrade') && !!document.querySelector('.notes-tab .cm-live-wikilink')`)
     // Real clicks and keys, as a person edits: the window-wide user-select: none once kept clicks from placing a caret.
     const lastLine = await js(`(() => { const r = [...document.querySelectorAll('.notes-tab .cm-line')].at(-1).getBoundingClientRect(); return { x: Math.round(r.left + 30), y: Math.round(r.top + r.height / 2) } })()`)
     win.webContents.focus()
@@ -453,10 +507,42 @@ app.whenReady().then(async () => {
     await until(`document.activeElement?.classList.contains('cm-content') && getSelection().rangeCount > 0`)
     for (const ch of 'Checked the logs. ') win.webContents.sendInputEvent({ type: 'char', keyCode: ch })
     await until(`document.querySelector('.notes-tab .cm-content').textContent.includes('Checked the logs.')`)
-    assert.match(await js(`document.querySelector('.notes-tab .cm-content').textContent`), /see \[\[PLM upgrade\]\]\.Checked the logs\./, 'typing goes where the click put the caret')
+    assert.match(await js(`document.querySelector('.notes-tab .cm-content').textContent`), /see (\[\[)?PLM upgrade(\]\])?\.Checked the logs\./, 'typing goes where the click put the caret')
     for (let n = 0; n < 100 && !calls.some((c) => c.channel === 'notes:write' && c.args[0] === 'Runbook.md' && c.args[1].includes('Checked the logs.')); n++) await new Promise((r) => setTimeout(r, 30))
     assert.ok(calls.some((c) => c.channel === 'notes:write' && c.args[0] === 'Runbook.md' && c.args[1].includes('Checked the logs.') && typeof c.args[2] === 'number'), 'typing autosaves, with the loaded version for conflict checks')
     await until(`document.querySelector('.notes-status')?.textContent === 'Saved'`)
+    // Open in Obsidian goes through its own channel (shell:open only passes web addresses).
+    await js(`[...document.querySelectorAll('.notes-head button')].find((b) => b.textContent === 'Obsidian').click()`)
+    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'notes:openInObsidian'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:openInObsidian').at(-1)?.args, ['Runbook.md'])
+    // Formatting: select a word, the toolbar and the shortcuts change the Markdown; ⌘B is bold here, not the sidebar.
+    for (const ch of 'key words') win.webContents.sendInputEvent({ type: 'char', keyCode: ch })
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Left', modifiers: ['shift', 'alt'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Left', modifiers: ['shift', 'alt'] })
+    await until(`getSelection().toString() === 'words'`)
+    await js(`document.querySelector('.nt-btn[aria-label="Bold (⌘B)"]').click()`)
+    await until(`document.querySelector('.notes-tab .cm-content').textContent.includes('key **words**') && document.querySelector('.nt-btn[aria-label="Bold (⌘B)"]').classList.contains('on')`)
+    const sidebarOpen = () => js(`!!document.querySelector('[title="Collapse sidebar (⌘B)"]')`)
+    const sidebarBefore = await sidebarOpen()
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'I', modifiers: ['meta'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'I', modifiers: ['meta'] })
+    await until(`document.querySelector('.notes-tab .cm-content').textContent.includes('key ***words***')`)
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'B', modifiers: ['meta'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'B', modifiers: ['meta'] })
+    await until(`document.querySelector('.notes-tab .cm-content').textContent.includes('key *words*') && !document.querySelector('.notes-tab .cm-content').textContent.includes('**words')`)
+    assert.equal(await sidebarOpen(), sidebarBefore, '⌘B in the editor does not toggle the sidebar')
+    await js(`document.querySelector('.nt-btn[aria-label="Bulleted list (⌘⇧8)"]').click()`)
+    await until(`[...document.querySelectorAll('.notes-tab .cm-line')].some((l) => l.textContent.startsWith('- Checked the logs.'))`)
+    // Away from the line, its Markdown is hidden: a bullet dot and italic text instead of "- " and "*".
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Up', modifiers: ['meta'] })
+    await until(`!!document.querySelector('.notes-tab .cm-live-bullet') && [...document.querySelectorAll('.notes-tab .cm-line')].some((l) => l.textContent.includes('key words') && !l.textContent.includes('*'))`)
+    await js(`(() => { const s = document.querySelector('.nt-select.font'); s.value = 'Georgia'; s.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await until(`document.querySelector('.notes-tab').style.getPropertyValue('--notes-font').includes('Georgia')`)
+    await screenshot('notes-formatting.png')
+    for (let n = 0; n < 100 && !calls.some((c) => c.channel === 'notes:write' && c.args[1].includes('see [[PLM upgrade]].\n- Checked the logs. key *words*')); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'notes:write' && c.args[1].includes('see [[PLM upgrade]].\n- Checked the logs. key *words*')), 'formatting is saved as Markdown')
+    await js(`(() => { const s = document.querySelector('.nt-select.font'); s.value = 'Monaco'; s.dispatchEvent(new Event('change', { bubbles: true })) })()`)
     await js(`[...document.querySelectorAll('.notes-modes button')].find((b) => b.textContent === 'Split').click()`)
     await until(`!!document.querySelector('.notes-preview a.wikilink')`)
     await screenshot('notes.png')
@@ -729,6 +815,22 @@ app.whenReady().then(async () => {
     await puntil(`document.querySelectorAll('.session-grid > .session-pane').length === 1`)
     await ptap('Done')
     await puntil(`!document.querySelector('.session-grid')`)
+    // The Terminal on an iPad has room for its tabs down the side; a phone-sized window puts them across the top.
+    await ptap('More')
+    await ptap('Terminal')
+    await puntil(`!!document.querySelector('.term-side .term-tab')`)
+    await pshot('ipad-terminal.png')
+    phone.setContentSize(430, 932)
+    await puntil(`innerWidth === 430 && !!document.querySelector('.term-tabs .term-tab') && !document.querySelector('.term-side')`)
+    phone.setContentSize(1194, 834)
+    await puntil(`innerWidth === 1194 && !!document.querySelector('.term-side .term-tab')`)
+    // The whiteboard on an iPad: the toolbar fits and the page does not scroll sideways.
+    await ptap('More')
+    await ptap('Whiteboard')
+    await puntil(`!!document.querySelector('.board-toolbar') && document.querySelector('.board-svg').getClientRects().length > 0`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.board-toolbar').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight })()`), true, 'iPad: whiteboard toolbar on screen')
+    assert.equal(await noSideScroll(), true, 'iPad whiteboard: no sideways scrolling')
+    await pshot('ipad-whiteboard.png')
 
     // Signing in from a phone: the approval happens in Safari, iOS suspends the page and drops its socket, and the
     // "signed in" push is sent to nobody. The dialog must still finish by asking the computer what token it holds.
@@ -768,6 +870,7 @@ app.whenReady().then(async () => {
     const bjs = (code) => bwin.webContents.executeJavaScript(code)
     const buntil = async (code, what = code) => {
       for (let n = 0; n < 200; n++) { if (await bjs(code)) { if (process.env.UI_TRACE) console.log('[browser ok]', what.slice(0, 70)); return } await new Promise((r) => setTimeout(r, 30)) }
+      if (process.env.UI_TRACE) console.log('[browser state]', await bjs(`JSON.stringify({ key: !!document.querySelector('.web-url-key'), op: !!document.querySelector('.op'), pop: !!document.querySelector('.popover'), toasts: document.querySelector('.toasts')?.textContent, url: document.querySelector('.web-url-host')?.textContent })`))
       throw new Error(`Timed out (browser): ${what}`)
     }
     const bshot = async (name) => { await bjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 250)); writeFileSync(join(output, name), (await bwin.webContents.capturePage()).toPNG()) }
@@ -803,7 +906,7 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelectorAll('.web-tab').length === 2 && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page two'`, 'reopen closed tab')
     // Pin with ⌘D; find in page.
     await bkey('d')
-    await buntil(`document.querySelectorAll('.web-pin').length === 1 && document.querySelectorAll('.web-tab').length === 1`, 'pinned')
+    await buntil(`document.querySelectorAll('.web-pinned .web-tab').length === 1 && document.querySelectorAll('.web-tabs .web-tab').length === 1`, 'pinned')
     await bkey('f')
     await buntil(`document.activeElement?.getAttribute('aria-label') === 'Find in page'`, 'find bar')
     await typeIn('.web-find input', 'find me')
@@ -837,23 +940,124 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira' && !!document.querySelector('.start-page')`, 'new space')
     // Leaving the browser for another tab and coming back keeps its pages (no reload, same page process).
     await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
-    await buntil(`document.querySelector('.web-pin.on') !== null`, 'pinned tab active in General')
+    await buntil(`document.querySelector('.web-pinned .web-tab.on') !== null`, 'pinned tab active in General')
     g1 = guestAt('/two')
     const before = g1.id
-    await bkey('1')
+    // ⌘1 belongs to the browser's tabs here; ⌘⇧[ goes to the previous app tab (Hosts).
+    await bkey('{', { shiftKey: true })
     await buntil(`!document.querySelector('.browser') || document.querySelector('.browser').getClientRects().length === 0`, 'hosts shown')
     await bjs(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('Browser')).click()`)
     await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
     assert.ok(guestAt('/two') && guestAt('/two').id === before, 'page survives switching app tabs')
+    // Favorites: page one becomes a favorite, shown in every space and keeping General's logins; ⌘W only unloads it.
+    await bjs(`[...document.querySelectorAll('.web-tabs .web-tab')].find((t) => t.textContent.includes('Fixture page one')).click()`)
+    await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page one'`, 'page one selected')
+    const oneId = guestAt('/one').id
+    await bkey('d', { shiftKey: true })
+    await buntil(`document.querySelectorAll('.web-fav').length === 1 && !document.querySelector('.web-tabs .web-tab') && !!document.querySelector('.web-fav.on')`, 'favorited')
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox' && !!document.querySelector('.web-fav .web-fav-dot')`, 'favorite shown in another space')
+    await bjs(`document.querySelector('.web-fav').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on') && document.querySelector('.web-space-name')?.textContent === 'sandbox' && document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`, 'favorite opens in the showing space')
+    assert.equal(guestAt('/one')?.id, oneId, 'the favorite is the same page, not reloaded')
+    await bshot('browser-favorites.png')
+    await bkey('w')
+    await buntil(`!!document.querySelector('.web-fav.asleep') && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'AWS Console fixture'`, '⌘W unloads the favorite')
+    for (let n = 0; n < 50 && guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(guestAt('/one'), undefined, 'unloaded favorite releases its page')
+    // General was showing the favorite: it loads again there (unloading is not closing).
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on:not(.asleep)') && document.querySelector('.web-space-name')?.textContent === 'General'`, 'back in General')
+    await buntil(`document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`)
+    for (let n = 0; n < 60 && !guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(guestAt('/one'), 'the favorite loads again where it was showing')
+    // ⌘1…⌘9 switch spaces in the order of the avatars (General, Jira, sandbox); ⌘9 is the last one.
+    await bkey('2')
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira'`, '⌘2 shows the second space')
+    await bkey('9')
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox'`, '⌘9 shows the last space')
+    assert.match(await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').title`), /⌘3$/)
+    await bkey('1')
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'General' && !!document.querySelector('.web-fav.on')`, '⌘1 shows the first space')
+    // One zoom for every page: ⌘+ on one page zooms the other open pages too, and ⌘0 resets them all.
+    await bkey('=')
+    await buntil(`document.querySelector('.web-zoom')?.textContent === '110%'`, 'zoom badge')
+    for (let n = 0; n < 50 && guestAt('/two')?.getZoomFactor() !== 1.1; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(guestAt('/one').getZoomFactor(), 1.1)
+    assert.equal(guestAt('/two').getZoomFactor(), 1.1, 'the page in the background zooms too')
+    // The sidebar follows the zoom so it stays in proportion with the pages.
+    await buntil(`Math.abs(document.querySelector('.web-side').getBoundingClientRect().width - 208 * 1.1) < 1`, 'sidebar zooms with the pages')
+    await bkey('0')
+    await buntil(`!document.querySelector('.web-zoom') && document.querySelector('.web-side').getBoundingClientRect().width === 208`, 'zoom reset')
+    for (let n = 0; n < 3; n++) await bkey('-')
+    await buntil(`document.querySelector('.web-zoom')?.textContent === '75%' && document.querySelector('.web-side').getBoundingClientRect().width === 156`, 'sidebar at 75%')
+    await bshot('browser-zoom-75.png')
+    await bkey('0')
+    await buntil(`!document.querySelector('.web-zoom')`)
+    assert.equal(guestAt('/two').getZoomFactor(), 1)
+    // Edit a favorite's name.
+    await bjs(`document.querySelector('.web-fav').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await bjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith('Edit name')).click()`)
+    await buntil(`!!document.querySelector('.popover form.space-form')`, 'edit form')
+    await typeIn('.popover form.space-form input', 'My fixture')
+    await bjs(`document.querySelector('.popover form.space-form').requestSubmit()`)
+    await buntil(`!!document.querySelector('.web-fav[aria-label="Favorite My fixture"]') && !document.querySelector('.popover')`, 'favorite renamed')
+    // The sidebar fits three favorites a row; dragging its edge wider fits four, double-click restores it.
+    const favCols = () => bjs(`getComputedStyle(document.querySelector('.web-favs')).gridTemplateColumns.split(' ').length`)
+    assert.equal(await favCols(), 3)
+    await bjs(`(() => { const h = document.querySelector('.web-side-resize'); const r = h.getBoundingClientRect(); h.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: 300 })) })()`)
+    await buntil(`!!document.querySelector('.web-resize-shield')`)
+    await bjs(`(() => { const h = document.querySelector('.web-side-resize').getBoundingClientRect(); const s = document.querySelector('.web-resize-shield'); s.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: h.left + 64, clientY: 300 })); s.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: h.left + 64, clientY: 300 })) })()`)
+    await buntil(`!document.querySelector('.web-resize-shield') && document.querySelector('.web-side').getBoundingClientRect().width === 268`, 'sidebar resized')
+    assert.equal(await favCols(), 4)
+    await bjs(`document.querySelector('.web-side-resize').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await buntil(`document.querySelector('.web-side').getBoundingClientRect().width === 208`, 'default width again')
+    // A sideways two-finger swipe on the sidebar switches space, once per gesture.
+    const swipeSide = (dx) => bjs(`(() => { const a = document.querySelector('.web-side'); for (let i = 0; i < 6; i++) a.dispatchEvent(new WheelEvent('wheel', { deltaX: ${dx}, deltaY: 0, bubbles: true, cancelable: true })) })()`)
+    await swipeSide(40)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira'`, 'swipe to the next space')
+    await new Promise((r) => setTimeout(r, 300))
+    await swipeSide(-40)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'General'`, 'swipe back')
+    // Fill from 1Password (⌘⇧L): this site's logins first, the others by search; Enter fills the selected one.
+    await bkey('l', { shiftKey: true })
+    await buntil(`document.querySelector('.op .op-title')?.textContent === 'Fixture login' && document.querySelectorAll('.op-row').length === 1`, '1Password picker')
+    await bshot('browser-1password.png')
+    await bjs(`document.querySelector('.op-search input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`)
+    await buntil(`!document.querySelector('.op') && document.querySelector('.toasts')?.textContent.includes('Filled the username and password')`, 'filled')
+    const fillCall = calls.filter((c) => c.channel === 'browser:fill').at(-1).args
+    assert.deepEqual(fillCall.slice(1), ['u1', 'i1', false])
+    assert.equal(fillCall[0], guestAt('/one').id, 'fills the page on screen')
+    // A click inside the page (which this document never sees) closes an open menu.
+    await bjs(`document.querySelector('.web-url-more[aria-label="Page actions"]').click()`)
+    await buntil(`!!document.querySelector('.popover')`, 'page menu open')
+    bwin.webContents.send('web:pointer', { webContentsId: guestAt('/one').id }) // what main/webviews.ts reports
+    await buntil(`!document.querySelector('.popover')`, 'clicking into the page closes the menu')
+    // Downloads: a ring while a file downloads, a dot when it finishes, and the list with View all downloads.
+    const dl = { id: 'd1', name: 'report.pdf', path: '/fixture/Downloads/report.pdf', at: Date.now(), total: 2048 }
+    bwin.webContents.send('web:download', { ...dl, state: 'progressing', received: 512 })
+    await buntil(`document.querySelector('.web-dl.busy')?.style.getPropertyValue('--p') === '25%'`, 'download progress ring')
+    bwin.webContents.send('web:download', { ...dl, state: 'completed', received: 2048 })
+    await buntil(`!!document.querySelector('.web-dl.unseen:not(.busy)')`, 'download finished dot')
+    await bjs(`document.querySelector('.web-dl').click()`)
+    await buntil(`document.querySelector('.dl-row.done .dl-name')?.textContent === 'report.pdf' && document.querySelector('.dl-sub').textContent === 'pdf · 2 KB'`, 'downloads list')
+    await bshot('browser-downloads.png')
+    await bjs(`document.querySelector('.dl-act[aria-label^="Show"]').click()`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'browser:openDownload').at(-1).args, [dl.path, 'reveal'])
+    await bjs(`document.querySelector('.web-dl').click()`)
+    await buntil(`!!document.querySelector('.dl-all')`)
+    await bjs(`document.querySelector('.dl-all').click()`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'browser:openDownload').at(-1).args, [null, 'open'])
     // State is saved (never with a sign-in link) and comes back after a reload.
-    for (let n = 0; n < 60 && !(browserSaved?.spaces.some((x) => x.name === 'Jira') && browserSaved.tabs.length === 4); n++) await new Promise((r) => setTimeout(r, 50))
+    for (let n = 0; n < 60 && !(browserSaved?.spaces.some((x) => x.name === 'Jira') && browserSaved.tabs.length === 4 && browserSaved.activeSpace === 'general' && browserSaved.tabs.some((t) => t.favorite)); n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(browserSaved.tabs.length, 4)
+    assert.deepEqual(browserSaved.tabs.filter((t) => t.favorite).map((t) => [t.spaceId, t.homeUrl]), [['general', page('/one')]])
     assert.ok(browserSaved.tabs.every((t) => !t.url.includes('/fed')), 'no sign-in links saved')
     assert.ok(browserSaved.history.length >= 3)
     await bwin.reload()
     await buntil(`document.querySelectorAll('[data-host-key]').length > 0`)
     await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
-    await buntil(`document.querySelectorAll('.web-pin').length === 1 && document.querySelector('.web-space-name')?.textContent === 'General'`, 'restored')
+    await buntil(`document.querySelectorAll('.web-pinned .web-tab').length === 1 && document.querySelectorAll('.web-fav.on').length === 1 && document.querySelector('.web-space-name')?.textContent === 'General'`, 'restored')
     await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
     await buntil(`document.querySelectorAll('.web-tab').length === 2`, 'restored AWS tabs')
     // ⌘S hides the sidebar; the page fills the window.
@@ -864,6 +1068,226 @@ app.whenReady().then(async () => {
     browserScenario = false
     bwin.destroy()
     webServer.close()
+
+    // The Terminal tab: Warp-style tabs, split panes, command blocks and the input box, against a fake zsh.
+    const twin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    twin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const tjs = (code) => twin.webContents.executeJavaScript(code)
+    const tuntil = async (code, what = code) => {
+      for (let n = 0; n < 200; n++) { if (await tjs(code)) { if (process.env.UI_TRACE) console.log('[term ok]', what.slice(0, 70)); return } await new Promise((r) => setTimeout(r, 30)) }
+      if (process.env.UI_TRACE) console.log('[term state]', JSON.stringify(calls.filter((c) => c.channel.startsWith('term:')).slice(-6).map((c) => [c.channel, String(c.args[1] ?? '').slice(0, 30)])), await tjs(`JSON.stringify({ rows: document.querySelector('.xterm-rows')?.textContent.slice(0, 200), gut: document.querySelectorAll('.tblock-gutter').length, screen: !!document.querySelector('.xterm-screen'), h: document.querySelector('.xterm-screen')?.offsetHeight })`))
+      throw new Error(`Timed out (terminal): ${what}`)
+    }
+    const tshot = async (name) => { await tjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 200)); writeFileSync(join(output, name), (await twin.webContents.capturePage()).toPNG()) }
+    const tkey = (k, mods = {}) => tjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const focusedArea = `(document.querySelector('.term-slot:not([style*="none"]) .tpane.focused .tdock textarea') ?? document.querySelector('.term-slot:not([style*="none"]) .tdock textarea'))`
+    const typeCmd = async (text, keyMods = {}) => {
+      await tjs(`(() => { const a = ${focusedArea}; const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; a.focus(); set.call(a, ${JSON.stringify(text)}); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    }
+    const pressIn = (k, mods = {}) => tjs(`${focusedArea}.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const screenText = () => tjs(`[...document.querySelectorAll('.term-slot:not([style*="none"]) .xterm-rows')].map((r) => r.textContent).join('\\n')`)
+    const termWrites = () => calls.filter((c) => c.channel === 'term:write').map((c) => c.args[1])
+    await twin.loadFile(resolve('out/renderer/index.html'))
+    await tuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await tkey('`', { ctrlKey: true, code: 'Backquote' })
+    await tuntil(`document.querySelectorAll('.term-tab').length === 1 && !!document.querySelector('.tdock textarea')`, '⌃` opens the Terminal with the input box')
+    assert.equal(await tjs(`!!document.querySelector('.term-side .term-tab')`), true, 'tabs are down the side by default')
+    await tuntil(`document.querySelector('.tdock-chips')?.textContent.includes('~/proj') && document.querySelector('.tchip.git')?.textContent === 'main'`, 'folder and branch chips')
+    // A command typed in the input box runs in the shell and becomes a block.
+    await typeCmd('echo hi')
+    await pressIn('Enter')
+    await tuntil(`!!document.querySelector('.tblock-gutter.ok')`, 'successful block')
+    assert.ok((await screenText()).includes('hi'))
+    await typeCmd('false')
+    await pressIn('Enter')
+    await tuntil(`!!document.querySelector('.tblock-gutter.err')`, 'failed block')
+    // Hovering a block shows its actions; Copy output copies just the output.
+    await tjs(`(() => { const g = document.querySelector('.tblock-gutter.ok').getBoundingClientRect(); document.querySelector('.term-slot:not([style*="none"]) .tpane-term').dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: g.left + 200, clientY: g.top + 2 })) })()`)
+    await tuntil(`!!document.querySelector('.tblock-bar')`, 'block toolbar')
+    await tshot('terminal-blocks.png')
+    await tjs(`document.querySelector('.tblock-bar button[title="Copy the output"]').click()`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== 'hi'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'hi')
+    // History on ↑, and a suggestion from history.
+    await typeCmd('')
+    await pressIn('ArrowUp')
+    await tuntil(`${focusedArea}.value === 'false'`, 'history recall')
+    await typeCmd('git c')
+    await tuntil(`document.querySelector('.tdock-ghost-rest')?.textContent === 'heckout main'`, 'history suggestion')
+    await pressIn('ArrowRight')
+    await tuntil(`${focusedArea}.value === 'git checkout main'`, 'suggestion accepted')
+    await typeCmd('')
+    // A long command: the running bar, and ⌃C stops it.
+    await typeCmd('sleep 10')
+    await pressIn('Enter')
+    await tuntil(`!!document.querySelector('.tdock.running')`, 'running bar')
+    await tjs(`document.querySelector('.tdock-btn').click()`)
+    await tuntil(`!!document.querySelector('.tdock textarea') && document.querySelectorAll('.tblock-gutter.err').length === 2`, '⌃C stops it')
+    // Tab hands the line to the shell (its own completion), and the box comes back at the next prompt.
+    await typeCmd('ls')
+    await pressIn('Tab')
+    assert.equal(termWrites().at(-1), 'ls\t')
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock')`, 'the shell has the line')
+    twin.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+    twin.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+    twin.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'input box back at the next prompt')
+    // Splits: ⌘D opens a pane in the same folder, ⌥⌘← moves focus, ⌘W closes the focused pane.
+    const opens = () => calls.filter((c) => c.channel === 'term:open').map((c) => c.args[0])
+    const opensAtSplit = opens().length
+    await tkey('d', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])').length === 2`, 'split right')
+    assert.equal(opens().length, opensAtSplit + 1)
+    assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'the new pane starts in the same folder')
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"]) .tdock textarea').length === 2`)
+    await tshot('terminal-split.png')
+    await tkey('ArrowLeft', { metaKey: true, altKey: true })
+    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tpane.focused') === document.querySelectorAll('.term-slot:not([style*="none"]) .tpane')[0]`, 'focus moves left')
+    await tkey('w', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])').length === 1`, '⌘W closes the pane')
+    // Layouts: four panes in a grid in one go, and back to one (after confirming the others close).
+    const pickLayout = async (label) => {
+      await tjs(`document.querySelector('.term-tool[aria-label="Pane layout"]').click()`)
+      await tuntil(`!!document.querySelector('.popover .tl-icon.grid')`)
+      await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes(${JSON.stringify(label)})).click()`)
+    }
+    const termOpensBeforeGrid = opens().length
+    await pickLayout('Four in a grid')
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])').length === 4 && document.querySelectorAll('.term-slot:not([style*="none"]) .tdock textarea').length === 4`, '2×2 grid')
+    assert.equal(opens().length, termOpensBeforeGrid + 3, 'three new shells')
+    const rects = await tjs(`[...document.querySelectorAll('.term-slot:not([style*="none"])')].map((s) => s.style.left + ',' + s.style.top + ',' + s.style.width + ',' + s.style.height)`)
+    assert.deepEqual(rects.sort(), ['0%,0%,50%,50%', '0%,50%,50%,50%', '50%,0%,50%,50%', '50%,50%,50%,50%'])
+    await tshot('terminal-grid.png')
+    await tkey('ArrowDown', { metaKey: true, altKey: true })
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])')[2]?.querySelector('.tpane.focused') !== null`, 'focus moves down in the grid')
+    await tjs('void (window.confirm = () => true)')
+    await pickLayout('One pane')
+    await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"])').length === 1`, 'back to one pane')
+    // Tabs: ⌘T, ⌘1, rename by double-click, and a tab for an AWS profile.
+    await tkey('t', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-tab').length === 2 && document.querySelectorAll('.term-tab')[1].classList.contains('on')`, 'new tab')
+    await tkey('1', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.term-tab')[0].classList.contains('on')`, '⌘1')
+    await tjs(`document.querySelectorAll('.term-tab')[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await tuntil(`!!document.querySelector('.term-tab-rename')`)
+    await tjs(`(() => { const i = document.querySelector('.term-tab-rename'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'build'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
+    await tuntil(`document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'renamed')
+    await tjs(`document.querySelector('.term-tab-more').click()`)
+    await tuntil(`!!document.querySelector('.popover')`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes('Production')).click()`)
+    await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelector('.term-tab.on .term-tab-aws')?.textContent === 'production'`, 'AWS profile tab')
+    assert.deepEqual(opens().at(-1).env, { AWS_PROFILE: 'production' })
+    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tchip.aws')?.textContent === 'production'`, 'AWS chip')
+    await tuntil(`document.querySelectorAll('.term-side .term-tab-sub')[0]?.textContent === '~/proj'`, 'side list shows the folder')
+    await tshot('terminal-vertical-tabs.png')
+    // Tabs across the top instead, and back down the side.
+    const termSetting = async (label) => {
+      await tjs(`document.querySelector('.term-tool[aria-label="Terminal settings"]').click()`)
+      await tuntil(`!!document.querySelector('.popover')`)
+      await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith(${JSON.stringify(label)})).click()`)
+      await tkey('Escape')
+      await tuntil(`!document.querySelector('.popover')`)
+    }
+    await termSetting('Across the top')
+    await tuntil(`!!document.querySelector('.term-tabs .term-tab') && !document.querySelector('.term-side')`, 'tabs across the top')
+    await termSetting('Down the side')
+    await tuntil(`!!document.querySelector('.term-side .term-tab')`, 'tabs down the side again')
+    // Typing straight into the shell instead: no input box.
+    await tjs(`document.querySelector('.term-tool[aria-label="Terminal settings"]').click()`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith('Straight into')).click()`)
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock')`, 'shell input mode')
+    await tkey('Escape')
+    // The layout is saved and the shells start again in their folders after a restart.
+    for (let n = 0; n < 60 && !(termSaved?.tabs.length === 3 && termSaved.input === 'shell'); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.equal(termSaved.tabs.length, 3)
+    assert.equal(termSaved.tabs[0].title, 'build')
+    const opensBefore = opens().length
+    await twin.reload()
+    await tuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await tkey('`', { ctrlKey: true, code: 'Backquote' })
+    await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'restored tabs')
+    for (let n = 0; n < 60 && opens().length < opensBefore + 1; n++) await new Promise((r) => setTimeout(r, 50))
+    assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'restored shell starts in its folder')
+
+    // The Whiteboard: pen, shapes, a sticky note, selecting, deleting, undo, saving, a second board, and a PNG into today's note.
+    await tjs(`document.querySelector('button[aria-label="Whiteboard"]').click()`)
+    await tuntil(`!!document.querySelector('.board-svg') && !!document.querySelector('.board-hint')`, 'whiteboard opens on an empty board')
+    for (let n = 0; n < 60 && !Object.values(boardsSaved).some((b) => b.name === 'Brainstorm'); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.ok(Object.values(boardsSaved).some((b) => b.name === 'Brainstorm'), 'a first board is created and saved')
+    assert.equal(await tjs(`document.querySelector('.bt-btn.on').getAttribute('aria-label')`), 'Pen', 'the pen is ready')
+    const ptr = (type, x, y, extra = {}) => tjs(`(() => { const r = document.querySelector('.board-svg').getBoundingClientRect(); document.querySelector('.board-svg').dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { clientX: r.left + ${x}, clientY: r.top + ${y}, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: ${type === 'pointerup' ? 0 : 1}, bubbles: true, cancelable: true, ...${JSON.stringify(extra)} })) })()`)
+    const stroke = async (points, extra) => {
+      await ptr('pointerdown', ...points[0], extra)
+      for (const p of points.slice(1)) await ptr('pointermove', ...p, extra)
+      await ptr('pointerup', ...points.at(-1), extra)
+    }
+    const boardItems = () => tjs(`document.querySelectorAll('.board-items > *').length`)
+    await stroke([[120, 200], [160, 180], [200, 210], [240, 190], [280, 220], [320, 200]])
+    await tuntil(`document.querySelectorAll('.board-items > path').length === 1 && !document.querySelector('.board-hint')`, 'a pen stroke')
+    await tkey('r')
+    await stroke([[380, 150], [450, 200], [560, 260]])
+    await tkey('a')
+    await stroke([[580, 200], [650, 205], [700, 210]])
+    await tkey('o')
+    await tkey('3')
+    await stroke([[150, 300], [250, 380], [330, 420]])
+    await tuntil(`document.querySelectorAll('.board-items > rect').length === 1 && document.querySelectorAll('.board-items > ellipse').length === 1 && document.querySelectorAll('.board-items > g polygon').length === 1`, 'rectangle, arrow and ellipse')
+    assert.equal(await tjs(`document.querySelector('.board-items > ellipse').getAttribute('stroke')`), '#0090ff', 'key 3 picks the third colour')
+    // A sticky note: placed on release, typed into, kept when the editor closes.
+    await tkey('n')
+    await ptr('pointerdown', 840, 220)
+    await ptr('pointerup', 840, 220)
+    await tuntil(`document.activeElement?.classList.contains('board-editor')`, 'the note editor has focus')
+    await tjs(`(() => { const a = document.activeElement; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, 'Ship the whiteboard on Friday'); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await tuntil(`!document.querySelector('.board-editor') && document.querySelector('.board-note')?.textContent.includes('Ship the')`, 'the note keeps its text')
+    // Text: a box sized to what was typed; an empty one disappears.
+    await tkey('t')
+    await ptr('pointerdown', 420, 330)
+    await ptr('pointerup', 420, 330)
+    await tuntil(`document.activeElement?.classList.contains('board-editor')`, 'the text editor has focus')
+    await tjs(`(() => { const a = document.activeElement; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, 'Ideas'); a.dispatchEvent(new Event('input', { bubbles: true })); a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })()`)
+    await tkey('t')
+    await ptr('pointerdown', 700, 420)
+    await ptr('pointerup', 700, 420)
+    await tuntil(`document.activeElement?.classList.contains('board-editor')`)
+    await tjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await tuntil(`!document.querySelector('.board-editor')`)
+    assert.equal(await boardItems(), 6, 'pen, rectangle, arrow, ellipse, note and one text box')
+    await tshot('whiteboard.png')
+    // Marquee-select the stroke and the rectangle, delete them, then undo.
+    await tkey('v')
+    await stroke([[100, 120], [300, 180], [500, 240]])
+    await tuntil(`document.querySelector('.board-count')?.textContent === '2 selected'`, 'two selected')
+    assert.equal(await tjs(`document.querySelectorAll('.board-handle').length`), 8, 'resize handles around the selection')
+    await tkey('Backspace')
+    await tuntil(`document.querySelectorAll('.board-items > *').length === 4`, 'deleted')
+    await tkey('z', { metaKey: true })
+    await tuntil(`document.querySelectorAll('.board-items > *').length === 6`, '⌘Z brings them back')
+    // Moving the rectangle by dragging it.
+    await tkey('Escape')
+    const rectX = await tjs(`Number(document.querySelector('.board-items > rect').getAttribute('x'))`)
+    await stroke([[380, 200], [430, 230], [480, 260]])
+    await tuntil(`Number(document.querySelector('.board-items > rect').getAttribute('x')) === ${rectX + 100}`, 'dragging moves the rectangle')
+    for (let n = 0; n < 60 && !Object.values(boardsSaved).some((b) => b.name === 'Brainstorm' && b.items.length === 6 && b.items.some((it) => it.type === 'note' && it.text.startsWith('Ship'))); n++) await new Promise((r) => setTimeout(r, 50))
+    const saved = Object.values(boardsSaved).find((b) => b.name === 'Brainstorm')
+    assert.deepEqual(saved.items.map((it) => it.type).sort(), ['arrow', 'ellipse', 'note', 'pen', 'rect', 'text'], 'the board is saved with its items')
+    // A PNG of the board into today's note.
+    await tjs(`document.querySelector('.bt-btn[aria-label="More"]').click()`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith('Add to today')).click()`)
+    for (let n = 0; n < 100 && !notes['Journal/2026-10-18.md']?.text.includes('![[Brainstorm.png]]'); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.match(noteImages.at(-1) ?? '', /^data:image\/png;base64,.{2000,}/, 'the export is a real PNG')
+    assert.ok(notes['Journal/2026-10-18.md'].text.includes('![[Brainstorm.png]]'), 'the image is embedded in the daily note')
+    // A second board starts empty and both are listed.
+    await tjs(`document.querySelector('button[aria-label="New board"]').click()`)
+    await tuntil(`document.querySelectorAll('.board-row').length === 2 && !!document.querySelector('.board-hint') && document.querySelector('.board-row.on .board-row-name').textContent === 'Board'`, 'a new empty board')
+    await tjs(`[...document.querySelectorAll('.board-row')].find((r) => r.textContent.startsWith('Brainstorm')).click()`)
+    await tuntil(`document.querySelectorAll('.board-items > *').length === 6`, 'switching back loads the first board')
+    // The shortcuts list has a whiteboard section.
+    await tkey('/', { metaKey: true })
+    await tuntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('On the whiteboard')`, 'shortcuts dialog lists the whiteboard keys')
+    await tkey('Escape')
+    twin.destroy()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)

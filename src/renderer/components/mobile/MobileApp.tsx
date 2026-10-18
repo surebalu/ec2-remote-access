@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { isSession, useStore, type Tab } from '../../store'
 import { nativeApp, postNative, setLayoutPreference, trackVisualViewport, WIDE_QUERY } from '../../mobile'
+import { consoleHomeFor, openConsoleOnDevice } from '../../quickConnect'
+import { metaFor, initials } from '../../colors'
 import { SessionPanes } from '../TerminalTabs'
 import AuthBanner from '../AuthBanner'
 import { Icon } from '../icons'
@@ -10,8 +12,8 @@ import Sheet, { SheetItem } from './Sheet'
 type View = 'hosts' | 'sessions' | 'more'
 
 const dotFor = (st: Tab['status']): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : <Icon.terminal />)
-const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : 'Terminal')
+const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : <Icon.terminal />)
+const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : 'Terminal')
 
 const LIST_HIDDEN_KEY = 'ui.mobileListHidden'
 
@@ -228,6 +230,26 @@ function MobileMore(): ReactElement {
           </span>
         </button>
       </div>
+      {s.profiles.some((p) => p.enabled && p.kind !== 'static') && (
+        <>
+          <h3 className="m-group-title">AWS console</h3>
+          <div className="m-card-list">
+            {s.profiles.filter((p) => p.enabled && p.kind !== 'static').map((p) => {
+              const m = metaFor(p.name, s.settings)
+              return (
+                <button key={p.name} className="m-host" onClick={() => openConsoleOnDevice(p.name, consoleHomeFor(p.name))}>
+                  <span className="avatar sm" data-accent={m.color}>{initials(m.label)}</span>
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="m-host-name">{m.label}</span>
+                    <span className="m-host-meta">Opens the console signed in, in Safari · {p.region}</span>
+                  </span>
+                  <Icon.external className="muted" />
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
       <h3 className="m-group-title">Appearance</h3>
       <div className="m-segment" role="radiogroup" aria-label="Theme">
         {(['system', 'light', 'dark'] as const).map((t) => (
@@ -245,9 +267,19 @@ function MobileMore(): ReactElement {
             <Icon.chevron className="muted" />
           </button>
         )}
+        <button className="m-host" onClick={() => s.openTerminal()}>
+          <span className="m-host-os"><Icon.console /></span>
+          <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Terminal</span><span className="m-host-meta">Shells on the computer running the app, when it allows them</span></span>
+          <Icon.chevron className="muted" />
+        </button>
         <button className="m-host" onClick={() => s.openNotes()}>
           <span className="m-host-os"><Icon.note /></span>
           <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Notes</span><span className="m-host-meta">Markdown notes on the computer running the app, a note per host</span></span>
+          <Icon.chevron className="muted" />
+        </button>
+        <button className="m-host" onClick={() => s.openBoard()}>
+          <span className="m-host-os"><Icon.board /></span>
+          <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Whiteboard</span><span className="m-host-meta">Sketch and brainstorm; draw with a finger or Apple Pencil</span></span>
           <Icon.chevron className="muted" />
         </button>
         <button className="m-host" onClick={() => s.set({ settingsOpen: true })}>

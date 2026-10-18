@@ -25,7 +25,22 @@ const wikilink: TokenizerAndRendererExtension = {
   }
 }
 
-const md = new Marked({ gfm: true, breaks: false }, { extensions: [wikilink] })
+/** Obsidian's ==highlight==. */
+const highlight: TokenizerAndRendererExtension = {
+  name: 'highlight',
+  level: 'inline',
+  start: (src) => src.match(/==/)?.index,
+  tokenizer(src) {
+    const m = /^==(?![\s=])([^=\n]*?[^\s=])==(?!=)/.exec(src)
+    if (!m) return undefined
+    return { type: 'highlight', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) }
+  },
+  renderer(token) {
+    return `<mark>${this.parser.parseInline(token.tokens ?? [])}</mark>`
+  }
+}
+
+const md = new Marked({ gfm: true, breaks: false }, { extensions: [wikilink, highlight] })
 
 /** HTML for a note (not yet sanitised). */
 export function noteToHtml(text: string): string {

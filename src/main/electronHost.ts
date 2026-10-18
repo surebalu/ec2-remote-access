@@ -1,6 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, ShareMenu, shell } from 'electron'
 import type { Host } from './host'
 import { broadcastToPhones } from './phoneAccess'
+import { cancelDownload, fillPage } from './webviews'
 
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */
 export const electronHost: Host = {
@@ -14,6 +15,19 @@ export const electronHost: Host = {
   revealPath: (p) => shell.showItemInFolder(p),
   async trashPaths(paths) {
     for (const p of paths) await shell.trashItem(p)
+  },
+  downloadsDir: () => app.getPath('downloads'),
+  async openPath(path) {
+    const error = await shell.openPath(path)
+    if (error) throw new Error(`Could not open ${path}: ${error}`)
+  },
+  cancelDownload,
+  fillWebPage: fillPage,
+  shareUrl(url) {
+    if (process.platform !== 'darwin') return false
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    new ShareMenu({ urls: [url] }).popup(win ? { window: win } : {})
+    return true
   },
   clipboardWrite(text) {
     clipboard.writeText(text)

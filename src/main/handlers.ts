@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { basename, resolve, sep } from 'node:path'
 import { startDeviceFlow, waitForDeviceFlow, saveSsoProfiles, cancelDeviceFlow, addStaticProfile, removeProfile, renameProfile, ssoSessionsInConfig, sessionTokenInfo, loginExistingSession } from './aws/sso'
 import type { IpcApi } from '@shared/ipc'
 import { host } from './host'
@@ -8,7 +10,11 @@ import { windowsPassword } from './aws/passwords'
 import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
 import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
-import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
+import { opLogins, opSecrets } from './onepassword'
+import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
+import { loginMatches } from '@shared/browser'
+import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
+import { deleteBoard, listBoards, loadBoard, saveBoard } from './boards'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
@@ -19,7 +25,7 @@ import { listTunnels, closeTunnel } from './tunnels'
 import { openPortForward } from './portForward'
 import { hostHealth } from './aws/health'
 import { findBinary } from './util'
-import { phoneStatus, configurePhoneAccess, rotatePhoneToken } from './phoneAccess'
+import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
 
 type Handler<K extends keyof IpcApi> = (...args: Parameters<IpcApi[K]>) => ReturnType<IpcApi[K]>
@@ -62,6 +68,12 @@ export const handlers: Handlers = {
       .catch((e: Error) => send('profiles:status', { profile: `sso-session:${name}`, state: 'error', message: e.message }))
     return { flowId: r.flowId, userCode: r.userCode, verificationUri: r.verificationUri, verificationUriComplete: r.verificationUriComplete, expiresIn: r.expiresIn }
   },
+  'notes:openInObsidian': (path) => openInObsidian(path),
+  'notes:saveImage': (name, dataUrl) => saveImage(name, dataUrl),
+  'boards:list': async () => listBoards(),
+  'boards:load': async (id) => loadBoard(id),
+  'boards:save': (board) => saveBoard(board),
+  'boards:delete': (id) => deleteBoard(id),
   'shell:open': async (url) => {
     if (/^https?:\/\//.test(url)) await host().openExternal(url)
   },
@@ -137,6 +149,32 @@ export const handlers: Handlers = {
   'browser:load': async () => loadBrowserState(),
   'browser:save': (state) => saveBrowserState(state),
   'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
+  'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
+  'browser:openDownload': async (path, how) => {
+    const dir = host().downloadsDir()
+    if (!dir) return
+    // Only what the browser put in Downloads: the renderer never gets to open arbitrary files.
+    const target = path ? resolve(path) : dir
+    if (target !== dir && !target.startsWith(dir + sep)) throw new Error('Only files in your Downloads folder can be opened from here.')
+    if (path && !existsSync(target)) throw new Error(`${basename(target)} is no longer in your Downloads folder.`)
+    if (how === 'reveal' && path) host().revealPath(target)
+    else await host().openPath(target)
+  },
+  'browser:cancelDownload': async (id) => host().cancelDownload(id),
+  'term:available': async () => true,
+  'term:open': (req) => openLocal(req),
+  'term:write': async (id, data) => writeLocal(id, data),
+  'term:resize': async (id, cols, rows) => resizeLocal(id, cols, rows),
+  'term:close': async (id) => closeLocal(id),
+  'term:history': async () => shellHistory(),
+  'term:loadState': async () => loadTerminalState(),
+  'term:saveState': (state) => saveTerminalState(state),
+  'browser:logins': async (pageUrl, refresh) => (await opLogins(refresh)).map((l) => ({ ...l, matches: loginMatches(l.urls, pageUrl) })),
+  'browser:fill': async (webContentsId, account, itemId, anySite) => {
+    const login = (await opLogins()).find((l) => l.id === itemId && l.account === account)
+    if (!login) throw new Error('That 1Password item is no longer there.')
+    return host().fillWebPage(webContentsId, await opSecrets(account, itemId), anySite ? null : login.urls)
+  },
   'clipboard:write': async (text) => {
     if (!host().clipboardWrite(text)) throw new Error('No clipboard on this host')
   },
@@ -149,6 +187,7 @@ export const handlers: Handlers = {
   }),
   'phone:status': async () => phoneStatus(),
   'phone:configure': (patch) => configurePhoneAccess(patch),
+  'phone:terminals': async (allow) => setPhoneTerminals(allow),
   'phone:rotateToken': () => rotatePhoneToken(),
   'diag:log': async (opts) => {
     const r = recentLog(opts?.lines, opts?.filter)

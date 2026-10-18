@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactElement } from 'react'
 import type { Instance } from '@shared/types'
 import { filteredInstances, routeOf, useStore, visibleInstances } from '../../store'
 import { groupKeyOf, metaFor } from '../../colors'
-import { openFilesFor, openRdpFor, openSshFor } from '../../quickConnect'
+import { openFilesFor, openInConsole, openRdpFor, openSshFor } from '../../quickConnect'
 import { Icon } from '../icons'
 import Sheet, { SheetItem } from './Sheet'
 
@@ -125,6 +125,7 @@ function HostActionsSheet({ i, onClose }: { i: Instance; onClose: () => void }):
       {i.platform === 'windows' && <SheetItem icon={<Icon.monitor />} disabled={!reachable} onClick={() => run(() => void openRdpFor(i.key))}>Remote desktop</SheetItem>}
       <SheetItem icon={<Icon.terminal />} disabled={!reachable} onClick={() => run(() => openSshFor(i.key))}>SSH terminal</SheetItem>
       <SheetItem icon={<Icon.folder />} disabled={!reachable} onClick={() => run(() => openFilesFor(i.key))}>Files (SFTP)</SheetItem>
+      {!i.manual && <SheetItem icon={<Icon.globe />} onClick={() => run(() => openInConsole(i))}>AWS console (opens in Safari, signed in)</SheetItem>}
       <SheetItem icon={<Icon.settings />} onClick={() => run(() => s.set({ connectFor: { kind: i.platform === 'windows' ? 'rdp' : 'ssh', key: i.key } }))}>Connect with options…</SheetItem>
       <SheetItem icon={<Icon.star />} onClick={() => run(() => void s.toggleFavorite(i.key))}>{fav ? 'Remove from favorites' : 'Add to favorites'}</SheetItem>
     </Sheet>

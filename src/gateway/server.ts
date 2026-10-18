@@ -35,12 +35,19 @@ export interface GatewayOptions {
   resumeGraceMs?: number
   /** Called with the connected RPC clients whenever the set changes. */
   onClientsChanged?: (clients: { address: string; since: number }[]) => void
+  /**
+   * Whether paired pages may open shells on this machine (the Terminal tab), asked on every call. Off unless the
+   * machine's owner turned it on there: the Mac's Settings → Phone access, or the gateway's --allow-terminals.
+   */
+  allowTerminals?: () => boolean
 }
 
 export interface Gateway {
   server: Server
   /** Push an IpcEvents message to every connected browser. */
   broadcast(channel: string, payload: unknown): void
+  /** Closes every terminal a paired page opened (terminals were just turned off). */
+  closeTerminals(): void
   listen(port: number, host: string): Promise<{ port: number; host: string }>
   close(): Promise<void>
 }
@@ -51,18 +58,31 @@ const MIME: Record<string, string> = {
   '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain'
 }
 
+type Opened = { sessionId?: string; id?: string } | undefined
+
 /** Which calls open a long-lived session, where its id lives, and which call closes it. */
-const SESSION_OPENERS: Record<string, { idFrom: 'args' | 'result'; closer: keyof IpcApi }> = {
-  'ssh:open': { idFrom: 'args', closer: 'ssh:close' },
-  'sftp:open': { idFrom: 'result', closer: 'sftp:close' },
-  'rdp:prepare': { idFrom: 'args', closer: 'rdp:release' }
+const SESSION_OPENERS: Record<string, { id: (args: unknown[], result: unknown) => string | undefined; closer: keyof IpcApi }> = {
+  'ssh:open': { id: (a) => (a[0] as Opened)?.sessionId, closer: 'ssh:close' },
+  'sftp:open': { id: (_a, r) => (r as Opened)?.sessionId, closer: 'sftp:close' },
+  'rdp:prepare': { id: (a) => (a[0] as Opened)?.sessionId, closer: 'rdp:release' },
+  'term:open': { id: (a) => (a[0] as Opened)?.id, closer: 'term:close' }
 }
 const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) => x.closer))
 
+/**
+ * What stays with the person at the computer, never with whoever holds the pairing link: the desktop browser's
+ * 1Password fill, downloads and pages, and the phone-access settings themselves (so a paired page cannot widen its
+ * own access). Shells on this machine (term:*) are refused too unless `allowTerminals` says otherwise.
+ */
+export function desktopOnly(channel: string): boolean {
+  return channel.startsWith('web:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'phone:configure', 'phone:rotateToken', 'phone:terminals'].includes(channel)
+}
+
 export function createGatewayServer(opts: GatewayOptions): Gateway {
   const log = opts.log ?? ((l: string): void => console.log(l))
-  const clients = new Map<WebSocket, { address: string; since: number }>()
-  const notifyClients = (): void => opts.onClientsChanged?.(Array.from(clients.values()))
+  const clients = new Map<WebSocket, { address: string; since: number; owned?: Map<string, keyof IpcApi> }>()
+  const terminalsAllowed = (): boolean => opts.allowTerminals?.() === true
+  const notifyClients = (): void => opts.onClientsChanged?.(Array.from(clients.values(), ({ address, since }) => ({ address, since })))
   /** Public host the browser used (behind `tailscale serve` that is the forwarded host, not 127.0.0.1). */
   const publicHost = (req: IncomingMessage): string => String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost')
   const remoteAddress = (req: IncomingMessage): string =>
@@ -153,6 +173,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       if (page.owned.size) log(`[gateway] client resumed with ${page.owned.size} session(s)`)
     }
     const owned = page?.owned ?? new Map<string, keyof IpcApi>()
+    clients.get(ws)!.owned = owned
     const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '')
     const secure = forwardedProto === 'https' || forwardedProto === 'wss' || 'encrypted' in req.socket
     const publicWsBase = `${secure ? 'wss' : 'ws'}://${publicHost(req)}`
@@ -163,6 +184,16 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       try { msg = JSON.parse(raw.toString()) } catch { return }
       if (msg.t !== 'call' || typeof msg.id !== 'number' || typeof msg.channel !== 'string') return
       const { id, channel } = msg
+      const reply = (result: unknown): void => { ws.send(JSON.stringify({ t: 'result', id, result: result ?? null })) }
+      if (desktopOnly(channel) || (channel.startsWith('term:') && channel !== 'term:available' && !terminalsAllowed())) {
+        ws.send(JSON.stringify({ t: 'error', id, message: channel.startsWith('term:') ? 'Terminals from paired devices are off. Turn them on on the computer running the app.' : 'That is only available in the Mac app.' }))
+        return
+      }
+      if (channel === 'term:available') return reply(terminalsAllowed())
+      // A paired page's terminal layout is its own; it must not replace the computer's saved one.
+      if (channel === 'term:loadState') return reply(null)
+      if (channel === 'term:saveState') return reply(null)
+      if (channel === 'settings:set' && msg.args?.[0] && typeof msg.args[0] === 'object') delete (msg.args[0] as Record<string, unknown>).phoneTerminals
       const fn = (opts.handlers as Record<string, AnyHandler | undefined>)[channel]
       if (!fn) { ws.send(JSON.stringify({ t: 'error', id, message: `Unknown channel ${channel}` })); return }
       const args = Array.isArray(msg.args) ? msg.args : []
@@ -170,7 +201,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
         (result) => {
           const opener = SESSION_OPENERS[channel]
           if (opener) {
-            const sid = opener.idFrom === 'args' ? (args[0] as { sessionId?: string } | undefined)?.sessionId : (result as { sessionId?: string } | undefined)?.sessionId
+            const sid = opener.id(args, result)
             if (sid) owned.set(sid, opener.closer)
           }
           if (SESSION_CLOSERS.has(channel) && typeof args[0] === 'string') owned.delete(args[0])
@@ -217,8 +248,24 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
   return {
     server,
     broadcast(channel, payload) {
+      if (desktopOnly(channel)) return
       const data = JSON.stringify({ t: 'event', channel, payload })
-      for (const c of clients.keys()) if (c.readyState === WebSocket.OPEN) c.send(data)
+      // A shell's output goes only to the page that opened it (never the computer's own terminals, nor other phones).
+      const term = channel.startsWith('term:') ? (payload as { id?: string } | undefined)?.id : undefined
+      if (channel.startsWith('term:') && (!term || !terminalsAllowed())) return
+      for (const [c, info] of clients) if (c.readyState === WebSocket.OPEN && (!term || info.owned?.has(term))) c.send(data)
+    },
+    closeTerminals() {
+      const close = (opts.handlers as Record<string, AnyHandler>)['term:close']
+      const maps = [...[...clients.values()].map((c) => c.owned), ...[...pages.values()].map((p) => p.owned)]
+      for (const owned of maps) {
+        if (!owned) continue
+        for (const [sid, closer] of owned) {
+          if (closer !== 'term:close') continue
+          owned.delete(sid)
+          void close?.(sid).catch(() => undefined)
+        }
+      }
     },
     listen: (port, host) =>
       new Promise((resolve, reject) => {

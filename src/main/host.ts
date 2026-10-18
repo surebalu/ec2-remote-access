@@ -35,6 +35,16 @@ export interface Host {
   revealPath(path: string): void
   /** Move local paths to the trash. */
   trashPaths(paths: string[]): Promise<void>
+  /** The user's Downloads folder, where the browser saves files; null when the host has no browser (gateway). */
+  downloadsDir(): string | null
+  /** Opens a local file or folder with its default app. */
+  openPath(path: string): Promise<void>
+  /** Types a 1Password login into a browser page (see webviews.ts fillPage); returns what was filled. */
+  fillWebPage(webContentsId: number, values: { username?: string; password?: string; otp?: string }, allowedUrls: string[] | null): Promise<string[]>
+  /** Stops a browser download in progress. */
+  cancelDownload(id: string): void
+  /** Shows the system Share menu for a link (Messages, Notes, Anybox…) at the pointer. False when there is none. */
+  shareUrl(url: string): boolean
   /** Copy text to the clipboard. Returns false when the host has no clipboard (the UI then copies client-side). */
   clipboardWrite(text: string): boolean
   /** Apply the app-wide light/dark preference to native chrome; no-op without native windows. */

@@ -23,6 +23,7 @@ import SnippetsDialog from './components/SnippetsDialog'
 import WorkspaceDialog from './components/WorkspaceDialog'
 import ShortcutsDialog from './components/ShortcutsDialog'
 import { handleAppShortcut } from './shortcuts'
+import { hasBrowser } from './quickConnect'
 import { isMobile } from './mobile'
 import MobileApp from './components/mobile/MobileApp'
 
@@ -31,7 +32,7 @@ export default function App(): ReactElement {
   const activeTab = useStore((s) => s.activeTab)
   const gridView = useStore((s) => s.gridView)
   // The browser brings its own sidebar (spaces and tabs); the hosts sidebar steps aside while it is in front.
-  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && t.kind === 'browser' && !s.splitGroup.includes(t.id)))
+  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && (t.kind === 'browser' || t.kind === 'local' || t.kind === 'board') && !s.splitGroup.includes(t.id)))
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)
@@ -120,7 +121,9 @@ export default function App(): ReactElement {
           <span>EC2 Remote Access</span>
         </div>
         <TerminalTabs />
+        {hasBrowser() && <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Terminal: shells on this Mac (⌃`)" aria-label="Terminal" onClick={() => useStore.getState().openTerminal()}><Icon.console /></button>}
         <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Browser: AWS console spaces and web tabs" aria-label="Browser" onClick={() => useStore.getState().openBrowser()}><Icon.globe /></button>
+        <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Whiteboard: a scratch pad for brainstorming" aria-label="Whiteboard" onClick={() => useStore.getState().openBoard()}><Icon.board /></button>
         <button className="btn btn-ghost btn-icon no-drag shrink-0" title="Notes (⌘⇧N)" aria-label="Notes" onClick={() => useStore.getState().openNotes()}><Icon.note /></button>
         <button className="btn btn-ghost no-drag mr-3 shrink-0" title="Find a host or session (⌘K)" aria-label="Open quick switcher" onClick={() => useStore.getState().openQuickSwitcher()}><Icon.search /><kbd>⌘K</kbd></button>
       </header>

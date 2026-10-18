@@ -5,6 +5,8 @@
 #   scripts/deploy-pi.sh user@host        # first install, and every later update (restarts the service)
 #   SKIP_BUILD=1 scripts/deploy-pi.sh …   # reuse the existing out/ build
 #   NODE_MAJOR=24 PORT=8321               # Node line to install on the machine, local port of the gateway
+#   ALLOW_TERMINALS=1 | 0                 # let paired devices open shells on this machine (the Terminal tab), or stop that;
+#                                         # unset keeps what the machine has (off on a first install)
 #
 # Everything lives in the user's home directory (Node in ~/.local/node, the app in ~/ec2-remote-access, data in
 # ~/.config/ec2-remote-access) except the systemd unit and AWS's session-manager-plugin package, which need sudo.
@@ -17,6 +19,7 @@ TARGET="${1:-}"
 [ -n "$TARGET" ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 PORT="${PORT:-8321}"
 NODE_MAJOR="${NODE_MAJOR:-24}"
+ALLOW_TERMINALS="${ALLOW_TERMINALS:-keep}"
 PNPM_VERSION="${PNPM_VERSION:-$(pnpm -v)}"
 SERVICE=ec2-remote-gateway
 
@@ -33,7 +36,7 @@ rsync -a --delete out/renderer/ "$TARGET:$APP/out/renderer/"
 rsync -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$TARGET:$APP/"
 
 echo "Setting up the machine…"
-ssh "$TARGET" "APP='$APP' PORT='$PORT' NODE_MAJOR='$NODE_MAJOR' PNPM_VERSION='$PNPM_VERSION' SERVICE='$SERVICE' sh -s" <<'REMOTE'
+ssh "$TARGET" "APP='$APP' PORT='$PORT' NODE_MAJOR='$NODE_MAJOR' PNPM_VERSION='$PNPM_VERSION' SERVICE='$SERVICE' ALLOW_TERMINALS='$ALLOW_TERMINALS' sh -s" <<'REMOTE'
 set -eu
 case "$(uname -m)" in
   aarch64) NODE_ARCH=arm64; PLUGIN_DIR=ubuntu_arm64 ;;
@@ -73,6 +76,10 @@ fi
 
 DATA="$HOME/.config/ec2-remote-access"
 mkdir -p "$DATA"
+# An update keeps the machine's terminal setting unless ALLOW_TERMINALS says otherwise.
+if [ "$ALLOW_TERMINALS" = keep ]; then
+  if grep -q -- '--allow-terminals' "/etc/systemd/system/$SERVICE.service" 2>/dev/null; then ALLOW_TERMINALS=1; else ALLOW_TERMINALS=0; fi
+fi
 sudo tee "/etc/systemd/system/$SERVICE.service" >/dev/null <<UNIT
 [Unit]
 Description=EC2 Remote Access gateway
@@ -83,7 +90,7 @@ Wants=network-online.target
 User=$(id -un)
 WorkingDirectory=$APP
 Environment=HOME=$HOME
-ExecStart=$NODE_HOME/current/bin/node $APP/out/gateway/index.js --host 127.0.0.1 --port $PORT --data-dir $DATA
+ExecStart=$NODE_HOME/current/bin/node $APP/out/gateway/index.js --host 127.0.0.1 --port $PORT --data-dir $DATA$( [ "$ALLOW_TERMINALS" = 1 ] && echo ' --allow-terminals' )
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

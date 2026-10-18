@@ -165,3 +165,32 @@ export function frequentSites(history: WebHistoryEntry[], spaceId: string, limit
   }
   return [...by.values()].sort((a, b) => b.visits - a.visits).slice(0, limit)
 }
+
+const hostname = (url: string): string => {
+  try {
+    return new URL(url.includes('://') ? url : `https://${url}`).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * The registrable part of a host, which password managers match logins by: "jira.example.com" → "example.com",
+ * "a.example.co.uk" → "example.co.uk". IP addresses and single-label hosts (localhost) stay whole.
+ */
+export function siteOf(host: string): string {
+  const h = host.toLowerCase().replace(/\.$/, '')
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || !h.includes('.')) return h
+  const parts = h.split('.')
+  const secondLevel = parts.length > 2 && parts.at(-1)!.length === 2 && /^(co|com|net|org|gov|edu|ac|or|ne)$/.test(parts.at(-2)!)
+  return parts.slice(secondLevel ? -3 : -2).join('.')
+}
+
+/** Whether a saved login (its website addresses) belongs to the page at `pageUrl`. */
+export function loginMatches(urls: string[], pageUrl: string): boolean {
+  const page = hostname(pageUrl)
+  return !!page && urls.some((u) => {
+    const h = hostname(u)
+    return !!h && siteOf(h) === siteOf(page)
+  })
+}

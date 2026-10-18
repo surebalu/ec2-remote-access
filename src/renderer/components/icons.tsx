@@ -185,6 +185,39 @@ export const Icon = {
       <rect x="9" y="2.5" width="6" height="3.5" rx="1" />
     </svg>
   ),
+  minus: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M6 12h12" />
+    </svg>
+  ),
+  /** Curved arrow back: return a pinned tab to its saved page. */
+  undo: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </svg>
+  ),
+  share: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 3v12M8 7l4-4 4 4" />
+      <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
+    </svg>
+  ),
+  /** Window with a prompt: the Terminal tab (local shells). */
+  console: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M7 9l3 3-3 3M12.5 15H17" />
+    </svg>
+  ),
+  branch: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="6" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="7" r="2" />
+      <path d="M6 8v8M18 9c0 5-6 4-11 8" />
+    </svg>
+  ),
   /** Globe: the built-in browser. */
   globe: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
@@ -229,6 +262,13 @@ export const Icon = {
     <svg {...base} className={p.className}>
       <path d="M6 3h9l4 4v14H6z" />
       <path d="M14 3v5h5M9 12h7M9 16h5" />
+    </svg>
+  ),
+  /** Easel with a squiggle: the whiteboard. */
+  board: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M7 12c1.5-3 3-3 4-1s2.5 2 4-2M9 20l3-4 3 4" />
     </svg>
   ),
   /** Page with a plus: add to a note. */

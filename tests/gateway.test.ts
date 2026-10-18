@@ -10,7 +10,7 @@ import { createGatewayHost } from '../src/gateway/host.ts'
 
 type Msg = { t: string; id?: number; result?: unknown; message?: string; channel?: string; payload?: unknown }
 
-async function start(overrides: Partial<Record<string, (...a: unknown[]) => Promise<unknown>>> = {}, staticDir?: string, resumeGraceMs?: number) {
+async function start(overrides: Partial<Record<string, (...a: unknown[]) => Promise<unknown>>> = {}, staticDir?: string, resumeGraceMs?: number, allowTerminals?: () => boolean) {
   const closed: string[] = []
   const handlers = {
     'settings:get': async () => ({ theme: 'dark' }),
@@ -23,7 +23,7 @@ async function start(overrides: Partial<Record<string, (...a: unknown[]) => Prom
     'ec2:start': async () => { throw new Error('boom') },
     ...overrides
   } as unknown as GatewayHandlers
-  const gw = createGatewayServer({ handlers, token: 'secret', staticDir, rdpTarget: async () => null, log: () => undefined, resumeGraceMs })
+  const gw = createGatewayServer({ handlers, token: 'secret', staticDir, rdpTarget: async () => null, log: () => undefined, resumeGraceMs, allowTerminals })
   const { port } = await gw.listen(0, '127.0.0.1')
   return { gw, port, closed }
 }
@@ -187,4 +187,71 @@ test('another page cannot claim sessions, and shutdown closes parked ones', asyn
   assert.deepEqual(closed, [])
   await gw.close()
   assert.deepEqual(closed, ['ssh:ssh-a'])
+})
+
+test('a paired page can neither open a shell on this computer nor see one, nor fill or open downloads', async () => {
+  let opened = false
+  const { gw, port } = await start({ 'term:open': async () => { opened = true; return {} }, 'browser:fill': async () => ['password'] })
+  const c = await client(port, 'secret')
+  assert.equal((await c.next()).t, 'hello')
+  for (const channel of ['term:open', 'term:write', 'browser:fill', 'browser:logins', 'browser:openDownload']) {
+    const r = await c.call(channel, { id: 'x', cols: 80, rows: 24 })
+    assert.equal(r.t, 'error', channel)
+    assert.match(r.message ?? '', /only available in the Mac app|Terminals from paired devices are off/)
+  }
+  assert.equal(opened, false)
+  gw.broadcast('term:event', { id: 'x', type: 'data', data: 'secret output' })
+  gw.broadcast('web:download', { name: 'a.pdf' })
+  gw.broadcast('tunnels:changed', [])
+  const m = await c.next()
+  assert.equal(m.channel, 'tunnels:changed', 'only the public event arrives')
+  c.ws.close()
+  await gw.close()
+})
+
+test('with terminals allowed, a page gets its own shells and only their output; it cannot change the permission', async () => {
+  let allowed = true
+  const closed: string[] = []
+  const saved: unknown[] = []
+  const settings: unknown[] = []
+  const { gw, port } = await start({
+    'term:open': async (req: { id: string }) => ({ shell: '/bin/zsh', integration: true, cwd: '/home/pi', id: req.id }),
+    'term:close': async (id: string) => { closed.push(id) },
+    'term:saveState': async (st: unknown) => { saved.push(st) },
+    'term:loadState': async () => ({ tabs: ['the computer\'s own layout'] }),
+    'settings:set': async (patch: unknown) => { settings.push(patch); return patch }
+  }, undefined, undefined, () => allowed)
+  const a = await client(port, 'secret')
+  const b = await client(port, 'secret')
+  assert.equal((await a.next()).t, 'hello')
+  assert.equal((await b.next()).t, 'hello')
+  assert.deepEqual(await a.call('term:available'), { t: 'result', id: 1, result: true })
+  assert.equal((await a.call('term:open', { id: 'pa', cols: 80, rows: 24 })).t, 'result')
+  // The computer's saved layout is neither read nor replaced by a paired page.
+  assert.deepEqual((await a.call('term:loadState')).result, null)
+  await a.call('term:saveState', { tabs: [] })
+  assert.deepEqual(saved, [])
+  // A page cannot widen its own access, directly or through settings.
+  assert.equal((await a.call('phone:terminals', true)).t, 'error')
+  await a.call('settings:set', { phoneTerminals: true, theme: 'dark' })
+  assert.deepEqual(settings, [{ theme: 'dark' }])
+  // Output of a shell goes only to the page that opened it; the computer's own shells reach nobody.
+  gw.broadcast('term:event', { id: 'desk', type: 'data', data: 'mac only' })
+  gw.broadcast('term:event', { id: 'pa', type: 'data', data: 'for a' })
+  gw.broadcast('tunnels:changed', [])
+  const aFirst = await a.next()
+  assert.equal(aFirst.channel, 'term:event')
+  assert.deepEqual(aFirst.payload, { id: 'pa', type: 'data', data: 'for a' }, 'its own shell, not the computer\'s')
+  assert.equal((await a.next()).channel, 'tunnels:changed')
+  const bFirst = await b.next()
+  assert.equal(bFirst.channel, 'tunnels:changed', 'the other page sees neither shell')
+  // Turning terminals off closes the shells pages opened and refuses new ones.
+  allowed = false
+  gw.closeTerminals()
+  assert.deepEqual(closed, ['pa'])
+  assert.equal((await b.call('term:open', { id: 'pb', cols: 80, rows: 24 })).t, 'error')
+  assert.deepEqual((await b.call('term:available')).result, false)
+  a.ws.close()
+  b.ws.close()
+  await gw.close()
 })

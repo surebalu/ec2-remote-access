@@ -15,7 +15,9 @@ module.exports = {
   directories: { buildResources: 'resources', output: 'dist' },
   files: ['out/**', 'package.json', '!**/*.map'],
   npmRebuild: false,
-  asarUnpack: ['node_modules/ssh2/**'],
+  // node-pty's native module and its spawn-helper must be real files for the local terminals.
+  asarUnpack: ['node_modules/ssh2/**', 'node_modules/node-pty/**'],
+  afterPack: 'build/afterPack.cjs',
   afterSign: 'build/afterSign.cjs',
   mac: {
     category: 'public.app-category.developer-tools',

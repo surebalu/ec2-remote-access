@@ -73,6 +73,35 @@ export async function listNotes(): Promise<NoteEntry[]> {
   return out.sort((a, b) => a.path.localeCompare(b.path))
 }
 
+/**
+ * Saves a PNG (a whiteboard) into the notes folder under EC2 Remote/Boards, never over an existing file, and returns
+ * its path there for an ![[embed]] (Obsidian finds embeds by file name anywhere in the vault).
+ */
+export async function saveImage(name: string, dataUrl: string): Promise<string> {
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl)
+  if (!m) throw new Error('Not a PNG image.')
+  const folder = 'EC2 Remote/Boards'
+  const stem = name.replace(/[\\/:*?"<>|#^[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Board'
+  await mkdir(join(root(), folder), { recursive: true })
+  let rel = `${folder}/${stem}.png`
+  for (let n = 2; existsSync(join(root(), rel)); n++) rel = `${folder}/${stem} ${n}.png`
+  await writeFile(join(root(), rel), Buffer.from(m[1], 'base64'))
+  return rel
+}
+
+/**
+ * Opens a note in Obsidian (obsidian://open with its full path, which Obsidian maps to the vault that holds it). Done
+ * here rather than through shell:open, which only passes web addresses.
+ */
+export async function openInObsidian(rel: string): Promise<void> {
+  const abs = notePath(root(), rel)
+  try {
+    await host().openExternal(`obsidian://open?path=${encodeURIComponent(abs)}`)
+  } catch {
+    throw new Error('Could not open Obsidian. Is it installed, and is the notes folder one of its vaults?')
+  }
+}
+
 export async function readNote(rel: string): Promise<NoteFile> {
   const abs = notePath(root(), rel)
   const [text, st] = await Promise.all([readFile(abs, 'utf8'), stat(abs)])

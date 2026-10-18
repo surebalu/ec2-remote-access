@@ -89,6 +89,8 @@ export interface PhoneAccessStatus {
   token: string
   /** Connected browsers: remote address and when they attached. */
   clients: { address: string; since: number }[]
+  /** Paired devices may open shells on this Mac (Settings.phoneTerminals). */
+  terminals: boolean
   error?: string
 }
 
@@ -165,6 +167,11 @@ export interface Settings {
   phoneAccessEnabled: boolean
   phoneAccessPort: number
   phoneAccessBind: PhoneAccessBind
+  /** Font and text size of the Notes editor and preview (see components/NotesToolbar.tsx NOTE_FONTS). */
+  notesFont?: string
+  notesFontSize?: number
+  /** Paired devices may open terminals (shells) on this Mac. Off by default; only this Mac's own window can change it. */
+  phoneTerminals?: boolean
   sshAgentSock: string
   defaultIdentityFile: string
   pemFile: string
@@ -315,8 +322,17 @@ export interface WebTab {
   url: string
   title: string
   favicon?: string
-  /** Pinned tabs sit in the favorites grid at the top of their space and survive Close all. */
+  /** Pinned tabs sit at the top of their space's list and survive Clear; ⌘W unloads them instead of closing. */
   pinned?: boolean
+  /**
+   * Favorites are shown in every space (the icon grid at the top), like Arc's. A favorite keeps the logins of its own
+   * space (`spaceId`), so a favorite from an AWS account space stays signed in to that account wherever it is opened.
+   */
+  favorite?: boolean
+  /** The page a pinned tab or favorite goes back to when it is unloaded (⌘W) or reset. */
+  homeUrl?: string
+  /** A name the user gave a pinned tab or favorite, shown instead of the page's title. */
+  name?: string
   lastActive: number
 }
 
@@ -325,6 +341,121 @@ export interface WebHistoryEntry {
   title: string
   spaceId: string
   at: number
+}
+
+/** One thing drawn on a whiteboard (components/board). Coordinates are board units; the view pans and zooms. */
+export interface BoardItem {
+  id: string
+  type: 'pen' | 'highlighter' | 'line' | 'arrow' | 'rect' | 'ellipse' | 'diamond' | 'text' | 'note' | 'image'
+  /** Shapes, text, notes, images: the box. Pen, highlighter, line, arrow: the bounding box of `points`. */
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Pen and highlighter: [x, y, pressure]; line and arrow: start and end. Absolute board coordinates. */
+  points?: number[][]
+  /** A colour, 'ink' (follows light/dark), or 'gradient'. */
+  color: string
+  width: number
+  fill?: 'none' | 'tint' | 'solid'
+  dashed?: boolean
+  text?: string
+  fontSize?: number
+  /** Image items: a data: URL. */
+  src?: string
+}
+
+export interface Board {
+  id: string
+  name: string
+  items: BoardItem[]
+  background: 'dots' | 'grid' | 'plain'
+  view: { x: number; y: number; zoom: number }
+  updatedAt: number
+}
+
+export interface BoardSummary {
+  id: string
+  name: string
+  updatedAt: number
+  items: number
+}
+
+/** Opens a shell on this computer for a pane of the Terminal tab (main/localterm.ts). */
+export interface LocalTermOpen {
+  /** The pane id; also the session id in later term:* calls and events. */
+  id: string
+  cols: number
+  rows: number
+  cwd?: string
+  /** Added to the environment (AWS_PROFILE for an AWS account tab). */
+  env?: Record<string, string>
+}
+
+export interface LocalTermInfo {
+  shell: string
+  /** Shell integration is loaded: prompts, commands and exit codes are marked (zsh). */
+  integration: boolean
+  cwd: string
+}
+
+export type LocalTermEvent = { id: string; type: 'data'; data: string } | { id: string; type: 'exit'; code: number }
+
+/** A Terminal tab's panes: one pane, or panes side by side ('row') or stacked ('column'), with their shares. */
+export type PaneNode = { type: 'pane'; id: string } | { type: 'split'; dir: 'row' | 'column'; children: PaneNode[]; sizes: number[] }
+
+export interface TermTabState {
+  id: string
+  /** A name the user gave the tab; otherwise it shows the running command or the folder. */
+  title?: string
+  color?: AccentColor
+  /** AWS profile the tab's shells start with (AWS_PROFILE). */
+  profile?: string
+  root: PaneNode
+  activePane: string
+  /** A pane shown alone (⌘⇧↵) until restored. */
+  maximized?: string
+}
+
+/** The Terminal tab's layout, kept between runs (terminal.json beside the settings); shells start again in `cwds`. */
+export interface TerminalState {
+  tabs: TermTabState[]
+  activeTab: string
+  cwds: Record<string, string>
+  /** 'editor' = Warp-style input box at the bottom of each pane; 'shell' = type straight into the shell. */
+  input?: 'editor' | 'shell'
+  /** Notify when a command that ran 10 s or more finishes while you are elsewhere. */
+  notify?: boolean
+  /** Tabs down the left side (default) or across the top, and the side list's width in px. */
+  tabBar?: 'vertical' | 'horizontal'
+  tabBarWidth?: number
+}
+
+/** A 1Password login as the browser's Fill menu lists it: no secrets, only what identifies it. */
+export interface WebLogin {
+  id: string
+  /** The 1Password account (user id) the item is in. */
+  account: string
+  accountName: string
+  title: string
+  username: string
+  vault: string
+  urls: string[]
+  /** Saved for the site of the page it was asked for. */
+  matches: boolean
+}
+
+/** A file the browser downloaded (always into the Downloads folder). */
+export interface WebDownload {
+  id: string
+  name: string
+  path: string
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted'
+  received: number
+  total: number
+  at: number
+  /** The file's Finder icon as a data URL, once it has finished. */
+  icon?: string
 }
 
 /** Everything the browser keeps between runs (main/browser.ts, browser.json beside the settings). */
@@ -338,6 +469,12 @@ export interface BrowserState {
   /** Last favicon seen per host, for the start page's frequent sites. */
   favicons?: Record<string, string>
   sidebarHidden?: boolean
+  /** Recent downloads, newest first. */
+  downloads?: WebDownload[]
+  /** Page zoom for every page in the browser (1 = 100%). */
+  zoom?: number
+  /** Sidebar width in px when the user dragged its edge; unset = the default. */
+  sidebarWidth?: number
 }
 
 /** Where notes live (main/notes.ts) and how that was decided. */

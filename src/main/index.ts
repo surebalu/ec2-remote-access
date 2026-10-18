@@ -6,6 +6,7 @@ import { electronHost } from './electronHost'
 import { closeAllSsh } from './ssh/session'
 import { closeAllSftp } from './sftp/session'
 import { closeAllTunnels } from './tunnels'
+import { closeAllLocal } from './localterm'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
@@ -94,6 +95,7 @@ app.on('before-quit', (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
+  closeAllLocal()
   Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess()])
     .then(() => stopProxy())
     .catch(() => undefined)
