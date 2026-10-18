@@ -211,8 +211,8 @@ export default function InstanceTable(): ReactElement {
                     )}
                     <span className="group-count">{g.rows.length} host{g.rows.length === 1 ? '' : 's'}</span>
                     <span className="flex-1" />
-                    <span className="mono muted text-[10px]">
-                      {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} with route
+                    <span className="muted text-[10.5px]" title="Hosts with a connection route right now (SSM or a reachable address)">
+                      {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} reachable
                     </span>
                   </div>
                 </td>

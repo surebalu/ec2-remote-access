@@ -264,6 +264,26 @@ export const Icon = {
       <path d="M14 3v5h5M9 12h7M9 16h5" />
     </svg>
   ),
+  /** Phone with a tablet behind it: paired devices. */
+  phone: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+      <path d="M11 18.5h2" />
+    </svg>
+  ),
+  /** Circled i: about and information. */
+  info: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5.5M12 7.6v.1" />
+    </svg>
+  ),
+  /** Check in a circle: a requirement that is met. */
+  check: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </svg>
+  ),
   /** Easel with a squiggle: the whiteboard. */
   board: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

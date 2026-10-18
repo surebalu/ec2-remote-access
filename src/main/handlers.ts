@@ -27,6 +27,7 @@ import { hostHealth } from './aws/health'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
+import { version as APP_VERSION } from '../../package.json'
 
 type Handler<K extends keyof IpcApi> = (...args: Parameters<IpcApi[K]>) => ReturnType<IpcApi[K]>
 export type Handlers = { [K in keyof IpcApi]: Handler<K> }
@@ -185,6 +186,17 @@ export const handlers: Handlers = {
     awsCli: getSettings().awsCliPath || findBinary('aws'),
     windowsApp: hasWindowsApp()
   }),
+  'app:about': async () => ({
+    version: APP_VERSION,
+    electron: process.versions.electron ?? null,
+    chrome: process.versions.chrome ?? null,
+    node: process.versions.node,
+    platform: process.platform,
+    arch: process.arch,
+    dataDir: host().userDataDir(),
+    logsDir: host().logsDir()
+  }),
+  'app:reveal': async (which) => host().revealPath(which === 'logs' ? host().logsDir() : host().userDataDir()),
   'phone:status': async () => phoneStatus(),
   'phone:configure': (patch) => configurePhoneAccess(patch),
   'phone:terminals': async (allow) => setPhoneTerminals(allow),

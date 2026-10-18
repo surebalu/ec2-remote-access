@@ -101,6 +101,8 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'sso:loginSession': return { flowId: 'flow-1', userCode: 'ABCD-EFGH', verificationUri: 'https://device.sso.example/', verificationUriComplete: 'https://device.sso.example/?user_code=ABCD-EFGH', expiresIn: 600 }
     case 'sso:cancel': return
     case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', awsCli: null, windowsApp: false }
+    case 'app:about': return { version: '1.0.0', electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: 'darwin', arch: 'arm64', dataDir: '/fixture/data', logsDir: '/fixture/data/logs' }
+    case 'app:reveal': return
     case 'diag:log': return { path: '/fixture/main.log', text: '' }
     case 'phone:status': return { enabled: true, running: true, port: 8321, bind: 'https', tailscaleAvailable: true, tailscaleHostname: 'fixture-mac.tail1234.ts.net', tailscaleHttps: true, urls: ['https://fixture-mac.tail1234.ts.net/#token=fixture-token'], token: 'fixture-token', clients: [{ address: '100.101.102.5', since: Date.now() - 120000 }] }
     case 'ssh:open':
@@ -181,7 +183,8 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
   win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
   win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
-  const js = (code) => win.webContents.executeJavaScript(code)
+  // Names the script when it throws; Electron's own error says only that "a script" failed.
+  const js = (code) => win.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
   const until = async (code) => {
     for (let n = 0; n < 100; n++) { if (await js(code)) return; await new Promise((r) => setTimeout(r, 30)) }
     throw new Error(`Timed out: ${code}`)
@@ -368,7 +371,9 @@ app.whenReady().then(async () => {
     shellScenario = false
 
     // Terminal colour scheme applies live to the open SSH tab and persists through settings:set.
-    await js(`document.querySelector('button[title="Settings"]').click()`)
+    await js(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await until(`!!document.querySelector('.settings-nav [data-section="terminal"]')`)
+    await js(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
     await until(`!!document.querySelector('[role="dialog"] select option[value="dracula"]')`)
     await js(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="dracula"]').closest('select'); sel.value = 'dracula'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
     await until(`getComputedStyle(document.querySelector('.xterm').parentElement).backgroundColor === 'rgb(40, 42, 54)'`)
@@ -478,8 +483,19 @@ app.whenReady().then(async () => {
     await key('Escape')
     await until(`!document.querySelector('[role="dialog"]')`)
     await click('Hosts')
-    await js(`document.querySelector('button[title="Settings"]').click()`)
-    await until(`!!document.querySelector('[role="dialog"]')`)
+    await js(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await until(`!!document.querySelector('.settings-nav [data-section="phone"]')`)
+    // Every section opens from the sidebar.
+    for (const id of ['general', 'accounts', 'ssh', 'notes', 'requirements', 'about']) {
+      await js(`document.querySelector('.settings-nav [data-section="${id}"]').click()`)
+      await until(`document.querySelector('.settings-nav-item.on')?.dataset.section === '${id}' && document.querySelectorAll('.settings-body .set-card').length > 0`)
+    }
+    await until(`document.querySelector('.settings-body').textContent.includes('No analytics')`)
+    await screenshot('settings-about.png')
+    await js(`document.querySelector('.settings-nav [data-section="general"]').click()`)
+    await until(`!!document.querySelector('.settings-body [role="switch"]')`)
+    await screenshot('settings-general.png')
+    await js(`document.querySelector('.settings-nav [data-section="phone"]').click()`)
     await until(`document.body.textContent.includes('Let my phone use this app')`)
     await until(`!!document.querySelector('img[alt="QR code for the phone link"]')`)
     assert.equal(await js(`document.body.textContent.includes('fixture-token')`), false, 'token must be masked in the settings dialog')
@@ -612,7 +628,7 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('.session-grid')`)
     assert.equal(await js(`document.querySelectorAll('.session-grid > .session-pane:not(.hidden)').length`), sessionCount)
     assert.equal(await js(`!!document.querySelector('.session-grid .notes-tab:not(.hidden)') && !document.querySelector('.session-grid .notes-tab').closest('.session-pane').classList.contains('hidden')`), false, 'no Notes tile')
-    assert.match(await js(`document.querySelector('button[title^="All sessions"]').textContent`), new RegExp(`All\\s*${sessionCount}$`))
+    assert.equal(await js(`document.querySelector('button[title^="All sessions"] .rail-badge').textContent`), String(sessionCount), 'the Overview badge counts sessions only')
     await key('0', { metaKey: true })
     await until(`!document.querySelector('.session-grid')`)
     // The host's note beside its terminal, and output added to it.
@@ -946,7 +962,7 @@ app.whenReady().then(async () => {
     // ⌘1 belongs to the browser's tabs here; ⌘⇧[ goes to the previous app tab (Hosts).
     await bkey('{', { shiftKey: true })
     await buntil(`!document.querySelector('.browser') || document.querySelector('.browser').getClientRects().length === 0`, 'hosts shown')
-    await bjs(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('Browser')).click()`)
+    await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
     await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
     assert.ok(guestAt('/two') && guestAt('/two').id === before, 'page survives switching app tabs')
     // Favorites: page one becomes a favorite, shown in every space and keeping General's logins; ⌘W only unloads it.

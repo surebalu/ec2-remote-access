@@ -478,6 +478,18 @@ export interface BrowserState {
 }
 
 /** Where notes live (main/notes.ts) and how that was decided. */
+/** What Settings → About shows: the build and where the app keeps its data. */
+export interface AppAbout {
+  version: string
+  electron: string | null
+  chrome: string | null
+  node: string
+  platform: string
+  arch: string
+  dataDir: string
+  logsDir: string
+}
+
 export interface NotesInfo {
   dir: string
   source: 'setting' | 'obsidian' | 'default'
