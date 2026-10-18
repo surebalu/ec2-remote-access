@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { SshOpenRequest, SshSessionInfo, SshEvent } from '@shared/types'
+import type { HostShell, SshOpenRequest, SshSessionInfo, SshEvent } from '@shared/types'
 import { findInstance } from '../aws/inventory'
 import { decideRoute, defaultSshUser, defaultIdentityFile, defaultInitCommand, persistentShell } from '../connect/route'
 import type { Instance } from '@shared/types'
@@ -18,7 +18,7 @@ import { findBinary, shellQuote, uid } from '../util'
 import { getCredential } from '../creds'
 import { lookupClient, registerClient, unregisterClient } from './clients'
 import { startRecorder, type Recorder } from './recorder'
-import { attachCommand, detachedShells, isShellName, killCommand, parseProbe, probeCommand, shellNameFor, type AttachPlan } from './persist'
+import { attachCommand, cleanLabel, detachedShells, historyCommand, hostShells, isShellName, killCommand, labelCommand, newShellName, parseProbe, probeCommand, shellNameFor, switchCommand, type AttachPlan } from './persist'
 
 interface Live {
   info: SshSessionInfo
@@ -30,6 +30,11 @@ interface Live {
   recorder?: Recorder | null
   /** The tmux shell this session shows, when the shell is persistent (./persist). */
   shell?: string
+  /** "Run after connect" for this session, typed into each new shell it starts. */
+  init?: string
+  /** Terminal size, for shells started or switched to later. */
+  cols?: number
+  rows?: number
 }
 
 const sessions = new Map<string, Live>()
@@ -224,13 +229,15 @@ async function planShell(live: Live, req: SshOpenRequest): Promise<AttachPlan | 
     return null
   }
   const own = probe.sessions.find((x) => x.name === name)
-  if (own) emit({ sessionId, type: 'status', message: 'Resuming the shell that kept running on the host' })
+  if (own) emit({ sessionId, type: 'status', message: own.label ? `Resuming "${own.label}", which kept running on the host` : 'Resuming the shell that kept running on the host' })
   else if (req.shellResume) emit({ sessionId, type: 'status', message: 'The earlier shell has ended on the host (it exited or the host restarted); starting a new one' })
   live.shell = name
   live.info.persistent = true
   live.info.resumed = !!own
   live.info.detached = own ? [] : detachedShells(probe, name)
-  return { name, create: !own, startServer: probe.sessions.length === 0, history: !!own && !!req.shellHistory, cols: req.cols, rows: req.rows }
+  live.info.shellLabel = own ? own.label : cleanLabel(req.shellLabel)
+  live.info.shellName = name
+  return { name, create: !own, startServer: probe.sessions.length === 0, label: req.shellLabel, history: !!own && !!req.shellHistory, cols: req.cols, rows: req.rows }
 }
 
 /** Opens the interactive shell channel on a ready client and wires its output to the renderer. */
@@ -272,8 +279,65 @@ async function openShell(live: Live, req: SshOpenRequest): Promise<void> {
   })
   // sshd (or tmux) queues stdin until the shell reads it, so this runs as the first command of the session. A resumed
   // shell already had it, and typing it again could land in whatever program is running there now.
-  const init = !plan || plan.create ? defaultInitCommand(inst, req.initCommand) : ''
-  if (init) channel.write(init.replace(/\r?\n/g, '\n').replace(/\n?$/, '\n'))
+  live.init = defaultInitCommand(inst, req.initCommand)
+  live.cols = req.cols
+  live.rows = req.rows
+  if (live.init && (!plan || plan.create)) channel.write(typedLine(live.init))
+}
+
+function typedLine(cmd: string): string {
+  return cmd.replace(/\r?\n/g, '\n').replace(/\n?$/, '\n')
+}
+
+/** The persistent shells on this session's host, for the tab's session list. */
+export async function listShells(sessionId: string): Promise<HostShell[]> {
+  const live = requireShell(sessionId)
+  const probe = parseProbe((await execOutput(live.client, probeCommand(), 10_000)) ?? '')
+  if (!probe?.available) throw new Error('Could not list the shells on this host.')
+  return hostShells(probe, live.shell)
+}
+
+function requireShell(sessionId: string): Live & { shell: string } {
+  const live = sessions.get(sessionId)
+  if (!live) throw new Error('This tab is not connected. Reconnect it first.')
+  if (!live.shell) throw new Error(live.channel ? 'This tab is not running a persistent shell.' : 'This tab is still connecting. Try again in a moment.')
+  return live as Live & { shell: string }
+}
+
+/**
+ * Shows another of the host's shells in this tab, or a new one (`target` null), by moving the tab's tmux client on the
+ * connection it already has: instant, and the shell it leaves keeps running (unless `endPrevious`, which the
+ * Resume banner uses to drop the new shell a tab started before it was offered the old one). The terminal is cleared
+ * and refilled with the target's earlier output first, so its scrollback always belongs to the shell on screen.
+ */
+export async function switchShell(sessionId: string, target: string | null, opts: { endPrevious?: boolean; label?: string } = {}): Promise<{ name: string; label: string }> {
+  const live = requireShell(sessionId)
+  const to = target ?? newShellName(sessionId)
+  if (!isShellName(to)) throw new Error('Unknown shell.')
+  if (to === live.shell) return { name: to, label: '' }
+  const rows = live.rows ?? 24
+  const history = target ? ((await execOutput(live.client, historyCommand(to), 10_000)) ?? '') : ''
+  if (sessions.get(sessionId) !== live) throw new Error('cancelled')
+  // Clear screen and scrollback, replay, then push the replay above the screen tmux is about to redraw.
+  emit({ sessionId, type: 'data', data: `\x1b[H\x1b[2J\x1b[3J${history.replace(/\r?\n/g, '\r\n')}${history ? '\r\n'.repeat(rows) : ''}` })
+  const out = (await execOutput(live.client, switchCommand({ from: live.shell, to, create: !target, label: opts.label, cols: live.cols ?? 80, rows }), 10_000)) ?? ''
+  if (!out.includes('ec2ra:switched')) {
+    throw new Error(out.includes('ec2ra:gone') ? 'That session has ended on the host.' : 'Could not switch sessions. Reconnect the tab and try again.')
+  }
+  const previous = live.shell
+  live.shell = to
+  if (!target && live.init) live.channel?.write(typedLine(live.init))
+  if (opts.endPrevious) await execOutput(live.client, killCommand(previous), 5000)
+  return { name: to, label: cleanLabel(/^ec2ra:label (.*)$/m.exec(out)?.[1]) }
+}
+
+/** Names one of the host's shells, or clears its name. */
+export async function renameShell(sessionId: string, name: string, label: string): Promise<string> {
+  const live = requireShell(sessionId)
+  if (!isShellName(name)) throw new Error('Unknown session.')
+  const out = await execOutput(live.client, labelCommand(name, label), 10_000)
+  if (!out?.includes('ec2ra:ok')) throw new Error('Could not rename that session; it may have ended.')
+  return cleanLabel(label)
 }
 
 export function writeSsh(sessionId: string, data: string): void {
@@ -281,7 +345,11 @@ export function writeSsh(sessionId: string, data: string): void {
 }
 
 export function resizeSsh(sessionId: string, cols: number, rows: number): void {
-  sessions.get(sessionId)?.channel?.setWindow(rows, cols, 0, 0)
+  const live = sessions.get(sessionId)
+  if (!live) return
+  live.cols = cols
+  live.rows = rows
+  live.channel?.setWindow(rows, cols, 0, 0)
 }
 
 export async function closeSsh(sessionId: string, opts: { endShell?: boolean } = {}): Promise<void> {

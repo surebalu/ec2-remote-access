@@ -572,3 +572,43 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .m-divider-toggle { position: absolute; left: 0; top: 50%; z-index: 5; display: flex; align-items: center; justify-content: center; width: 22px; height: 64px; margin-top: -32px; border: 1px solid var(--border-strong); border-left: 0; border-radius: 0 10px 10px 0; background: var(--panel); color: var(--text-2); box-shadow: var(--shadow); opacity: .85; }
 .m-divider-toggle:active { background: var(--panel-2); }
 .m-divider-toggle svg { width: 16px; height: 16px; }
+
+/* Session names and the per-host session list (components/Shells.tsx). */
+.shell-chip { display: inline-block; flex-shrink: 0; max-width: 140px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 600; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.shell-list { display: flex; flex-direction: column; }
+.shell-list.menu { max-height: min(70vh, 560px); overflow-y: auto; }
+.shell-item { padding: 7px 10px 8px 9px; border-left: 3px solid transparent; cursor: pointer; }
+.shell-item:hover { background: var(--accent-soft); }
+.shell-item.current { border-left-color: var(--accent); background: var(--panel-2); cursor: default; }
+.shell-line1 { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.shell-num { flex-shrink: 0; width: 16px; text-align: center; color: var(--muted); font: 600 11px/1 'SF Mono', ui-monospace, monospace; }
+.shell-item.current .shell-num { color: var(--accent); }
+.shell-name { min-width: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.shell-name.unnamed { color: var(--muted); font-style: italic; font-weight: 400; }
+.shell-name-input { flex: 1; min-width: 0; height: 24px !important; font-size: 12.5px; }
+.shell-tag { flex-shrink: 0; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 9.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.shell-tag.elsewhere { background: var(--warn-soft); color: var(--warn); }
+.shell-line2 { margin: 2px 0 0 22px; overflow: hidden; color: var(--text-2); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.shell-preview { margin: 4px 0 0 22px; padding: 3px 7px; overflow: hidden; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--muted); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
+.shell-footer { margin-top: 4px; padding: 6px 10px 4px; border-top: 1px solid var(--border); }
+.shell-new-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 2px; color: var(--accent); font-size: 12px; font-weight: 600; }
+.shell-new { display: flex; gap: 6px; }
+.shell-new .input { flex: 1; min-width: 0; }
+.shell-hint { padding: 4px 2px 2px; font-size: 10px; }
+.shell-empty { padding: 10px 12px; }
+.shell-list.sheet .shell-item { padding: 10px 10px 10px 9px; border-radius: 10px; }
+.shell-list.sheet .shell-name { font-size: 16px; }
+.shell-list.sheet .shell-line2, .shell-list.sheet .shell-preview { margin-left: 24px; font-size: 12.5px; }
+.shell-list.sheet .btn-icon { width: 34px; height: 34px; }
+.shell-list.sheet .shell-new-btn { padding: 10px 2px; font-size: 16px; }
+.shell-list.sheet .shell-hint { font-size: 12px; }
+/* "Name this session" on a new unnamed shell (Shells.tsx NameBar). */
+.name-bar { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.name-bar .input { width: 220px; height: 24px !important; font-size: 12px; }
+.name-bar-label { font-weight: 600; white-space: nowrap; }
+.name-bar-hint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.name-bar.mobile { padding: 8px 12px; background: var(--accent-soft); font-size: 13px; }
+.name-bar.mobile .name-bar-label { display: none; }
+.name-bar.mobile .input { flex: 1; width: auto; min-width: 0; height: 34px !important; }
+.name-bar.mobile .btn-sm { height: 32px; }
+.session-grid .name-bar { display: none; }

@@ -185,6 +185,13 @@ export const Icon = {
       <rect x="9" y="2.5" width="6" height="3.5" rx="1" />
     </svg>
   ),
+  /** Window with a plus: open in a new tab. */
+  openTab: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M12 9v6M9 12h6" />
+    </svg>
+  ),
   /** Two sheets: copy. */
   copy: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

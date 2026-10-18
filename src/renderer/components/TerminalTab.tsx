@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
-import type { DetachedShell, Snippet } from '@shared/types'
+import type { DetachedShell, HostShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
 import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
@@ -17,6 +17,7 @@ import KeyBar from './mobile/KeyBar'
 import { applyStickyMods, keySequence, type StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
 import { CopySheet, PasteSheet } from './mobile/ClipboardSheets'
+import { DetachedShells, NameBar, ShellList } from './Shells'
 
 /** Sends keystrokes to this session, or to every connected SSH pane of the split while broadcasting. */
 function writeInput(fromId: string, data: string): void {
@@ -65,38 +66,6 @@ function bufferText(term: Terminal): string {
   return lines.join('\n')
 }
 
-function idleText(sec: number | null): string {
-  if (sec === null) return ''
-  if (sec < 90) return 'idle just now'
-  if (sec < 5400) return `idle ${Math.round(sec / 60)} min`
-  if (sec < 172_800) return `idle ${Math.round(sec / 3600)} h`
-  return `idle ${Math.round(sec / 86_400)} days`
-}
-
-/** Persistent shells on the host that no tab shows (the app quit, a phone page was lost, a Detach), offered to resume. */
-function DetachedShells({ shells, mobile, onResume, onEnd, onDismiss }: { shells: DetachedShell[]; mobile: boolean; onResume: (name: string) => void; onEnd: (name: string) => void; onDismiss: () => void }): ReactElement {
-  return (
-    <div className={mobile ? 'm-shells' : 'shells-bar panel border-b px-2 py-1 text-[11px]'} style={mobile ? undefined : { borderColor: 'var(--border)' }}>
-      <div className="flex items-center gap-1.5">
-        <Icon.layers className="muted shrink-0" />
-        <span className="min-w-0 flex-1">{shells.length === 1 ? 'A shell from an earlier session is still running on this host.' : `${shells.length} shells from earlier sessions are still running on this host.`} Resume replaces this new one.</span>
-        <button className="btn btn-ghost btn-sm btn-icon" aria-label="Dismiss" title="Dismiss" onClick={onDismiss}><Icon.x /></button>
-      </div>
-      {shells.slice(0, 5).map((d) => (
-        <div key={d.name} className="shells-row flex items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate">
-            <span className="mono">{d.command || 'shell'}</span>
-            {d.path && <span className="muted"> in <span className="mono">{d.path}</span></span>}
-            {d.idleSec !== null && <span className="muted"> · {idleText(d.idleSec)}</span>}
-          </span>
-          <button className="btn btn-primary btn-sm" onClick={() => onResume(d.name)}>Resume</button>
-          <button className="btn btn-sm" title="End this shell on the host" onClick={() => onEnd(d.name)}>End</button>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 const SEARCH_DECOR = { matchBackground: '#f5a62366', activeMatchBackground: '#f5a623', matchOverviewRuler: '#f5a623', activeMatchColorOverviewRuler: '#f5a623' }
 
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -108,18 +77,23 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const snippetBtn = useRef<HTMLButtonElement>(null)
   const splitBtn = useRef<HTMLButtonElement>(null)
   const reconnectRef = useRef<() => void>(() => undefined)
-  const adoptRef = useRef<(name: string) => void>(() => undefined)
   /**
-   * The tmux shell this tab shows (undefined = its own, named after the tab) and whether it has shown it yet: a
-   * reconnect then resumes it, and taking over another one prints that shell's earlier output first.
+   * The tmux shell this tab shows (undefined = its own, named after the tab) and whether it has shown it yet, so a
+   * reconnect resumes that shell and can say when it has ended.
    */
-  const shellRef = useRef<{ name?: string; shown: boolean; history: boolean }>({ shown: false, history: false })
+  const shellRef = useRef<{ name?: string; shown: boolean }>({ name: tab.request?.shellName, shown: false })
   const [detached, setDetached] = useState<DetachedShell[]>([])
+  /** The tab's shell is brand new and unnamed: offer the name field. */
+  const [namePrompt, setNamePrompt] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [hits, setHits] = useState<{ index: number; count: number } | null>(null)
-  const [menu, setMenu] = useState<'snippets' | 'split' | null>(null)
+  const [menu, setMenu] = useState<'snippets' | 'split' | 'shells' | null>(null)
+  const shellsBtn = useRef<HTMLButtonElement>(null)
+  /** The host's persistent shells for the session list (null while loading). */
+  const [shells, setShells] = useState<HostShell[] | null>(null)
+  const [shellSheet, setShellSheet] = useState(false)
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
   const themeId = useStore((s) => s.settings?.terminalTheme)
@@ -206,31 +180,32 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     })
     ro.observe(el)
 
-    /** 'retry' reconnects (to the same shell when it is persistent); 'adopt' swaps in a shell left running on the host. */
-    const connect = async (mode: 'open' | 'retry' | 'adopt' = 'open'): Promise<void> => {
+    /** `retry` reconnects, to the same shell when it is persistent. */
+    const connect = async (retry = false): Promise<void> => {
       if (opening || disposed) return
-      const retry = mode !== 'open'
       opening = true
       opened = false
       updateTab(id, { status: 'connecting', message: retry ? 'Reconnecting…' : 'Connecting…' })
       try {
         if (retry) {
           closingForRetry = true
-          // Taking over another shell ends the one this tab just started; a plain reconnect leaves it to be resumed.
-          await window.api.invoke('ssh:close', id, { endShell: mode === 'adopt' })
+          await window.api.invoke('ssh:close', id)
           closingForRetry = false
           if (disposed) return
-          term.writeln(mode === 'adopt' ? '\r\n\x1b[90m──── Switching to the shell left running on the host ────\x1b[0m' : '\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
+          term.writeln('\r\n\x1b[90m──── Reconnecting ────\x1b[0m')
         }
         // A reused connection belongs to the tab that lent it; a reconnect logs in on its own.
         const request = retry ? { ...tab.request!, reuseSessionId: undefined } : tab.request!
         const sh = shellRef.current
-        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown, shellHistory: sh.history })
+        const info = await window.api.invoke('ssh:open', { ...request, sessionId: id, cols: term.cols, rows: term.rows, shellName: sh.name, shellResume: sh.shown,
+          // Only the first connect names a new shell or replays the history of one opened from the session list.
+          shellLabel: retry ? undefined : request.shellLabel, shellHistory: !retry && !!request.shellHistory })
         if (disposed) return
         opened = true
-        if (info.persistent) shellRef.current = { name: sh.name, shown: true, history: false }
+        if (info.persistent) shellRef.current = { name: info.shellName ?? sh.name, shown: true }
         setDetached(info.detached ?? [])
-        updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent })
+        setNamePrompt(!!info.persistent && !info.resumed && !info.shellLabel)
+        updateTab(id, { status: 'connected', route: info.route, message: `${info.user}@${info.host} via ${info.route}`, logFile: info.logFile, persistent: !!info.persistent, shellLabel: info.shellLabel || undefined })
         if (useStore.getState().activeTab === id) term.focus()
       } catch (error) {
         const e = error as Error
@@ -241,12 +216,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         toast('error', e.message)
       } finally { opening = false; closingForRetry = false }
     }
-    reconnectRef.current = () => void connect('retry')
-    adoptRef.current = (name) => {
-      setDetached([])
-      shellRef.current = { name, shown: false, history: true }
-      void connect('adopt')
-    }
+    reconnectRef.current = () => void connect(true)
     void connect()
 
     return () => {
@@ -392,10 +362,88 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       (e: Error) => toast('error', e.message)
     )
   }
+  /** The banner's Resume: switch to the shell left running, in place, and end the new one this tab had just started. */
+  const resumeShell = (name: string): void => {
+    setDetached([])
+    setNamePrompt(false)
+    window.api.invoke('ssh:switchShell', tab.id, name, { endPrevious: true }).then(
+      (r) => {
+        shellRef.current = { name: r.name, shown: true }
+        updateTab(tab.id, { shellLabel: r.label || undefined })
+        termRef.current?.focus()
+      },
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const saveSessionName = (label: string): void => {
+    const name = shellRef.current.name
+    setNamePrompt(false)
+    termRef.current?.focus()
+    if (!name || !label.trim()) return
+    window.api.invoke('ssh:renameShell', tab.id, name, label).then(
+      (stored) => updateTab(tab.id, { shellLabel: stored || undefined }),
+      (e: Error) => toast('error', e.message)
+    )
+  }
   const shellsBar = detached.length > 0 && (
-    <DetachedShells shells={detached} mobile={mobile} onResume={(name) => adoptRef.current(name)} onEnd={endShell} onDismiss={() => setDetached([])} />
+    <DetachedShells shells={detached} mobile={mobile} onResume={resumeShell} onEnd={endShell} onDismiss={() => setDetached([])} />
   )
-  const canDetach = !!tab.persistent && !disconnected
+  // Only once connected: while a reconnect is under way the host's shells cannot be reached yet.
+  const canDetach = !!tab.persistent && tab.status === 'connected'
+  const loadShells = (): void => {
+    setShells(null)
+    window.api.invoke('ssh:listShells', tab.id).then(setShells, (e: Error) => {
+      toast('error', e.message)
+      setMenu(null)
+      setShellSheet(false)
+    })
+  }
+  const takeOver = (sh: HostShell): boolean =>
+    !sh.attached || sh.current || window.confirm(`"${sh.label || 'That session'}" is open in another tab or device. Show it here instead? It will close there.`)
+  /** Shows another shell in this tab (null = a new one, named `label`); the shell it leaves keeps running on the host. */
+  const switchShell = (sh: HostShell | null, label?: string): void => {
+    if (sh?.current || (sh && !takeOver(sh))) return
+    setMenu(null)
+    setShellSheet(false)
+    setNamePrompt(false)
+    window.api.invoke('ssh:switchShell', tab.id, sh?.name ?? null, { label }).then(
+      (r) => {
+        shellRef.current = { name: r.name, shown: true }
+        updateTab(tab.id, { shellLabel: r.label || undefined })
+        setDetached([])
+        termRef.current?.focus()
+      },
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const renameShell = (sh: HostShell, label: string): void => {
+    window.api.invoke('ssh:renameShell', tab.id, sh.name, label).then(
+      (stored) => {
+        setShells((list) => list?.map((x) => (x.name === sh.name ? { ...x, label: stored } : x)) ?? null)
+        if (sh.current) {
+          updateTab(tab.id, { shellLabel: stored || undefined })
+          setNamePrompt(false)
+        }
+      },
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  /** Opens a shell in a tab of its own (on this tab's connection), e.g. to keep "debug" and "indexing" side by side. */
+  const openShellInTab = (sh: HostShell): void => {
+    if (!takeOver(sh)) return
+    setMenu(null)
+    setShellSheet(false)
+    useStore.getState().openShellTab(tab.id, sh)
+  }
+  const endOtherShell = (sh: HostShell): void => {
+    window.api.invoke('ssh:endShell', tab.id, sh.name).then(
+      () => setShells((list) => list?.filter((x) => x.name !== sh.name) ?? null),
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  const shellList = (variant: 'menu' | 'sheet'): ReactElement => (
+    <ShellList shells={shells} variant={variant} onSwitch={(sh) => switchShell(sh)} onNew={(label) => switchShell(null, label)} onRename={renameShell} onOpenInTab={openShellInTab} onEnd={endOtherShell} />
+  )
   const detach = (): void => void useStore.getState().closeTab(tab.id, { detach: true })
 
   if (mobile) {
@@ -408,6 +456,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           </div>
         )}
         {shellsBar}
+        {namePrompt && canDetach && <NameBar mobile onSave={saveSessionName} onDismiss={() => setNamePrompt(false)} />}
         <div ref={ref} className="m-term min-h-0 min-w-0 flex-1" style={{ background }} />
         <KeyBar
           mods={mods}
@@ -420,6 +469,11 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         />
         {pasteBox !== null && <PasteSheet initial={pasteBox} action="Paste" onSend={sendPasteBox} onClose={() => setPasteBox(null)} />}
         {copyText !== null && <CopySheet text={copyText} onClose={() => setCopyText(null)} />}
+        {shellSheet && (
+          <Sheet title="Sessions on this host" onClose={() => setShellSheet(false)}>
+            {shellList('sheet')}
+          </Sheet>
+        )}
         {mobileMenu && (
           <Sheet title={tab.title} subtitle={tab.message} onClose={() => setMobileMenu(false)}>
             <SheetItem icon={<Icon.clipboard />} onClick={() => { setMobileMenu(false); paste() }}>Paste</SheetItem>
@@ -437,6 +491,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
             </div>
             {disconnected && <SheetItem icon={<Icon.refresh />} onClick={() => { setMobileMenu(false); reconnectRef.current() }}>Reconnect</SheetItem>}
             <SheetItem icon={<Icon.download />} onClick={() => { setMobileMenu(false); saveOutput() }}>Save output as text</SheetItem>
+            {canDetach && <SheetItem icon={<Icon.layers />} onClick={() => { setMobileMenu(false); setShellSheet(true); loadShells() }}>Sessions on this host…</SheetItem>}
             {canDetach && <SheetItem icon={<Icon.layers />} onClick={() => { setMobileMenu(false); detach() }}>Detach (leave the shell running)</SheetItem>}
             <SheetItem icon={<Icon.x />} danger onClick={() => { setMobileMenu(false); void useStore.getState().closeTab(tab.id) }}>{disconnected ? 'Close' : canDetach ? 'Disconnect and end the shell' : 'Disconnect'}</SheetItem>
           </Sheet>
@@ -484,6 +539,11 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <Icon.panelRight filled={paneOpen} />
         </button>
         {canDetach && (
+          <button ref={shellsBtn} className={`btn btn-sm ${menu === 'shells' ? 'on' : ''}`} title="Sessions kept running on this host (tmux): switch this tab between them; the others keep running" onMouseDown={(e) => e.preventDefault()} onClick={() => { if (menu === 'shells') setMenu(null); else { setMenu('shells'); loadShells() } }}>
+            <Icon.layers /> Sessions
+          </button>
+        )}
+        {canDetach && (
           <button className="btn btn-sm" title="Close this tab but leave the shell running on the host; opening the host again offers to resume it" onClick={detach}>
             Detach
           </button>
@@ -507,6 +567,12 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <MenuItem onClick={() => { setMenu(null); useStore.getState().set({ snippetsOpen: { hostKey: tab.instanceKey } }) }}>Edit snippets…</MenuItem>
         </Popover>
       )}
+      {menu === 'shells' && (
+        <Popover anchor={shellsBtn.current} align="right" width={420} onClose={() => { setMenu(null); termRef.current?.focus() }}>
+          <MenuLabel>Sessions on this host</MenuLabel>
+          {shellList('menu')}
+        </Popover>
+      )}
       {menu === 'split' && (
         <Popover anchor={splitBtn.current} align="right" width={280} onClose={() => setMenu(null)}>
           <MenuItem hint="⌘D" onClick={() => { setMenu(null); useStore.getState().duplicateTab(tab.id, true) }}>New session to this host, beside this one</MenuItem>
@@ -520,6 +586,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         </Popover>
       )}
       {shellsBar}
+      {namePrompt && canDetach && <NameBar mobile={false} onSave={saveSessionName} onDismiss={() => { setNamePrompt(false); termRef.current?.focus() }} />}
       {findOpen && (
         <div className="find-bar panel flex items-center gap-1.5 border-b px-2 py-1 text-[11px]" style={{ borderColor: 'var(--border)' }}>
           <Icon.search className="muted" />

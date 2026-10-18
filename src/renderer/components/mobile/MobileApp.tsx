@@ -111,6 +111,7 @@ export default function MobileApp(): ReactElement {
             <div className="m-session-title">
               <span className="dot" style={{ background: dotFor(active.status), animation: active.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
               <span className="truncate">{active.title.replace(/ @ .*/, '')}</span>
+              {active.shellLabel && <span className="shell-chip">{active.shellLabel}</span>}
               {active.status === 'connected' && active.route && <span className={`m-route ${active.route}`}>{active.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
             </div>
             {wide && s.tabs.length > 1 && (
@@ -139,7 +140,7 @@ export default function MobileApp(): ReactElement {
         <Sheet title="Sessions" onClose={() => setSwitcher(false)}>
           {s.tabs.map((t) => (
             <SheetItem key={t.id} icon={kindIcon(t)} hint={<span className="dot" style={{ background: dotFor(t.status) }} />} onClick={() => { setSwitcher(false); s.setActive(t.id) }}>
-              {t.title.replace(/ @ .*/, '')} <span className="muted">· {kindLabel(t)}</span>
+              {t.title.replace(/ @ .*/, '')}{t.shellLabel ? ` · ${t.shellLabel}` : ''} <span className="muted">· {kindLabel(t)}</span>
             </SheetItem>
           ))}
           <SheetItem icon={<Icon.cloud />} onClick={() => { setSwitcher(false); s.setActive('hosts'); setView('hosts') }}>Open another host…</SheetItem>
@@ -173,7 +174,7 @@ function MobileSessions({ wide }: { wide: boolean }): ReactElement {
           <div key={t.id} className={`m-host ${s.activeTab === t.id ? 'on' : ''}`} role="button" tabIndex={0} onClick={() => s.setActive(t.id)}>
             <span className="m-host-os">{kindIcon(t)}</span>
             <span className="min-w-0 flex-1 text-left">
-              <span className="m-host-name"><span className="dot mr-1.5" style={{ background: dotFor(t.status) }} />{t.title.replace(/ @ .*/, '')}</span>
+              <span className="m-host-name"><span className="dot mr-1.5" style={{ background: dotFor(t.status) }} />{t.title.replace(/ @ .*/, '')}{t.shellLabel && <span className="shell-chip ml-1.5">{t.shellLabel}</span>}</span>
               <span className="m-host-meta">{kindLabel(t)} · {t.message ?? t.status}</span>
             </span>
             <button className="m-row-close" aria-label={`Close ${t.title}`} onClick={(e) => { e.stopPropagation(); void s.closeTab(t.id) }}><Icon.x /></button>

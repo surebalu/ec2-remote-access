@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab } from '@shared/types'
+import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, HostShell } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { ssoWaitOutcome } from '@shared/ssoWait'
@@ -32,6 +32,8 @@ export interface Tab {
   logFile?: string
   /** The SSH shell runs in tmux on the host, so it outlives this connection (see main/ssh/persist.ts). */
   persistent?: boolean
+  /** The name of the persistent shell the tab shows ("debug"), shown next to its title. */
+  shellLabel?: string
 }
 
 export interface Toast {
@@ -83,6 +85,8 @@ interface State {
   moveTab: (id: string, beforeId: string | null) => void
   /** Opens another session with the same parameters; `split` shows it next to the original. */
   duplicateTab: (id: string, split?: boolean) => void
+  /** Opens a persistent shell of a tab's host in a new tab, on that tab's connection. */
+  openShellTab: (fromId: string, shell: HostShell) => void
   portForwardFor: { key?: string; presetId?: string } | null
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
@@ -212,6 +216,16 @@ export const useStore = create<State>((set, get) => ({
     rest.splice(at < 0 ? rest.length : at, 0, tab)
     return { tabs: rest }
   }),
+  openShellTab: (fromId, shell) => {
+    const st = get()
+    const tab = st.tabs.find((t) => t.id === fromId)
+    if (!tab?.request) return
+    const nid = `ssh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    st.addTab({
+      id: nid, kind: 'ssh', instanceKey: tab.instanceKey, title: tab.title, status: 'connecting', shellLabel: shell.label || undefined,
+      request: { ...tab.request, sessionId: nid, reuseSessionId: tab.status === 'connected' ? tab.id : undefined, shellName: shell.name, shellHistory: true, shellLabel: undefined }
+    })
+  },
   duplicateTab: (id, split = false) => {
     const st = get()
     const tab = st.tabs.find((t) => t.id === id)
@@ -220,7 +234,8 @@ export const useStore = create<State>((set, get) => ({
     const base = { id: nid, kind: tab.kind, instanceKey: tab.instanceKey, title: tab.title, status: 'connecting' as const }
     // A connected SSH/SFTP tab lends its authenticated connection, as quickConnect does.
     const reuse = tab.status === 'connected' && tab.kind !== 'rdp' ? tab.id : undefined
-    if (tab.kind === 'ssh' && tab.request) st.addTab({ ...base, request: { ...tab.request, sessionId: nid, reuseSessionId: reuse } })
+    // A duplicate starts a shell of its own rather than attaching to the one the original shows.
+    if (tab.kind === 'ssh' && tab.request) st.addTab({ ...base, request: { ...tab.request, sessionId: nid, reuseSessionId: reuse, shellName: undefined, shellHistory: undefined, shellLabel: undefined } })
     else if (tab.kind === 'sftp' && tab.sftpRequest) st.addTab({ ...base, sftpRequest: { ...tab.sftpRequest, reuseSessionId: reuse } })
     else if (tab.kind === 'rdp' && tab.rdpRequest) st.addTab({ ...base, rdpRequest: tab.rdpRequest })
     else return
