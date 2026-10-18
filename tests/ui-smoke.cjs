@@ -31,6 +31,8 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+// First run: no AWS profiles, no servers, nothing scanned.
+let emptyScenario = false
 // Notes vault for the Notes tab.
 const noteFolders = new Set(['Projects'])
 const notes = {
@@ -97,9 +99,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
   switch (channel) {
     case 'settings:get': return settings
     case 'settings:set': settings = { ...settings, ...args[0] }; return settings
-    case 'inventory:cached': return cached
-    case 'inventory:scan': cached = { ...cached, instances: cached.instances.map((i) => ({ ...i, staleReason: undefined, lastSeenAt: Date.now() })), errors: [], scannedAt: Date.now() }; return cached
-    case 'profiles:list': return ssoScenario ? [ssoProfile] : browserScenario ? [...profiles, awsProfile] : profiles
+    case 'inventory:cached': return emptyScenario ? null : cached
+    case 'inventory:scan': if (emptyScenario) return { instances: [], errors: [], scannedAt: Date.now() }
+      cached = { ...cached, instances: cached.instances.map((i) => ({ ...i, staleReason: undefined, lastSeenAt: Date.now() })), errors: [], scannedAt: Date.now() }; return cached
+    case 'profiles:list': return emptyScenario ? [] : ssoScenario ? [ssoProfile] : browserScenario ? [...profiles, awsProfile] : profiles
     case 'profiles:check':
       if (ssoScenario) return [{ profile: ssoProfile.name, state: ssoTokenWritten ? 'ok' : 'login-required', accountId: ssoProfile.accountId, checkedAt: Date.now() }]
       return [...profiles, ...(browserScenario ? [awsProfile] : [])].map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
@@ -764,6 +767,14 @@ app.whenReady().then(async () => {
     await pshot('phone-settings.png')
     await pjs(`document.querySelector('[aria-label="Close dialog"]').click()`)
     await puntil(`!document.querySelector('.modal')`)
+    // Run Command from the phone's More list fits the screen.
+    await ptap('Run a command')
+    await puntil(`!!document.querySelector('.rc .rc-count')`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.modal').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 1 })()`), true, 'run command fits the phone')
+    assert.equal(await noSideScroll(), true, 'run command: no sideways scrolling')
+    await pshot('phone-run-command.png')
+    await pjs(`document.querySelector('[aria-label="Close dialog"]').click()`)
+    await puntil(`!document.querySelector('.modal')`)
 
     // Unfolding (a foldable opening to tablet width) keeps the session mounted and shows list and session side by side.
     await pjs(`document.querySelectorAll('.m-tabbar button')[1].click()`)
@@ -1133,7 +1144,8 @@ app.whenReady().then(async () => {
     await typeCmd('echo hi')
     await pressIn('Enter')
     await tuntil(`!!document.querySelector('.tblock-gutter.ok')`, 'successful block')
-    assert.ok((await screenText()).includes('hi'))
+    // xterm paints rows on the next frame, so wait for the text rather than reading it once.
+    await tuntil(`[...document.querySelectorAll('.term-slot:not([style*="none"]) .xterm-rows')].some((r) => r.textContent.includes('hi'))`, 'the output is on screen')
     await typeCmd('false')
     await pressIn('Enter')
     await tuntil(`!!document.querySelector('.tblock-gutter.err')`, 'failed block')
@@ -1349,6 +1361,26 @@ app.whenReady().then(async () => {
     await tuntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('On the whiteboard')`, 'shortcuts dialog lists the whiteboard keys')
     await tkey('Escape')
     twin.destroy()
+
+    // First run: the welcome screen, in both appearances, and its main action opens Add account.
+    emptyScenario = true
+    const savedTheme = settings.theme
+    const ewin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    ewin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const ejs = (code) => ewin.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
+    const euntil = async (code) => { for (let n = 0; n < 150; n++) { if (await ejs(code)) return; await new Promise((r) => setTimeout(r, 30)) } throw new Error(`Timed out (welcome): ${code}`) }
+    const eshot = async (name) => { await ejs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 150)); writeFileSync(join(output, name), (await ewin.webContents.capturePage()).toPNG()) }
+    for (const theme of ['dark', 'light']) {
+      settings.theme = theme
+      await ewin.loadFile(resolve('out/renderer/index.html'))
+      await euntil(`!!document.querySelector('.welcome .welcome-action.primary') && document.querySelectorAll('.welcome-req').length === 3`)
+      await eshot(`welcome-${theme}.png`)
+    }
+    await ejs(`document.querySelector('.welcome-action.primary').click()`)
+    await euntil(`!!document.querySelector('[role="dialog"]')`)
+    ewin.destroy()
+    settings.theme = savedTheme
+    emptyScenario = false
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)

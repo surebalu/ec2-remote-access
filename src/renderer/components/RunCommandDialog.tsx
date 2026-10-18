@@ -292,7 +292,7 @@ export default function RunCommandDialog(): ReactElement | null {
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button className="btn btn-sm" disabled={!snippets.length} title={snippets.length ? 'Insert a saved snippet' : 'No snippets saved yet (Settings → Terminal)'} onClick={(e) => setMenu({ kind: 'snippets', anchor: e.currentTarget })}><Icon.snippet /> Snippets</button>
-            <label className="muted flex items-center gap-1.5 text-[12px]">
+            <label className="muted flex items-center gap-1.5 whitespace-nowrap text-[12px]">
               Stop after
               <select className="input !h-7 w-32" value={timeoutSec} onChange={(e) => setTimeoutSec(Number(e.target.value))}>
                 {TIMEOUTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}

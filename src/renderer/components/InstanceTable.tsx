@@ -361,7 +361,19 @@ export default function InstanceTable(): ReactElement {
             )
           })}
           <tbody>
-            {rows.length === 0 && (
+            {rows.length === 0 && allInstances(s).length === 0 && s.scanning && Array.from({ length: 6 }, (_, n) => (
+              <tr key={`sk${n}`} className="row" aria-hidden="true">
+                <td><div className="flex items-center gap-2 py-1"><span className="skeleton !h-4 !w-4 !rounded" /><div className="space-y-1.5"><span className="skeleton" style={{ width: 110 + ((n * 37) % 60) }} /><span className="skeleton !h-2" style={{ width: 80 }} /></div></div></td>
+                <td><span className="skeleton" style={{ width: 90 }} /></td>
+                <td><span className="skeleton" style={{ width: 60 }} /></td>
+                <td><span className="skeleton" style={{ width: 54 }} /></td>
+                <td><span className="skeleton" style={{ width: 84 }} /></td>
+                <td className="col-type"><span className="skeleton" style={{ width: 56 }} /></td>
+                <td><span className="skeleton" style={{ width: 44 }} /></td>
+                <td />
+              </tr>
+            ))}
+            {rows.length === 0 && !(allInstances(s).length === 0 && s.scanning) && (
               <tr>
                 <td colSpan={8} className="muted px-4 py-16 text-center">
                   {allInstances(s).length === 0

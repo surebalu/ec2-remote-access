@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import { isSession, useStore, type Tab } from '../../store'
+import { filteredInstances, isSession, useStore, type Tab } from '../../store'
 import { nativeApp, postNative, setLayoutPreference, trackVisualViewport, WIDE_QUERY } from '../../mobile'
 import { consoleHomeFor, openConsoleOnDevice } from '../../quickConnect'
 import { metaFor, initials } from '../../colors'
@@ -275,6 +275,11 @@ function MobileMore(): ReactElement {
         <button className="m-host" onClick={() => s.openNotes()}>
           <span className="m-host-os"><Icon.note /></span>
           <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Notes</span><span className="m-host-meta">Markdown notes on the computer running the app, a note per host</span></span>
+          <Icon.chevron className="muted" />
+        </button>
+        <button className="m-host" onClick={() => s.set({ runCommandFor: { keys: filteredInstances(s).filter((i) => !i.manual && i.state === 'running' && i.ssmOnline).map((i) => i.key) } })}>
+          <span className="m-host-os"><Icon.broadcast /></span>
+          <span className="min-w-0 flex-1 text-left"><span className="m-host-name">Run a command</span><span className="m-host-meta">On many hosts at once, through SSM Run Command</span></span>
           <Icon.chevron className="muted" />
         </button>
         <button className="m-host" onClick={() => s.openBoard()}>
