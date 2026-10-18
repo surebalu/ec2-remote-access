@@ -13,7 +13,7 @@ import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
 import { opLogins, opSecrets } from './onepassword'
 import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
 import { loginMatches } from '@shared/browser'
-import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
+import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, searchNotes, statNote, writeNote } from './notes'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
@@ -67,6 +67,7 @@ export const handlers: Handlers = {
       .catch((e: Error) => send('profiles:status', { profile: `sso-session:${name}`, state: 'error', message: e.message }))
     return { flowId: r.flowId, userCode: r.userCode, verificationUri: r.verificationUri, verificationUriComplete: r.verificationUriComplete, expiresIn: r.expiresIn }
   },
+  'notes:openInObsidian': (path) => openInObsidian(path),
   'shell:open': async (url) => {
     if (/^https?:\/\//.test(url)) await host().openExternal(url)
   },

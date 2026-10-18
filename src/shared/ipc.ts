@@ -93,6 +93,8 @@ export interface IpcApi {
   /** The host's note (created on first use); returns its path. */
   'notes:hostNote': (instanceKey: string) => Promise<string>
   'notes:daily': () => Promise<string>
+  /** Opens a note in the Obsidian app. */
+  'notes:openInObsidian': (path: string) => Promise<void>
   'notes:append': (path: string, text: string) => Promise<void>
   'notes:search': (query: string) => Promise<NoteHit[]>
   'notes:pickFolder': () => Promise<string | null>

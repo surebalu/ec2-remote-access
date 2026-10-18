@@ -121,6 +121,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'notes:daily': { const p = 'Journal/2026-10-18.md'; notes[p] ??= { text: '# 2026-10-18\n\n', mtime: Date.now() }; return p }
     case 'notes:append': notes[args[0]].text += `\n${args[1]}\n`; notes[args[0]].mtime = Date.now(); return
     case 'notes:search': return []
+    case 'notes:openInObsidian': return
     case 'browser:load': return browserSaved
     case 'browser:save': browserSaved = args[0]; return
     case 'browser:consoleUrl': return `http://127.0.0.1:${webPort}/fed?d=${encodeURIComponent(args[1])}`
@@ -502,6 +503,10 @@ app.whenReady().then(async () => {
     for (let n = 0; n < 100 && !calls.some((c) => c.channel === 'notes:write' && c.args[0] === 'Runbook.md' && c.args[1].includes('Checked the logs.')); n++) await new Promise((r) => setTimeout(r, 30))
     assert.ok(calls.some((c) => c.channel === 'notes:write' && c.args[0] === 'Runbook.md' && c.args[1].includes('Checked the logs.') && typeof c.args[2] === 'number'), 'typing autosaves, with the loaded version for conflict checks')
     await until(`document.querySelector('.notes-status')?.textContent === 'Saved'`)
+    // Open in Obsidian goes through its own channel (shell:open only passes web addresses).
+    await js(`[...document.querySelectorAll('.notes-head button')].find((b) => b.textContent === 'Obsidian').click()`)
+    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'notes:openInObsidian'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:openInObsidian').at(-1)?.args, ['Runbook.md'])
     // Formatting: select a word, the toolbar and the shortcuts change the Markdown; ⌘B is bold here, not the sidebar.
     for (const ch of 'key words') win.webContents.sendInputEvent({ type: 'char', keyCode: ch })
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Left', modifiers: ['shift', 'alt'] })

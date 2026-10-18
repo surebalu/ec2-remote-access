@@ -658,7 +658,7 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
         </div>
         <button className="btn btn-ghost btn-sm btn-icon" title="Close notes (everything is saved)" aria-label="Close notes" onClick={() => { void save().then(() => useStore.getState().closeTab(tab.id)) }}><Icon.x /></button>
         {current && inElectron && info && (
-          <button className="btn btn-ghost btn-sm" title="Open this note in Obsidian" onClick={() => void window.api.invoke('shell:open', `obsidian://open?path=${encodeURIComponent(`${info.dir}/${current.path}`)}`)}>Obsidian</button>
+          <button className="btn btn-ghost btn-sm" title="Open this note in Obsidian" onClick={() => { void save().then(() => window.api.invoke('notes:openInObsidian', current.path)).catch((e: Error) => toast('error', e.message)) }}>Obsidian</button>
         )}
       </div>
       {conflict && (

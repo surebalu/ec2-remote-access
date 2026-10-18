@@ -73,6 +73,19 @@ export async function listNotes(): Promise<NoteEntry[]> {
   return out.sort((a, b) => a.path.localeCompare(b.path))
 }
 
+/**
+ * Opens a note in Obsidian (obsidian://open with its full path, which Obsidian maps to the vault that holds it). Done
+ * here rather than through shell:open, which only passes web addresses.
+ */
+export async function openInObsidian(rel: string): Promise<void> {
+  const abs = notePath(root(), rel)
+  try {
+    await host().openExternal(`obsidian://open?path=${encodeURIComponent(abs)}`)
+  } catch {
+    throw new Error('Could not open Obsidian. Is it installed, and is the notes folder one of its vaults?')
+  }
+}
+
 export async function readNote(rel: string): Promise<NoteFile> {
   const abs = notePath(root(), rel)
   const [text, st] = await Promise.all([readFile(abs, 'utf8'), stat(abs)])
