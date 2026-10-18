@@ -185,6 +185,59 @@ export const Icon = {
       <rect x="9" y="2.5" width="6" height="3.5" rx="1" />
     </svg>
   ),
+  /** Globe: the built-in browser. */
+  globe: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z" />
+    </svg>
+  ),
+  back: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M15 5l-7 7 7 7" />
+    </svg>
+  ),
+  forward: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 5l7 7-7 7" />
+    </svg>
+  ),
+  lock: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  ),
+  external: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+    </svg>
+  ),
+  pin: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 4h6l-1 6 3 3v2H7v-2l3-3zM12 15v6" />
+    </svg>
+  ),
+  sidebar: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M9 4v16" />
+    </svg>
+  ),
+  /** Page with lines: a note. */
+  note: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M14 3v5h5M9 12h7M9 16h5" />
+    </svg>
+  ),
+  /** Page with a plus: add to a note. */
+  noteAdd: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M13 21H6V3h9l4 4v6" />
+      <path d="M14 3v5h5M18 15v6M15 18h6" />
+    </svg>
+  ),
   /** Window with a plus: open in a new tab. */
   openTab: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

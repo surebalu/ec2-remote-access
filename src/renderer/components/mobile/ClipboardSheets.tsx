@@ -34,7 +34,7 @@ export function PasteSheet({ initial, action, onSend, onClose }: { initial: stri
  * Terminal text in a read-only field. xterm.js has no touch selection, so this is where iOS's own selection handles
  * and Copy work on a phone.
  */
-export function CopySheet({ text, onClose }: { text: string; onClose: () => void }): ReactElement {
+export function CopySheet({ text, onClose, onAddToNote }: { text: string; onClose: () => void; onAddToNote?: (text: string) => void }): ReactElement {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [selected, setSelected] = useState(false)
   const toast = useStore((s) => s.toast)
@@ -62,6 +62,21 @@ export function CopySheet({ text, onClose }: { text: string; onClose: () => void
       <button className="btn btn-primary m-sheet-action" disabled={!text} onPointerDown={(e) => e.preventDefault()} onClick={copy}>
         {selected ? 'Copy selection' : 'Copy all'}
       </button>
+      {onAddToNote && (
+        <button
+          className="btn m-sheet-action mt-2"
+          disabled={!text}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const t = ref.current
+            if (!t) return
+            onAddToNote(t.selectionEnd > t.selectionStart ? t.value.slice(t.selectionStart, t.selectionEnd) : t.value.split('\n').slice(-50).join('\n'))
+            onClose()
+          }}
+        >
+          {selected ? 'Add selection to host note' : 'Add last 50 lines to host note'}
+        </button>
+      )}
     </Sheet>
   )
 }

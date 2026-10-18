@@ -516,7 +516,7 @@ export default function SftpTab({ tab, active }: { tab: Tab; active: boolean }):
         <span className="muted truncate">{tab.message ?? 'Connecting…'}</span>
         <span className="flex-1" />
         <span className="muted hidden xl:inline">Drag between panes, or drop files from Finder on the remote side.</span>
-        <HostActions instanceKey={tab.instanceKey} current="sftp" />
+        <HostActions instanceKey={tab.instanceKey} current="sftp" tabId={id} />
         {(tab.status === 'closed' || tab.status === 'error') && (
           <button className="btn btn-sm" onClick={() => void connect()}>
             Reconnect

@@ -8,7 +8,7 @@ import type { DetachedShell, HostShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
 import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
-import HostActions from './HostActions'
+import HostActions, { openHostNote } from './HostActions'
 import TerminalAppearancePane from './TerminalAppearancePane'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 import { Icon } from './icons'
@@ -66,6 +66,14 @@ function bufferText(term: Terminal): string {
   return lines.join('\n')
 }
 
+/** A Markdown block for a host's note: when, where, and the text in a fence longer than any backtick run inside it. */
+export function noteBlock(text: string, where: string, now = new Date()): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
+  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)))
+  return `### ${stamp}${where ? ` · ${where}` : ''}\n\n${fence}text\n${text.replace(/\s+$/, '')}\n${fence}\n`
+}
+
 const SEARCH_DECOR = { matchBackground: '#f5a62366', activeMatchBackground: '#f5a623', matchOverviewRuler: '#f5a623', activeMatchColorOverviewRuler: '#f5a623' }
 
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -119,6 +127,9 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const broadcast = useStore((s) => s.broadcastInput)
   const otherTabs = useStore((s) => s.tabs).filter((t) => t.id !== tab.id && t.kind !== 'rdp')
   const inSplit = splitGroup.includes(tab.id)
+  // Broadcasting types into every terminal of the split; with only one terminal there (beside a note, say) it does nothing.
+  const terminalsInSplit = useStore((s) => s.splitGroup.filter((id) => s.tabs.some((t) => t.id === id && t.kind === 'ssh')).length)
+  const canBroadcast = inSplit && terminalsInSplit > 1
   const theme = resolveTerminalTheme(themeId, isDarkMode())
   const background = theme.background ?? (isDarkMode() ? '#0f1115' : '#ffffff')
   const snippets = snippetsFor(tab.instanceKey, allSnippets)
@@ -455,6 +466,18 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     <ShellList shells={shells} variant={variant} onSwitch={(sh) => switchShell(sh)} onNew={(label) => switchShell(null, label)} onRename={renameShell} onOpenInTab={openShellInTab} onEnd={endOtherShell} onShowAll={tilesFit ? showAllShells : undefined} />
   )
   const detach = (): void => void useStore.getState().closeTab(tab.id, { detach: true })
+  /** Adds text to this host's note: the given text, else the terminal's selection, else its last 50 lines. */
+  const addToNote = (given?: string): void => {
+    const term = termRef.current
+    const selection = given ?? term?.getSelection() ?? ''
+    const body = selection || (term ? bufferText(term).split('\n').slice(-50).join('\n') : '')
+    if (!body.trim()) { toast('info', 'Nothing to add yet.'); return }
+    const where = [tab.message?.split(' via ')[0], tab.shellLabel && `session "${tab.shellLabel}"`].filter(Boolean).join(' · ')
+    window.api.invoke('notes:hostNote', tab.instanceKey).then(async (path) => {
+      await window.api.invoke('notes:append', path, noteBlock(body, where))
+      toast('success', `${selection ? 'Text' : 'The last 50 lines'} added to the note "${(path.split('/').pop() ?? path).replace(/\.md$/, '')}"`)
+    }).catch((e: Error) => toast('error', e.message))
+  }
 
   if (mobile) {
     return (
@@ -478,7 +501,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           onMore={() => setMobileMenu(true)}
         />
         {pasteBox !== null && <PasteSheet initial={pasteBox} action="Paste" onSend={sendPasteBox} onClose={() => setPasteBox(null)} />}
-        {copyText !== null && <CopySheet text={copyText} onClose={() => setCopyText(null)} />}
+        {copyText !== null && <CopySheet text={copyText} onClose={() => setCopyText(null)} onAddToNote={(t) => addToNote(t)} />}
         {shellSheet && (
           <Sheet title="Sessions on this host" onClose={() => setShellSheet(false)}>
             {shellList('sheet')}
@@ -488,6 +511,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <Sheet title={tab.title} subtitle={tab.message} onClose={() => setMobileMenu(false)}>
             <SheetItem icon={<Icon.clipboard />} onClick={() => { setMobileMenu(false); paste() }}>Paste</SheetItem>
             <SheetItem icon={<Icon.copy />} onClick={() => { setMobileMenu(false); setCopyText(termRef.current ? bufferText(termRef.current) : '') }}>Select text to copy</SheetItem>
+            <SheetItem icon={<Icon.note />} onClick={() => { setMobileMenu(false); openHostNote(tab.instanceKey) }}>Host note</SheetItem>
             {snippets.map((sn) => (
               <SheetItem key={sn.id} icon={<Icon.play />} disabled={tab.status !== 'connected'} hint={sn.run ? '↵' : undefined} onClick={() => { setMobileMenu(false); runSnippet(tab.id, sn) }}>
                 {sn.name} <span className="mono muted text-[12px]">{sn.command.split('\n')[0]}</span>
@@ -519,14 +543,17 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
             <span className="dot" /> REC
           </button>
         )}
-        {inSplit && broadcast && <span className="badge badge-err" title="Typing goes to every connected pane in this split (⌘⇧I to stop)"><Icon.broadcast /> Broadcasting</span>}
+        {canBroadcast && broadcast && <span className="badge badge-err" title="Typing goes to every connected pane in this split (⌘⇧I to stop)"><Icon.broadcast /> Broadcasting</span>}
         <span className="flex-1" />
         {disconnected && <>
           <button className="btn btn-primary btn-sm" onClick={() => reconnectRef.current()}>Reconnect</button>
           <button className="btn btn-sm" title="Open a new session with different connection settings" onClick={() => useStore.getState().set({ connectFor: { kind: 'ssh', key: tab.instanceKey } })}>Edit connection</button>
           <button className="btn btn-sm" onClick={() => void window.api.invoke('clipboard:write', tab.message ?? 'Disconnected').then(() => toast('success', 'Connection message copied'))}>Copy message</button>
         </>}
-        <HostActions instanceKey={tab.instanceKey} current="ssh" />
+        <HostActions instanceKey={tab.instanceKey} current="ssh" tabId={tab.id} />
+        <button className="btn btn-ghost btn-sm btn-icon" title="Add the selected text (or the last 50 lines) to this host's note" aria-label="Add to note" onMouseDown={(e) => e.preventDefault()} onClick={() => addToNote()}>
+          <Icon.noteAdd />
+        </button>
         <span className="tool-sep" />
         <button className={`btn btn-ghost btn-sm btn-icon ${findOpen ? 'on' : ''}`} title="Find in terminal (⌘F)" onClick={() => (findOpen ? closeFind() : onFindShortcut())}>
           <Icon.search />
@@ -537,8 +564,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         <button ref={splitBtn} className={`btn btn-ghost btn-sm btn-icon ${inSplit ? 'on' : ''}`} title="Split view (⌘D opens this session again beside it)" onMouseDown={(e) => e.preventDefault()} onClick={() => setMenu(menu === 'split' ? null : 'split')}>
           <Icon.split />
         </button>
-        {inSplit && (
-          <button className={`btn btn-ghost btn-sm btn-icon ${broadcast ? 'on' : ''}`} title={broadcast ? 'Stop broadcasting input (⌘⇧I)' : 'Broadcast typing to every pane in this split (⌘⇧I)'} aria-pressed={broadcast} onClick={() => useStore.getState().set({ broadcastInput: !broadcast })}>
+        {canBroadcast && (
+          <button className={`btn btn-ghost btn-sm btn-icon ${broadcast ? 'on' : ''}`} title={broadcast ? 'Stop broadcasting input (⌘⇧I)' : 'Broadcast: type the same keys into every terminal in this split at once (⌘⇧I)'} aria-pressed={broadcast} onClick={() => useStore.getState().set({ broadcastInput: !broadcast })}>
             <Icon.broadcast />
           </button>
         )}

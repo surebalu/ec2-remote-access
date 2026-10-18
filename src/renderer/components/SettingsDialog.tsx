@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
-import type { Settings } from '@shared/types'
+import type { NotesInfo, Settings } from '@shared/types'
 import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
@@ -13,6 +13,8 @@ export default function SettingsDialog(): ReactElement | null {
   const s = useStore()
   const [draft, setDraft] = useState<Settings | undefined>(s.settings)
   const [paths, setPaths] = useState<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean } | null>(null)
+  const [notesInfo, setNotesInfo] = useState<NotesInfo | null>(null)
+  useEffect(() => { void window.api.invoke('notes:info').then(setNotesInfo, () => undefined) }, [])
   useEffect(() => {
     void window.api.invoke('app:paths').then(setPaths)
   }, [])
@@ -114,6 +116,25 @@ export default function SettingsDialog(): ReactElement | null {
             <button className="btn" title="Choose folder" onClick={async () => { const f = await window.api.invoke('dialog:pickFile', 'Choose a file in the log folder'); if (f) upd('sessionLogDir', f.replace(/\/[^/]*$/, '')) }}>…</button>
           </div>
           <div className="muted mt-0.5 text-[10px]">One file per session, colours and cursor codes removed. Applies to sessions opened after saving; a REC badge shows in the tab.</div>
+        </div>
+        <label className="muted">Notes folder</label>
+        <div>
+          <div className="flex gap-1">
+            <input className="input" placeholder={notesInfo && notesInfo.source !== 'setting' ? notesInfo.dir : 'Folder of Markdown notes'} value={draft.notesDir ?? ''} onChange={(e) => upd('notesDir', e.target.value)} />
+            <button className="btn" title="Choose folder" onClick={async () => { const f = await window.api.invoke('notes:pickFolder'); if (f) upd('notesDir', f) }}>Choose…</button>
+            {draft.notesDir && <button className="btn" title="Go back to the folder chosen automatically" onClick={() => upd('notesDir', '')}>Use the Obsidian vault</button>}
+          </div>
+          <div className="muted mt-0.5 text-[10px]">
+            {draft.notesDir
+              ? 'Notes are kept in this folder (a network share works too). Point Obsidian at the same folder to use both.'
+              : notesInfo?.source === 'obsidian'
+                ? <>Using the vault Obsidian has open, <span className="mono">{notesInfo.dir}</span>, so both apps edit the same files. Enter a folder to keep notes elsewhere, e.g. a NAS.</>
+                : <>Using <span className="mono">{notesInfo?.dir ?? '~/Documents/EC2 Remote Access/Notes'}</span> (no Obsidian vault found). Enter a folder to keep notes elsewhere.</>}
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="muted whitespace-nowrap text-[11px]">Host notes in</span>
+            <input className="input" placeholder="EC2 Remote/Hosts" value={draft.notesHostFolder ?? ''} onChange={(e) => upd('notesHostFolder', e.target.value)} />
+          </div>
         </div>
         <label className="muted">Regions</label>
         <div>

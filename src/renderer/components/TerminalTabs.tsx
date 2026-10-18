@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
-import { useStore, type Tab } from '../store'
+import { isSession, useStore, type Tab } from '../store'
 import TerminalTab from './TerminalTab'
 import RdpTab from './RdpTab'
 import SftpTab from './SftpTab'
+import NotesTab from './NotesTab'
+import BrowserTab from './browser/BrowserTab'
 import { Icon } from './icons'
 
 const GAP = 4
@@ -13,7 +15,7 @@ const CROWDED_AT = 3
 const OVERFLOW_W = 44
 
 const dotFor = (st: string): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : <Icon.terminal />)
+const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : <Icon.terminal />)
 
 function useWindowWidth(): number {
   const [w, setW] = useState(() => window.innerWidth)
@@ -42,6 +44,8 @@ export default function TerminalTabs(): ReactElement {
   const s = useStore()
   // A host grid's transient tabs are tiles, not tabs.
   const tabs = s.tabs.filter((t) => !t.transient)
+  // The All grid tiles sessions; the Notes tab is not one.
+  const sessions = tabs.filter(isSession).length
   const stripRef = useRef<HTMLDivElement>(null)
   const hostsRef = useRef<HTMLButtonElement>(null)
   const gridRef = useRef<HTMLButtonElement>(null)
@@ -162,10 +166,10 @@ export default function TerminalTabs(): ReactElement {
         <Icon.cloud />
         Hosts
       </button>
-      {tabs.length > 0 && (
+      {sessions > 0 && (
         <button ref={gridRef} className={`tab no-drag ${s.gridView && !s.gridHost ? 'on' : ''}`} title="All sessions on one page (⌘0)" aria-pressed={s.gridView && !s.gridHost} onClick={() => s.showGrid(!s.gridView || !!s.gridHost)}>
           <Icon.grid />
-          All <span className="mono text-[11px]">{tabs.length}</span>
+          All <span className="mono text-[11px]">{sessions}</span>
         </button>
       )}
       {visibleTabs.map((t) => renderTab(t))}
@@ -236,7 +240,7 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
   const width = useWindowWidth()
   const tiled = grid && s.tabs.length > 0
   // A host grid tiles only that machine's terminals (every shell kept on it); the All grid tiles every tab.
-  const inGrid = (t: Tab): boolean => !s.gridHost || (t.instanceKey === s.gridHost && t.kind === 'ssh')
+  const inGrid = (t: Tab): boolean => isSession(t) && (!s.gridHost || (t.instanceKey === s.gridHost && t.kind === 'ssh'))
   const split = !tiled && s.splitGroup.includes(s.activeTab) ? s.splitGroup : []
   const shown = (id: string): boolean => (tiled ? inGrid(s.tabs.find((t) => t.id === id)!) : id === s.activeTab || split.includes(id))
   const anyShown = s.tabs.some((t) => shown(t.id))
@@ -272,7 +276,7 @@ export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; 
               <button className="btn btn-ghost btn-sm btn-icon" title={t.persistent ? 'Close this tile (the session keeps running on the host)' : 'Close'} aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id, { detach: !!t.persistent })}><Icon.x /></button>
             </div>
             <div className="tile-body relative flex min-h-0 flex-1 flex-col">
-              {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
+              {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : t.kind === 'notes' ? <NotesTab tab={t} active={shown(t.id)} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
               {shield && (
                 <div
                   className="tile-shield"

@@ -12,6 +12,7 @@ import { getSettings } from './store'
 import { setupAutoUpdate } from './updater'
 import { startPhoneAccess, stopPhoneAccess } from './phoneAccess'
 import { initLog } from './log'
+import { initWebviews } from './webviews'
 
 setHost(electronHost)
 
@@ -55,9 +56,12 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // The built-in browser's pages; ./webviews locks every guest down before it attaches.
+      webviewTag: true
     }
   })
+  initWebviews(win)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.webContents.on('console-message', (ev) => {
       if (ev.level === 'error' || ev.level === 'warning') console.log(`[renderer:${ev.level}] ${ev.message} (${ev.sourceId}:${ev.lineNumber})`)

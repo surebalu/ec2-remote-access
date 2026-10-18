@@ -157,6 +157,10 @@ export interface Settings {
   sshInitCommand: string
   /** Run SSH shells inside tmux on Linux hosts so a dropped connection leaves them running and Reconnect resumes them. */
   persistentShells: boolean
+  /** Folder of Markdown notes ('' = the vault Obsidian has open, else ~/Documents/EC2 Remote Access/Notes). */
+  notesDir: string
+  /** Subfolder of the notes folder that holds one note per host. */
+  notesHostFolder: string
   /** In-app gateway for phone browsers: start with the app, TCP port, and whether to bind only the Tailscale address. */
   phoneAccessEnabled: boolean
   phoneAccessPort: number
@@ -291,6 +295,79 @@ export interface SshOpenRequest {
   shellHistory?: boolean
   cols: number
   rows: number
+}
+
+/**
+ * A browser space: one cookie container, like Arc's spaces. Every AWS account gets one automatically (`profile` set,
+ * id `aws-<profile>`), which signs in to that account's console; others are the user's own (General, Jira…).
+ */
+export interface WebSpace {
+  id: string
+  name: string
+  color: AccentColor
+  profile?: string
+}
+
+export interface WebTab {
+  id: string
+  spaceId: string
+  /** '' = a new tab, showing the start page. */
+  url: string
+  title: string
+  favicon?: string
+  /** Pinned tabs sit in the favorites grid at the top of their space and survive Close all. */
+  pinned?: boolean
+  lastActive: number
+}
+
+export interface WebHistoryEntry {
+  url: string
+  title: string
+  spaceId: string
+  at: number
+}
+
+/** Everything the browser keeps between runs (main/browser.ts, browser.json beside the settings). */
+export interface BrowserState {
+  /** The user's own spaces; AWS account spaces are derived from the profiles and only stored as tab owners. */
+  spaces: WebSpace[]
+  tabs: WebTab[]
+  activeSpace: string
+  activeTab: Record<string, string>
+  history: WebHistoryEntry[]
+  /** Last favicon seen per host, for the start page's frequent sites. */
+  favicons?: Record<string, string>
+  sidebarHidden?: boolean
+}
+
+/** Where notes live (main/notes.ts) and how that was decided. */
+export interface NotesInfo {
+  dir: string
+  source: 'setting' | 'obsidian' | 'default'
+  hostFolder: string
+  exists: boolean
+}
+
+export interface NoteEntry {
+  /** Relative to the notes folder, forward slashes. */
+  path: string
+  /** A folder rather than a note (listed so empty folders show too). */
+  folder?: boolean
+  mtime: number
+  size: number
+}
+
+export interface NoteFile {
+  path: string
+  text: string
+  mtime: number
+}
+
+export interface NoteHit {
+  path: string
+  /** 0 = the note's name matched. */
+  line: number
+  text: string
 }
 
 /** A persistent shell on a host that no tab is showing (the app quit, a phone page was lost, the user detached). */

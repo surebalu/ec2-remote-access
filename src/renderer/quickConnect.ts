@@ -3,8 +3,17 @@
  * Each opens straight away when the needed parameters are already known (an open tab for the same host, saved
  * per-host overrides, account defaults, saved RDP credentials) and falls back to the connect dialog otherwise.
  */
-import type { SftpOpenRequest } from '@shared/types'
+import type { Instance, SftpOpenRequest } from '@shared/types'
+import { ec2InstanceUrl } from '@shared/browser'
 import { allInstances, useStore } from './store'
+
+/** The built-in browser needs Electron's <webview>; on a phone or the gateway page links open in the device's browser. */
+export const hasBrowser = (): boolean => /\bElectron\//.test(navigator.userAgent)
+
+/** Opens an AWS instance's page in its account's console, signed in, in the Browser tab. */
+export function openInConsole(i: Instance): void {
+  useStore.getState().openBrowser({ profile: i.profile, url: ec2InstanceUrl(i.region, i.instanceId) })
+}
 
 /** Double-click behaviour: RDP for Windows hosts, SSH for everything else. */
 export function openDefaultFor(key: string): void {

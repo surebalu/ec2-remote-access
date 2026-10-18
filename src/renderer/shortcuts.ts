@@ -3,7 +3,7 @@
  * window-level key capture, and so a focused terminal still sees them bubble up; TerminalTab tells xterm to ignore
  * the same combinations through isAppShortcut.
  */
-import { useStore } from './store'
+import { isSession, useStore } from './store'
 
 export interface ShortcutInfo {
   keys: string
@@ -16,6 +16,7 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘⇧P', label: 'Command list' },
   { keys: '⌘0', label: 'All sessions on one page' },
   { keys: '⌘1', label: 'Hosts' },
+  { keys: '⌘⇧N', label: 'Notes' },
   { keys: '⌘2 … ⌘8', label: 'Session tab 1 … 7' },
   { keys: '⌘9', label: 'Last session tab' },
   { keys: '⌘⇧] / ⌘⇧[', label: 'Next / previous tab' },
@@ -27,6 +28,38 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘B', label: 'Show / hide the sidebar' },
   { keys: '⌘/', label: 'Keyboard shortcuts' }
 ]
+
+/** Shortcuts of the Browser tab while it is the active tab (they take over ⌘T, ⌘W, ⌘F, ⌘D and ⌘0 there). */
+export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
+  { keys: '⌘T', label: 'New tab (command bar)' },
+  { keys: '⌘L', label: 'Edit the address' },
+  { keys: '⌘W / ⌘⇧T', label: 'Close tab / reopen the last closed tab' },
+  { keys: '⌘[ / ⌘]', label: 'Back / forward' },
+  { keys: '⌘R / ⌘⇧R', label: 'Reload / reload without cache' },
+  { keys: '⌃Tab / ⌃⇧Tab', label: 'Next / previous tab in the space' },
+  { keys: '⌥⌘↓ / ⌥⌘↑', label: 'Next / previous space' },
+  { keys: '⌘D', label: 'Pin or unpin the tab' },
+  { keys: '⌘S', label: 'Show / hide the browser sidebar' },
+  { keys: '⌘F', label: 'Find in page' },
+  { keys: '⌘⇧C', label: 'Copy the page address' },
+  { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset' }
+]
+
+export interface BrowserKey {
+  /** Lower-cased KeyboardEvent.key ('t', '[', 'arrowdown', 'tab'). */
+  key: string
+  shift: boolean
+  alt: boolean
+  /** ⌃ instead of ⌘ (only ⌃Tab is used). */
+  ctrl: boolean
+}
+
+let browserKeys: ((k: BrowserKey) => boolean) | null = null
+
+/** The Browser tab claims its keys while it is the active tab; the handler returns whether it used the key. */
+export function setBrowserKeys(fn: ((k: BrowserKey) => boolean) | null): void {
+  browserKeys = fn
+}
 
 type TerminalAction = 'find' | 'snippets'
 
@@ -51,13 +84,20 @@ export function isAppShortcut(e: KeyboardEvent): boolean {
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') return true
   if (!e.metaKey || e.altKey || e.ctrlKey) return false
   const k = e.key.toLowerCase()
-  return /^[0-9]$/.test(k) || ['w', 't', 'd', 'f', 'b', '/', '[', ']', '{', '}', 'p', 'i'].includes(k)
+  return /^[0-9]$/.test(k) || ['n', 'w', 't', 'd', 'f', 'b', '/', '[', ']', '{', '}', 'p', 'i'].includes(k)
 }
 
 /** Returns true when the event was a shortcut and has been handled. */
 export function handleAppShortcut(e: KeyboardEvent): boolean {
-  if (!e.metaKey || e.altKey || e.ctrlKey || e.repeat) return false
   const st = useStore.getState()
+  const browserActive = !!browserKeys && !st.gridView && st.tabs.some((t) => t.id === st.activeTab && t.kind === 'browser')
+  const browserCombo = (e.metaKey && !e.ctrlKey) || (e.ctrlKey && !e.metaKey && e.key === 'Tab')
+  if (browserActive && browserCombo && !e.repeat && !modalOpen() && browserKeys!({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
+    e.preventDefault()
+    e.stopPropagation()
+    return true
+  }
+  if (!e.metaKey || e.altKey || e.ctrlKey || e.repeat) return false
   const k = e.key.toLowerCase()
   const active = st.tabs.find((t) => t.id === st.activeTab)
   const go = (fn: () => void): true => {
@@ -69,6 +109,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   if (modalOpen()) return false
   const order = ['hosts', ...st.tabs.filter((t) => !t.transient).map((t) => t.id)]
   if (k === '0' && !e.shiftKey) return go(() => st.showGrid(!st.gridView))
+  if (k === 'n' && e.shiftKey) return go(() => st.openNotes())
   if (/^[1-9]$/.test(k) && !e.shiftKey) {
     const n = Number(k)
     const target = n === 9 ? order.at(-1) : order[n - 1]
@@ -84,7 +125,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   if (k === 'p' && e.shiftKey) return go(() => st.openQuickSwitcher('>'))
   if (k === '/') return go(() => st.set({ shortcutsOpen: true }))
   // A second RDP login as the same user would take over the first desktop, so RDP tabs are not duplicated.
-  if (k === 'd' && active && active.kind !== 'rdp') return go(() => st.duplicateTab(active.id, !e.shiftKey))
+  if (k === 'd' && active && active.kind !== 'rdp' && isSession(active)) return go(() => st.duplicateTab(active.id, !e.shiftKey))
   if (k === 'i' && e.shiftKey && st.splitGroup.includes(st.activeTab)) return go(() => st.set({ broadcastInput: !st.broadcastInput }))
   if (k === 'f' && !e.shiftKey && active?.kind === 'ssh') return go(() => terminalAction(active.id, 'find'))
   if (k === 'f' && !e.shiftKey && st.activeTab === 'hosts') return go(() => document.querySelector<HTMLInputElement>('[aria-label="Search hosts"]')?.focus())

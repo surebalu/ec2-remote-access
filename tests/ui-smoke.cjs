@@ -1,5 +1,6 @@
 // Runs the built renderer with synthetic data and no production main process or AWS access.
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, session, webContents } = require('electron')
+const http = require('node:http')
 const { mkdtempSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
@@ -30,12 +31,40 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+// Notes vault for the Notes tab.
+const noteFolders = new Set(['Projects'])
+const notes = {
+  'Runbook.md': { text: '# Runbook\n\nRestart 3dspace, then see [[PLM upgrade]].\n', mtime: 1000 },
+  'Projects/PLM upgrade.md': { text: '# PLM upgrade\n\n- [ ] index rebuild\n', mtime: 1000 }
+}
 // Persistent-shell scenario: the host reports a shell left running by an earlier session.
 let shellScenario = false
 // Sign-in scenario: one SSO profile whose token the "Mac" writes on demand, without ever pushing profiles:status.
 let ssoScenario = false
 let ssoTokenWritten = false
 const ssoProfile = { name: 'corp-prod', region: 'us-east-1', kind: 'sso', enabled: true, accountId: '123456789012', ssoSession: 'corp' }
+// Browser scenario: an AWS SSO account (its console is served by the local web server below) and saved browser state.
+let browserScenario = false
+let browserSaved = null
+let webPort = 0
+const awsProfile = { name: 'sandbox', region: 'us-west-2', kind: 'sso', enabled: true, accountId: '210987654321', ssoSession: 'corp' }
+// Pages for the browser's <webview>s; console.aws.amazon.com requests from its spaces are redirected here.
+const webServer = http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://127.0.0.1')
+  if (u.pathname === '/fed') { res.writeHead(302, { Location: u.searchParams.get('d') }); res.end(); return }
+  const title = u.pathname.startsWith('/console') ? 'AWS Console fixture' : { '/one': 'Fixture page one', '/two': 'Fixture page two' }[u.pathname] ?? 'Fixture'
+  res.writeHead(200, { 'content-type': 'text/html' })
+  res.end(`<!doctype html><title>${title}</title><body style="font:15px -apple-system,system-ui;padding:36px;line-height:1.6"><h1>${title}</h1><p>${u.pathname}${u.search}</p><p>find me, find me</p><a href="/two" target="_blank">two</a></body>`)
+})
+app.on('session-created', (ses) => {
+  ses.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    if (ses === session.defaultSession) return callback({ cancel: /^(https?|wss?):/.test(details.url) })
+    const u = new URL(details.url)
+    if (u.hostname === '127.0.0.1') return callback({})
+    if (/(^|\.)console\.aws\.amazon\.com$/.test(u.hostname)) return callback({ redirectURL: `http://127.0.0.1:${webPort}/console${u.pathname}${u.search}` })
+    callback({ cancel: /^(https?|wss?):/.test(details.url) })
+  })
+})
 ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
   calls.push({ channel, args })
   switch (channel) {
@@ -43,10 +72,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'settings:set': settings = { ...settings, ...args[0] }; return settings
     case 'inventory:cached': return cached
     case 'inventory:scan': cached = { ...cached, instances: cached.instances.map((i) => ({ ...i, staleReason: undefined, lastSeenAt: Date.now() })), errors: [], scannedAt: Date.now() }; return cached
-    case 'profiles:list': return ssoScenario ? [ssoProfile] : profiles
+    case 'profiles:list': return ssoScenario ? [ssoProfile] : browserScenario ? [...profiles, awsProfile] : profiles
     case 'profiles:check':
       if (ssoScenario) return [{ profile: ssoProfile.name, state: ssoTokenWritten ? 'ok' : 'login-required', accountId: ssoProfile.accountId, checkedAt: Date.now() }]
-      return profiles.map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
+      return [...profiles, ...(browserScenario ? [awsProfile] : [])].map((p) => ({ profile: p.name, state: 'ok', accountId: p.accountId, checkedAt: Date.now() }))
     case 'tunnels:list': return []
     case 'sso:sessions':
       if (!ssoScenario) return []
@@ -64,6 +93,23 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       }
       return { sessionId: args[0].sessionId, instanceKey: running.key, title: running.name, route: 'ssm', host: running.instanceId, user: 'ubuntu' }
     case 'ec2:health': return { instanceStatus: 'ok', systemStatus: 'ok', events: [], cpu: Array.from({ length: 36 }, (_, n) => ({ t: now - (36 - n) * 300000, v: 20 + 15 * Math.sin(n / 4) })), ssmLastPing: new Date(now - 90000).toISOString(), fetchedAt: now, errors: [] }
+    case 'notes:info': return { dir: '/fixture/vault', source: 'obsidian', hostFolder: 'EC2 Remote/Hosts', exists: true }
+    case 'notes:list': return [...[...noteFolders].map((path) => ({ path, mtime: 0, size: 0, folder: true })), ...Object.entries(notes).map(([path, n]) => ({ path, mtime: n.mtime, size: n.text.length }))]
+    case 'notes:mkdir': noteFolders.add(args[0]); return args[0]
+    case 'notes:rename': { const [from, to] = args; if (notes[from]) { notes[to] = notes[from]; delete notes[from] } return to }
+    case 'notes:delete': delete notes[args[0]]; noteFolders.delete(args[0]); return
+    case 'notes:read': { const n = notes[args[0]]; if (!n) throw new Error(`No note ${args[0]}`); return { path: args[0], text: n.text, mtime: n.mtime } }
+    case 'notes:write': notes[args[0]] = { text: args[1], mtime: Date.now() }; return { mtime: notes[args[0]].mtime }
+    case 'notes:stat': return notes[args[0]]?.mtime ?? null
+    case 'notes:create': notes[args[0]] ??= { text: `# ${args[0].replace(/\.md$/, '')}\n\n`, mtime: Date.now() }; return args[0]
+    case 'notes:hostNote': { const p = 'EC2 Remote/Hosts/web-prod-01 (production).md'; notes[p] ??= { text: '---\nec2_key: production/us-east-1/web-prod-01\n---\n# web-prod-01\n\n', mtime: Date.now() }; return p }
+    case 'notes:daily': { const p = 'Journal/2026-10-18.md'; notes[p] ??= { text: '# 2026-10-18\n\n', mtime: Date.now() }; return p }
+    case 'notes:append': notes[args[0]].text += `\n${args[1]}\n`; notes[args[0]].mtime = Date.now(); return
+    case 'notes:search': return []
+    case 'browser:load': return browserSaved
+    case 'browser:save': browserSaved = args[0]; return
+    case 'browser:consoleUrl': return `http://127.0.0.1:${webPort}/fed?d=${encodeURIComponent(args[1])}`
+    case 'shell:open': return
     case 'ssh:listShells': return [
       { name: 'ec2ra-old1', label: 'debug', user: '3dxadmin', args: 'bash', preview: '3dxadmin@ip-10-1-2-144:/etc/systemd/system$', command: 'bash', path: '/etc/systemd/system', idleSec: 5, ageSec: 7200, current: true, attached: true },
       { name: 'ec2ra-other', label: '', user: 'root', args: 'tail -f /var/log/messages', preview: 'Oct 17 21:40:01 ip-10-1-2-144 systemd[1]: Started Session 42.', command: 'tail', path: '/root', idleSec: 60, ageSec: 300, current: false, attached: false }
@@ -77,6 +123,8 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
 
 app.whenReady().then(async () => {
   app.dock?.hide()
+  await new Promise((r) => webServer.listen(0, '127.0.0.1', r))
+  webPort = webServer.address().port
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
   win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
   win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
@@ -296,7 +344,9 @@ app.whenReady().then(async () => {
     // Find bar (⌘F), snippet menu, split (⌘D) with broadcast, and ⌘W closing the split pane.
     await js(`document.querySelector('.xterm-helper-textarea').focus()`)
     await key('f', { metaKey: true })
-    await until(`document.activeElement?.getAttribute('aria-label') === 'Find in terminal'`)
+    // The find bar takes the focus, though a reconnect still in back-off from the failure above may take it back.
+    await until(`!!document.querySelector('[aria-label="Find in terminal"]')`)
+    await js(`document.querySelector('[aria-label="Find in terminal"]').focus()`)
     await key('Escape')
     await until(`!document.querySelector('[aria-label="Find in terminal"]')`)
     await js(`document.querySelector('button[title="Snippets"]').click()`)
@@ -308,7 +358,7 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.xterm-helper-textarea').focus()`)
     await key('d', { metaKey: true })
     await until(`document.querySelectorAll('.split-pane:not(.hidden)').length === 2`)
-    await until(`document.querySelectorAll('.term-toolbar button[title^="Broadcast typing"]').length >= 1`)
+    await until(`document.querySelectorAll('.term-toolbar button[title^="Broadcast:"]').length >= 1`)
     await screenshot('split.png')
     await key('w', { metaKey: true })
     await until(`document.querySelectorAll('.split-pane').length === 0 && document.querySelectorAll('.tab').length === ${tabsBefore}`)
@@ -387,6 +437,119 @@ app.whenReady().then(async () => {
     assert.equal(await js(`(() => { const r = document.querySelector('[role="dialog"]').getBoundingClientRect(); return r.height <= innerHeight && r.top >= 0 })()`), true)
     await key('Escape')
     await until(`!document.querySelector('[role="dialog"]')`)
+
+    // Notes: the vault in a tab, edited with autosave, previewed with [[links]]; a host's note beside its terminal and
+    // terminal output added to it.
+    win.setSize(1400, 900)
+    await js(`document.querySelector('button[aria-label="Notes"]').click()`)
+    await until(`!!document.querySelector('.notes-tab') && document.querySelectorAll('.notes-file').length >= 2`)
+    await js(`[...document.querySelectorAll('.notes-file')].find((b) => b.textContent.includes('Runbook')).click()`)
+    await until(`document.querySelector('.notes-tab .cm-content')?.textContent.includes('see [[PLM upgrade]]')`)
+    // Real clicks and keys, as a person edits: the window-wide user-select: none once kept clicks from placing a caret.
+    const lastLine = await js(`(() => { const r = [...document.querySelectorAll('.notes-tab .cm-line')].at(-1).getBoundingClientRect(); return { x: Math.round(r.left + 30), y: Math.round(r.top + r.height / 2) } })()`)
+    win.webContents.focus()
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: lastLine.x, y: lastLine.y, button: 'left', clickCount: 1 })
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: lastLine.x, y: lastLine.y, button: 'left', clickCount: 1 })
+    await until(`document.activeElement?.classList.contains('cm-content') && getSelection().rangeCount > 0`)
+    for (const ch of 'Checked the logs. ') win.webContents.sendInputEvent({ type: 'char', keyCode: ch })
+    await until(`document.querySelector('.notes-tab .cm-content').textContent.includes('Checked the logs.')`)
+    assert.match(await js(`document.querySelector('.notes-tab .cm-content').textContent`), /see \[\[PLM upgrade\]\]\.Checked the logs\./, 'typing goes where the click put the caret')
+    for (let n = 0; n < 100 && !calls.some((c) => c.channel === 'notes:write' && c.args[0] === 'Runbook.md' && c.args[1].includes('Checked the logs.')); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'notes:write' && c.args[0] === 'Runbook.md' && c.args[1].includes('Checked the logs.') && typeof c.args[2] === 'number'), 'typing autosaves, with the loaded version for conflict checks')
+    await until(`document.querySelector('.notes-status')?.textContent === 'Saved'`)
+    await js(`[...document.querySelectorAll('.notes-modes button')].find((b) => b.textContent === 'Split').click()`)
+    await until(`!!document.querySelector('.notes-preview a.wikilink')`)
+    await screenshot('notes.png')
+    await js(`document.querySelector('.notes-preview a.wikilink').click()`)
+    await until(`document.querySelector('.notes-title')?.textContent === 'PLM upgrade' && !!document.querySelector('.notes-preview input[type="checkbox"]')`)
+    // Folders: clicking one makes it where new notes and folders go; rename and delete from a row's menu.
+    await js(`[...document.querySelectorAll('.notes-folder')].find((r) => r.textContent.includes('Projects')).click()`)
+    await until(`document.querySelector('.notes-target-chip')?.textContent === 'Projects'`)
+    await js(`document.querySelector('button[aria-label="New folder"]').click()`)
+    await until(`document.activeElement?.getAttribute('aria-label') === 'New folder name'`)
+    await js(`(() => { const t = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(t, 'Ops'); t.dispatchEvent(new Event('input', { bubbles: true })); t.form.requestSubmit() })()`)
+    await until(`[...document.querySelectorAll('.notes-folder')].some((r) => r.textContent.includes('Ops')) && document.querySelector('.notes-target-chip')?.textContent === 'Projects/Ops'`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:mkdir').at(-1).args, ['Projects/Ops'], 'the folder is created inside the selected folder, not at the top')
+    await js(`document.querySelector('button[aria-label="New note"]').click()`)
+    await until(`document.activeElement?.getAttribute('aria-label') === 'New note name'`)
+    await js(`(() => { const t = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(t, 'Checklist'); t.dispatchEvent(new Event('input', { bubbles: true })); t.form.requestSubmit() })()`)
+    await until(`document.querySelector('.notes-title')?.textContent === 'Checklist' && document.querySelector('.notes-path')?.textContent === 'Projects/Ops'`)
+    await js(`document.querySelector('.notes-file.on .notes-row-more').click()`)
+    await until(`!!document.querySelector('.popover')`)
+    await click('Rename')
+    await until(`document.activeElement?.getAttribute('aria-label') === 'New name'`)
+    await js(`(() => { const t = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(t, 'Runlist'); t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
+    await until(`document.querySelector('.notes-title')?.textContent === 'Runlist'`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:rename').at(-1).args, ['Projects/Ops/Checklist.md', 'Projects/Ops/Runlist.md'])
+    await screenshot('notes-folders.png')
+    // Drag and drop: the note onto the Projects folder moves it there; a folder never into itself.
+    const rowOf = (text, kind) => `[...document.querySelectorAll('.notes-${kind}')].find((r) => r.textContent.replace('⋯', '').trim().startsWith(${JSON.stringify(text)}))`
+    const dragEvent = (row, type) => js(`(() => { const ev = new DragEvent('${type}', { dataTransfer: window.__dt, bubbles: true, cancelable: true }); ${row}.dispatchEvent(ev); return ev.defaultPrevented })()`)
+    await js(`void (window.__dt = new DataTransfer())`)
+    await dragEvent(rowOf('Runlist', 'file'), 'dragstart')
+    await until(`!!document.querySelector('.notes-file.dragging')`)
+    assert.equal(await dragEvent(rowOf('Projects', 'folder'), 'dragover'), true, 'a folder accepts a note from elsewhere')
+    await until(`!!document.querySelector('.notes-folder.drop-target')`)
+    await screenshot('notes-drag.png')
+    await dragEvent(rowOf('Projects', 'folder'), 'drop')
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'notes:rename').at(-1)?.args[1] !== 'Projects/Runlist.md'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:rename').at(-1).args, ['Projects/Ops/Runlist.md', 'Projects/Runlist.md'], 'dropping a note on a folder moves it into that folder')
+    await until(`document.querySelector('.notes-path')?.textContent === 'Projects' && !document.querySelector('.notes-row.dragging')`)
+    const renamesBefore = calls.filter((c) => c.channel === 'notes:rename').length
+    await js(`void (window.__dt = new DataTransfer())`)
+    await dragEvent(rowOf('Projects', 'folder'), 'dragstart')
+    await until(`!!document.querySelector('.notes-folder.dragging')`)
+    assert.equal(await dragEvent(rowOf('Ops', 'folder'), 'dragover'), false, 'a folder cannot be dropped into its own subfolder')
+    await dragEvent(rowOf('Projects', 'folder'), 'dragend')
+    await until(`!document.querySelector('.notes-row.dragging')`)
+    assert.equal(calls.filter((c) => c.channel === 'notes:rename').length, renamesBefore)
+    // Move to… from the menu (the touch-friendly way): back to the top level.
+    await js(`document.querySelector('.notes-file.on .notes-row-more').click()`)
+    await until(`!!document.querySelector('.popover')`)
+    await click('Move to…')
+    await until(`!!document.querySelector('.notes-move-list')`)
+    await click('Top level')
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'notes:rename').at(-1)?.args[1] !== 'Runlist.md'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:rename').at(-1).args, ['Projects/Runlist.md', 'Runlist.md'])
+    await until(`document.querySelector('.notes-title')?.textContent === 'Runlist' && !document.querySelector('.notes-path')`)
+    await js(`void (window.confirm = () => true)`)
+    await js(`document.querySelector('.notes-file.on .notes-row-more').click()`)
+    await until(`!!document.querySelector('.popover')`)
+    await click('Move to Trash')
+    await until(`document.querySelector('.notes-title')?.textContent === 'No note open' && ![...document.querySelectorAll('.notes-file')].some((r) => r.textContent.includes('Runlist'))`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'notes:delete').at(-1).args, ['Runlist.md'])
+    await js(`[...document.querySelectorAll('.notes-file')].find((b) => b.textContent.includes('PLM upgrade')).click()`)
+    await until(`document.querySelector('.notes-title')?.textContent === 'PLM upgrade'`)
+    // The All grid tiles sessions only: the open Notes tab is not a tile and not counted.
+    const sessionCount = await js(`document.querySelectorAll('.session-panes > .session-pane').length - 1`)
+    await key('0', { metaKey: true })
+    await until(`!!document.querySelector('.session-grid')`)
+    assert.equal(await js(`document.querySelectorAll('.session-grid > .session-pane:not(.hidden)').length`), sessionCount)
+    assert.equal(await js(`!!document.querySelector('.session-grid .notes-tab:not(.hidden)') && !document.querySelector('.session-grid .notes-tab').closest('.session-pane').classList.contains('hidden')`), false, 'no Notes tile')
+    assert.match(await js(`document.querySelector('button[title^="All sessions"]').textContent`), new RegExp(`All\\s*${sessionCount}$`))
+    await key('0', { metaKey: true })
+    await until(`!document.querySelector('.session-grid')`)
+    // The host's note beside its terminal, and output added to it.
+    await js(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('web-prod-01') && !t.textContent.includes('Notes')).click()`)
+    await until(`!!document.querySelector('.term-toolbar')`)
+    const termTab = await js(`document.querySelector('.session-panes > .session-pane:not(.hidden)').dataset.tabId`)
+    await click('Note')
+    await until(`document.querySelectorAll('.session-panes > .split-pane').length === 2 && document.querySelector('.notes-title')?.textContent === 'web-prod-01 (production)'`)
+    await screenshot('notes-beside-terminal.png')
+    win.webContents.send('ssh:event', { sessionId: termTab, type: 'data', data: 'uptime: 10 days\r\n' })
+    await new Promise((r) => setTimeout(r, 200))
+    await js(`document.querySelector('[data-tab-id="${termTab}"] button[aria-label="Add to note"]').click()`)
+    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'notes:append'); n++) await new Promise((r) => setTimeout(r, 30))
+    const appended = calls.filter((c) => c.channel === 'notes:append').at(-1).args
+    assert.equal(appended[0], 'EC2 Remote/Hosts/web-prod-01 (production).md')
+    assert.match(appended[1], /^### \d{4}-\d{2}-\d{2} \d{2}:\d{2} · .*\n\n```text\n[\s\S]*uptime: 10 days\n```\n$/)
+    await until(`document.querySelector('.notes-tab .cm-content')?.textContent.includes('uptime: 10 days')`)
+    // Broadcasting needs two terminals; beside a note it is not offered.
+    assert.equal(await js(`!!document.querySelector('[data-tab-id="${termTab}"] button[aria-pressed][title*="Broadcast"]')`), false, 'no broadcast button with a single terminal in the split')
+    // Note again closes the note beside the session; the terminal stays.
+    await js(`[...document.querySelectorAll('.notes-modes button')].find((b) => b.textContent === 'Edit').click()`)
+    await js(`document.querySelector('[data-tab-id="${termTab}"] button[aria-pressed="true"][title^="Close the note"]').click()`)
+    await until(`!document.querySelector('.notes-tab') && !!document.querySelector('[data-tab-id="${termTab}"]:not(.hidden)')`)
 
     // Phone layout (what the gateway serves to an iPhone): host list, action sheet, terminal key bar, back to lists.
     const phone = new BrowserWindow({ show: false, width: 430, height: 932, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
@@ -591,6 +754,116 @@ app.whenReady().then(async () => {
     await pshot('phone-sso-done.png')
     ssoScenario = false
     phone.destroy()
+
+    // The browser: start page, tabs, command bar, an AWS account space signing in to its console, spaces, persistence.
+    browserScenario = true
+    const bwin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false, webviewTag: true } })
+    // Electron 44 itself logs "Invalid guestInstanceId" whenever a loaded <webview> leaves the DOM (closing a tab does
+    // that); it is reproducible with a bare page and harmless, so it is the one error not counted here.
+    bwin.webContents.on('console-message', (event) => {
+      if (event.level !== 'error' || (/^Uncaught Error: Invalid guestInstanceId: \d+$/.test(event.message) && event.sourceId.includes('isolated_bundle'))) return
+      errors.push(event.message)
+      if (process.env.UI_TRACE) console.log('[browser error]', event.message, event.sourceId, event.lineNumber)
+    })
+    const bjs = (code) => bwin.webContents.executeJavaScript(code)
+    const buntil = async (code, what = code) => {
+      for (let n = 0; n < 200; n++) { if (await bjs(code)) { if (process.env.UI_TRACE) console.log('[browser ok]', what.slice(0, 70)); return } await new Promise((r) => setTimeout(r, 30)) }
+      throw new Error(`Timed out (browser): ${what}`)
+    }
+    const bshot = async (name) => { await bjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 250)); writeFileSync(join(output, name), (await bwin.webContents.capturePage()).toPNG()) }
+    const typeIn = (sel, value) => bjs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; i.focus(); set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    const enterIn = (sel, mods = {}) => bjs(`document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const bkey = (k, mods = {}) => bjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, metaKey: true, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const guests = () => webContents.getAllWebContents().filter((w) => w.getType() === 'webview' && w.hostWebContents === bwin.webContents)
+    const guestAt = (path) => guests().find((g) => g.getURL().includes(path))
+    const tabTitles = () => bjs(`[...document.querySelectorAll('.web-tab .web-tab-title')].map((t) => t.textContent)`)
+    const page = (path) => `http://127.0.0.1:${webPort}${path}`
+    await bwin.loadFile(resolve('out/renderer/index.html'))
+    await buntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
+    await buntil(`!!document.querySelector('.browser .start-page .start-clock')`, 'start page')
+    assert.equal(await bjs(`document.querySelector('.web-space-name').textContent`), 'General')
+    await bjs(`document.documentElement.dataset.theme = 'light'`)
+    await bshot('browser-start-light.png')
+    await bjs(`document.documentElement.dataset.theme = 'dark'`)
+    // Typing an address in the start page opens it in a tab.
+    await typeIn('.cmdbar.inline input', page('/one'))
+    await buntil(`document.querySelector('.cmdbar.inline .cmdbar-item.on')?.textContent.includes('/one')`, 'go suggestion')
+    await enterIn('.cmdbar.inline input')
+    await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page one'`, 'page one loads in a tab')
+    assert.equal(await bjs(`document.querySelector('.web-url-host').textContent`), '127.0.0.1:' + webPort)
+    // A page opening a new window gets a tab beside it; ⌘W from inside the page closes it, ⌘⇧T brings it back.
+    let g1 = guestAt('/one')
+    bwin.webContents.send('web:window', { webContentsId: g1.id, url: page('/two'), background: false })
+    await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page two'`, 'popup becomes a tab')
+    assert.deepEqual(await tabTitles(), ['Fixture page one', 'Fixture page two'])
+    bwin.webContents.send('web:shortcut', { webContentsId: guestAt('/two').id, key: 'w', shift: false, alt: false })
+    await buntil(`document.querySelectorAll('.web-tab').length === 1`, 'shortcut from the page closes the tab')
+    await bkey('t', { shiftKey: true })
+    await buntil(`document.querySelectorAll('.web-tab').length === 2 && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page two'`, 'reopen closed tab')
+    // Pin with ⌘D; find in page.
+    await bkey('d')
+    await buntil(`document.querySelectorAll('.web-pin').length === 1 && document.querySelectorAll('.web-tab').length === 1`, 'pinned')
+    await bkey('f')
+    await buntil(`document.activeElement?.getAttribute('aria-label') === 'Find in page'`, 'find bar')
+    await typeIn('.web-find input', 'find me')
+    await buntil(`/^\\d+\\/2$/.test(document.querySelector('.web-find-count').textContent)`, 'find counts matches')
+    await bjs(`document.querySelector('.web-find input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+    await buntil(`!document.querySelector('.web-find')`)
+    // ⌘L: the command bar with the address; "sandbox ec2" offers that account's EC2 console, which signs the space in.
+    await bkey('l')
+    await buntil(`document.querySelector('.cmdbar.floating input')?.value.endsWith('/two')`, 'command bar shows the address')
+    await typeIn('.cmdbar.floating input', 'sandbox ec2')
+    await buntil(`[...document.querySelectorAll('.cmdbar-item')].some((b) => b.textContent.includes('EC2') && b.textContent.includes('sandbox'))`, 'AWS suggestion')
+    await bshot('browser-command-bar.png')
+    const ec2 = await bjs(`[...document.querySelectorAll('.cmdbar-item')].findIndex((b) => b.textContent.includes('EC2') && b.textContent.includes('sandbox'))`)
+    await bjs(`document.querySelectorAll('.cmdbar-item')[${ec2}].click()`)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox' && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'AWS Console fixture'`, 'AWS space signs in and shows the console')
+    const signin = calls.filter((c) => c.channel === 'browser:consoleUrl').at(-1).args
+    assert.deepEqual(signin, ['sandbox', 'https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#Instances:'])
+    assert.equal(await bjs(`document.querySelectorAll('.web-services .web-service').length`), 7, 'account space offers its console services')
+    await bshot('browser-aws-space.png')
+    // A second console page in the same space reuses the console session (no second sign-in).
+    const signins = calls.filter((c) => c.channel === 'browser:consoleUrl').length
+    await bjs(`document.querySelector('.web-service[title^="CloudWatch"]').click()`)
+    await buntil(`document.querySelectorAll('.web-tab').length === 2 && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'AWS Console fixture'`, 'second console tab')
+    assert.equal(calls.filter((c) => c.channel === 'browser:consoleUrl').length, signins, 'signed-in space opens console pages directly')
+    // Spaces: ⌥⌘↑ goes back to General; its pinned tab is still loaded. A new space starts empty.
+    await bkey('ArrowUp', { altKey: true })
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'General'`, 'previous space')
+    await bjs(`document.querySelector('.space-add').click()`)
+    await typeIn('.space-form input', 'Jira')
+    await bjs(`document.querySelector('.space-form').requestSubmit()`)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira' && !!document.querySelector('.start-page')`, 'new space')
+    // Leaving the browser for another tab and coming back keeps its pages (no reload, same page process).
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
+    await buntil(`document.querySelector('.web-pin.on') !== null`, 'pinned tab active in General')
+    g1 = guestAt('/two')
+    const before = g1.id
+    await bkey('1')
+    await buntil(`!document.querySelector('.browser') || document.querySelector('.browser').getClientRects().length === 0`, 'hosts shown')
+    await bjs(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('Browser')).click()`)
+    await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
+    assert.ok(guestAt('/two') && guestAt('/two').id === before, 'page survives switching app tabs')
+    // State is saved (never with a sign-in link) and comes back after a reload.
+    for (let n = 0; n < 60 && !(browserSaved?.spaces.some((x) => x.name === 'Jira') && browserSaved.tabs.length === 4); n++) await new Promise((r) => setTimeout(r, 50))
+    assert.equal(browserSaved.tabs.length, 4)
+    assert.ok(browserSaved.tabs.every((t) => !t.url.includes('/fed')), 'no sign-in links saved')
+    assert.ok(browserSaved.history.length >= 3)
+    await bwin.reload()
+    await buntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
+    await buntil(`document.querySelectorAll('.web-pin').length === 1 && document.querySelector('.web-space-name')?.textContent === 'General'`, 'restored')
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
+    await buntil(`document.querySelectorAll('.web-tab').length === 2`, 'restored AWS tabs')
+    // ⌘S hides the sidebar; the page fills the window.
+    await bkey('s')
+    await buntil(`!!document.querySelector('.browser.side-hidden')`)
+    await bshot('browser-sidebar-hidden.png')
+    await bkey('s')
+    browserScenario = false
+    bwin.destroy()
+    webServer.close()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)
