@@ -45,7 +45,7 @@ export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘F', label: 'Find in page' },
   { keys: '⌘⇧C', label: 'Copy the page address' },
   { keys: '⌘⇧L', label: 'Fill the login from 1Password' },
-  { keys: '⌘1 … ⌘8 / ⌘9', label: 'Tab 1 … 8 in the sidebar (Favorites first) / the last tab' },
+  { keys: '⌘1 … ⌘8 / ⌘9', label: 'Space 1 … 8 (the avatars along the bottom of the sidebar) / the last space' },
   { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset (one zoom for every page)' }
 ]
 

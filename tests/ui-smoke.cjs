@@ -875,11 +875,14 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`)
     for (let n = 0; n < 60 && !guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
     assert.ok(guestAt('/one'), 'the favorite loads again where it was showing')
-    // ⌘1…⌘9 follow the sidebar: Favorites, then Pinned, then Today.
+    // ⌘1…⌘9 switch spaces in the order of the avatars (General, Jira, sandbox); ⌘9 is the last one.
     await bkey('2')
-    await buntil(`!!document.querySelector('.web-pinned .web-tab.on')`, '⌘2 selects the pinned tab')
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira'`, '⌘2 shows the second space')
+    await bkey('9')
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox'`, '⌘9 shows the last space')
+    assert.match(await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').title`), /⌘3$/)
     await bkey('1')
-    await buntil(`!!document.querySelector('.web-fav.on')`, '⌘1 selects the favorite')
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'General' && !!document.querySelector('.web-fav.on')`, '⌘1 shows the first space')
     // One zoom for every page: ⌘+ on one page zooms the other open pages too, and ⌘0 resets them all.
     await bkey('=')
     await buntil(`document.querySelector('.web-zoom')?.textContent === '110%'`, 'zoom badge')

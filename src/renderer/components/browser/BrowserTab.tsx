@@ -36,7 +36,7 @@ const SIDEBAR_WIDTH = { default: 208, min: 200, max: 380 }
 /** What the sidebar calls a tab: the name the user gave it, else the page title, else its site. */
 const tabLabel = (t: WebTab): string => t.name || t.title || hostOf(t.url || t.homeUrl || '') || 'New Tab'
 
-/** The sidebar's order, which ⌘1…⌘9 and ⌃Tab follow: Favorites, then the space's Pinned, then its Today. */
+/** The sidebar's order, which ⌃Tab follows: Favorites, then the space's Pinned, then its Today. */
 function sidebarOrder(s: BrowserState): WebTab[] {
   const mine = s.tabs.filter((t) => t.spaceId === s.activeSpace && !t.favorite)
   return [...s.tabs.filter((t) => t.favorite), ...mine.filter((t) => t.pinned), ...mine.filter((t) => !t.pinned)]
@@ -552,11 +552,11 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       cycleTab(k.shift ? -1 : 1)
       return true
     }
-    // ⌘1…⌘8: the tab at that place in the sidebar, ⌘9: the last one (the app's tab bar keeps ⌘⇧[ / ⌘⇧]).
+    // ⌘1…⌘8: the space at that place along the bottom of the sidebar, ⌘9: the last one (the app's tabs keep ⌘⇧[ / ⌘⇧]).
     if (/^[1-9]$/.test(k.key) && !k.shift && !k.alt) {
-      const list = stRef.current ? sidebarOrder(stRef.current) : []
-      const t = k.key === '9' ? list.at(-1) : list[Number(k.key) - 1]
-      if (t) activate(t.id)
+      const list = spacesRef.current
+      const sp = k.key === '9' ? list.at(-1) : list[Number(k.key) - 1]
+      if (sp) switchSpace(sp.id)
       return true
     }
     switch (k.key) {
@@ -827,12 +827,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const dlTotal = runningDl.reduce((n, d) => n + d.total, 0)
   const dlProgress = runningDl.length ? (dlTotal > 0 ? Math.round((runningDl.reduce((n, d) => n + d.received, 0) / dlTotal) * 100) : 15) : null
   const sideWidth = st.sidebarWidth ?? SIDEBAR_WIDTH.default
-  const order = sidebarOrder(st)
-  /** "⌘3" for a tab ⌘3 selects (⌘9 is the last tab). */
-  const keyFor = (t: WebTab): string => {
-    const i = order.indexOf(t)
-    return i >= 0 && i < 8 ? `  ⌘${i + 1}` : i >= 0 && i === order.length - 1 ? '  ⌘9' : ''
-  }
+  /** "  ⌘3" for the space ⌘3 shows (⌘9 is the last space). */
+  const keyFor = (i: number): string => (i < 8 ? `  ⌘${i + 1}` : i === spaces.length - 1 ? '  ⌘9' : '')
   const liveIds = st.tabs.filter((t) => live.includes(t.id) && (t.url || pending.current.has(t.id))).map((t) => t.id)
   mountOrder.current = [...mountOrder.current.filter((id) => liveIds.includes(id)), ...liveIds.filter((id) => !mountOrder.current.includes(id))]
   const liveTabs = mountOrder.current.map((id) => st.tabs.find((t) => t.id === id)!)
@@ -892,7 +888,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         role="tab"
         aria-selected={t.id === current?.id}
         className={`web-tab ${t.id === current?.id ? 'on' : ''} ${loaded ? '' : 'asleep'} ${dropCls(t.id)}`}
-        title={`${tabLabel(t)}${keyFor(t)}${t.url ? `\n${t.url}` : ''}`}
+        title={`${tabLabel(t)}${t.url ? `\n${t.url}` : ''}`}
         onClick={() => activate(t.id)}
         onAuxClick={(e) => { if (e.button === 1) closeOrUnload(t.id) }}
         onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
@@ -963,7 +959,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               key={t.id}
               type="button"
               className={`web-fav ${t.id === current?.id ? 'on' : ''} ${live.includes(t.id) ? '' : 'asleep'} ${dropCls(t.id)}`}
-              title={`${tabLabel(t)}${keyFor(t)}\n${t.url || t.homeUrl}${home && home.id !== space.id ? `\nUses the logins of ${home.name}` : ''}`}
+              title={`${tabLabel(t)}\n${t.url || t.homeUrl}${home && home.id !== space.id ? `\nUses the logins of ${home.name}` : ''}`}
               aria-label={`Favorite ${tabLabel(t)}`}
               onClick={() => activate(t.id)}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
@@ -1016,13 +1012,13 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       </div>
 
       <div className="web-spaces">
-        {spaces.map((sp) => (
+        {spaces.map((sp, i) => (
           <button
             key={sp.id}
             type="button"
             className={`web-space-dot ${sp.id === space.id ? 'on' : ''} ${dropCls(`space-${sp.id}`)}`}
             data-accent={sp.color}
-            title={`${sp.name}${sp.profile ? ' (AWS)' : ''}`}
+            title={`${sp.name}${sp.profile ? ' (AWS)' : ''}${keyFor(i)}`}
             aria-label={`Space ${sp.name}`}
             onClick={() => switchSpace(sp.id)}
             onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'space', id: sp.id, anchor: e.currentTarget }) }}
