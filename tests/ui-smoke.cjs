@@ -290,6 +290,11 @@ app.whenReady().then(async () => {
     await win.loadFile(resolve('out/renderer/index.html'))
     await until(`document.querySelectorAll('[data-host-key]').length === 3`)
     await screenshot('hosts-dark.png')
+    // Every row has the same action slots, so the SSH / RDP buttons line up down the column (a stopped host's Start sits
+    // to their left), and the labels fit their slots.
+    const primaries = await js(`[...document.querySelectorAll('.row-acts')].map((r) => { const b = r.querySelector('.act-main').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right)] })`)
+    assert.ok(primaries.length >= 2 && primaries.every((p) => p[0] === primaries[0][0] && p[1] === primaries[0][1]), `primary actions line up: ${JSON.stringify(primaries)}`)
+    assert.equal(await js(`[...document.querySelectorAll('.act-main, button.act-files')].every((b) => b.scrollWidth <= b.clientWidth)`), true, 'action labels fit their slots')
     assert.equal(await js(`document.querySelector('.titlebar .brand-name').textContent`), 'Remote Access Tool')
     assert.equal(await js(`getComputedStyle(document.querySelector('thead th button')).textTransform`), 'uppercase', 'sortable headers match the others')
     assert.equal(await js(`!!document.querySelector('[data-host-key="${stopped.key}"]')`), false, 'running filter initially hides stopped host')

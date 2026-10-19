@@ -316,15 +316,23 @@ export default function InstanceTable(): ReactElement {
                 <td>
                   <RouteBadge i={i} />
                 </td>
-                <td className="row-actions text-right whitespace-nowrap">
-                  {/* One primary action per OS; the rest are in the ⋯ menu (also the right-click menu). */}
+                <td className="row-actions">
+                  {/* One primary action per OS; the rest are in the ⋯ menu (also the right-click menu). Every row has the
+                      same slots from the right (⋯, Files, the primary), so SSH and RDP line up down the column; Windows
+                      rows keep Files' slot empty, and Start goes to the left of the primary. */}
+                  <div className="row-acts">
+                  {i.state === 'stopped' && !i.manual && (
+                    <button className="btn btn-sm btn-icon" title="Start instance" onClick={() => void power(i, 'start')}>
+                      <Icon.play />
+                    </button>
+                  )}
                   {i.platform === 'windows' ? (
-                    <button className="btn btn-sm btn-rdp mr-1" disabled={!canConnect(i)} title="Remote desktop (connects with saved credentials; shift-click for options)" onClick={(e) => void openRdpFor(i.key, e.shiftKey)}>
+                    <button className="btn btn-sm btn-rdp act-main" disabled={!canConnect(i)} title="Remote desktop (connects with saved credentials; shift-click for options)" onClick={(e) => void openRdpFor(i.key, e.shiftKey)}>
                       <Icon.monitor /> RDP
                     </button>
                   ) : (
                     <button
-                      className="btn btn-sm btn-ssh mr-1"
+                      className="btn btn-sm btn-ssh act-main"
                       disabled={!canConnect(i)}
                       title={s.settings?.profileDefaults?.[i.profile]?.identityFile ? 'Connect now (shift-click for options)' : 'Connect…'}
                       onClick={(e) => quickSsh(i, e)}
@@ -332,16 +340,11 @@ export default function InstanceTable(): ReactElement {
                       <Icon.terminal /> SSH
                     </button>
                   )}
-                  {i.platform !== 'windows' && (
-                    <button className="btn btn-sm mr-1" disabled={!canConnect(i)} title="Browse and transfer files over SFTP (shift-click for options)" onClick={(e) => openFilesFor(i.key, e.shiftKey)}>
+                  {i.platform !== 'windows' ? (
+                    <button className="btn btn-sm act-files" disabled={!canConnect(i)} title="Browse and transfer files over SFTP (shift-click for options)" onClick={(e) => openFilesFor(i.key, e.shiftKey)}>
                       <Icon.folder /> Files
                     </button>
-                  )}
-                  {i.state === 'stopped' && !i.manual && (
-                    <button className="btn btn-sm btn-icon mr-1" title="Start instance" onClick={() => void power(i, 'start')}>
-                      <Icon.play />
-                    </button>
-                  )}
+                  ) : <span className="act-files" aria-hidden="true" />}
                   <button
                     className="btn btn-ghost btn-sm btn-icon"
                     title="More actions"
@@ -355,6 +358,7 @@ export default function InstanceTable(): ReactElement {
                   >
                     <Icon.more />
                   </button>
+                  </div>
                 </td>
               </tr>
             ))}
