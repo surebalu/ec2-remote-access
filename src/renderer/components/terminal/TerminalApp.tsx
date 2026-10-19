@@ -100,6 +100,8 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
   const currentRef = useRef(current)
   currentRef.current = current
   const inputMode = st?.input ?? 'editor'
+  /** The ribbon's Rich input and ⌃G at a prompt: the input box, or typing straight into the shell (every pane). */
+  const toggleInput = useCallback(() => update((s) => ({ ...s, input: (s.input ?? 'editor') === 'editor' ? 'shell' : 'editor' })), [update])
 
   const onInfo = useCallback((pane: string, patch: PaneInfo) => {
     setInfo((m) => ({ ...m, [pane]: { ...m[pane], ...patch } }))
@@ -501,6 +503,8 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
                 onInfo={onInfo}
                 onExit={closePane}
                 onReveal={() => { useStore.getState().setActive(useStore.getState().tabs.find((x) => x.kind === 'local')?.id ?? 'hosts'); activateTab(t.id); focusPane(id) }}
+                onNewTab={(dir) => openTab({ cwd: dir })}
+                onToggleInput={toggleInput}
                 registerApi={registerApi}
               />
             </div>

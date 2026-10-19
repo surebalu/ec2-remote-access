@@ -169,6 +169,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'term:saveState': termSaved = args[0]; return
     case 'term:resize': return
     case 'term:close': shells.delete(args[0]); return
+    case 'term:git': return {
+      branch: 'main', detached: false, upstream: 'origin/main', ahead: 1, behind: 0, changed: 6, insertions: 31, deletions: 8,
+      files: [{ path: 'src/app.ts', status: 'M', staged: false }, { path: 'notes/todo.md', status: '?', staged: false }]
+    }
     case 'term:open': {
       const sh = { id: args[0].id, cwd: args[0].cwd || '/Users/fixture/proj', env: args[0].env, sender: _e.sender, line: '' }
       shells.set(sh.id, sh)
@@ -1139,8 +1143,77 @@ app.whenReady().then(async () => {
     await tkey('`', { ctrlKey: true, code: 'Backquote' })
     await tuntil(`document.querySelectorAll('.term-tab').length === 1 && !!document.querySelector('.tdock textarea')`, '⌃` opens the Terminal with the input box')
     assert.equal(await tjs(`!!document.querySelector('.term-side .term-tab')`), true, 'tabs are down the side by default')
-    await tuntil(`document.querySelector('.tdock-chips')?.textContent.includes('~/proj') && document.querySelector('.tchip.git')?.textContent === 'main'`, 'folder and branch chips')
     await tuntil(`document.querySelector('.term-side .term-tab.on .term-tab-branch')?.textContent === 'main'`, 'the side list shows the tab\'s Git branch, as in Warp')
+    // The ribbon along the bottom of the pane, as in Warp: Git changes, workflows, Finder, the input-box switch, the
+    // folder and the branch. With the whole width it has its labels and does not overflow.
+    const ribbon = `document.querySelector('.term-slot:not([style*="none"]) .tribbon')`
+    await tuntil(`${ribbon}?.querySelector('.trib-chip.folder')?.textContent.includes('~/proj') && ${ribbon}.querySelector('.trib-chip.branch .trib-text')?.textContent === 'main'`, 'ribbon: folder and branch chips')
+    await tuntil(`${ribbon}.querySelector('.trib-count')?.textContent === '6'`, 'ribbon: the Git changes')
+    assert.equal(await tjs(`${ribbon}.querySelector('.trib-pm').textContent + ' ' + ${ribbon}.querySelector('.trib-count').textContent + ' ' + ${ribbon}.querySelector('.trib-add').textContent + ' ' + ${ribbon}.querySelector('.trib-del').textContent`), '± 6 +31 −8')
+    assert.ok(calls.some((c) => c.channel === 'term:git' && c.args[0] === '/Users/fixture/proj'), 'Git status of the pane\'s folder')
+    assert.equal(await tjs(`(() => { const r = ${ribbon}; return r.scrollWidth <= r.clientWidth && getComputedStyle(r.querySelector('.trib-label')).display !== 'none' && r.getBoundingClientRect().bottom === r.closest('.tpane').getBoundingClientRect().bottom })()`), true, 'a wide ribbon: labels, no overflow, at the very bottom')
+    assert.equal(await tjs(`${ribbon}.querySelector('.trib-chip.rich').getAttribute('aria-pressed')`), 'true', 'Rich input shows on')
+    await tshot('terminal-ribbon.png')
+    // The Git chip lists the changed files with their status letters.
+    await tjs(`${ribbon}.querySelector('.trib-chip.git').click()`)
+    await tuntil(`document.querySelectorAll('.popover .trib-file').length === 2`, 'ribbon: changed files listed')
+    assert.deepEqual(await tjs(`[...document.querySelectorAll('.popover .trib-file')].map((f) => f.querySelector('.trib-st').textContent + ' ' + f.querySelector('.trib-file-path').textContent)`), ['M src/app.ts', '? notes/todo.md'])
+    assert.match(await tjs(`document.querySelector('.popover .trib-pop-head').textContent`), /6 changed files.*\+31.*−8/)
+    await tshot('terminal-ribbon-git.png')
+    await tkey('Escape')
+    await tuntil(`!document.querySelector('.popover')`)
+    // ⌃G at the prompt: from the input box to typing straight into the shell, and back from the shell (never sent to it).
+    const writesBeforeG = termWrites().length
+    await pressIn('g', { ctrlKey: true })
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock') && ${ribbon}.querySelector('.trib-chip.rich').getAttribute('aria-pressed') === 'false'`, '⌃G: straight into the shell')
+    await tshot('terminal-ribbon-shell.png')
+    await tjs(`document.querySelector('.term-slot:not([style*="none"]) .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', ctrlKey: true, bubbles: true, cancelable: true }))`)
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea') && ${ribbon}.querySelector('.trib-chip.rich').getAttribute('aria-pressed') === 'true'`, '⌃G in the shell brings the input box back')
+    assert.ok(!termWrites().slice(writesBeforeG).some((d) => d.includes('\x07')), '⌃G at the prompt is not sent to the shell')
+    // The Rich input chip does the same.
+    await tjs(`${ribbon}.querySelector('.trib-chip.rich').click()`)
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock')`, 'Rich input off')
+    await tjs(`${ribbon}.querySelector('.trib-chip.rich').click()`)
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'Rich input on')
+    // History: the ribbon opens the input box's history search.
+    await tjs(`[...${ribbon}.querySelectorAll('.trib-chip')].find((b) => b.getAttribute('aria-label') === 'History').click()`)
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock-pop input[aria-label="Search command history"]')`, 'ribbon: history search')
+    await tjs(`document.querySelector('.term-slot:not([style*="none"]) .tdock-pop input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock-pop')`)
+    // The mic asks dictation (voice.ts) to start or stop for this pane, and shows pressed while it listens.
+    await tjs(`window.__dictate = []; window.addEventListener('ec2ra:dictate', (e) => window.__dictate.push(e.detail)); 0`)
+    await tjs(`${ribbon}.querySelector('.trib-chip.mic').click()`)
+    assert.deepEqual(await tjs(`window.__dictate.map((d) => [d.action, !!d.target?.classList.contains('tpane')])`), [['toggle', true]])
+    await tjs(`window.dispatchEvent(new CustomEvent('ec2ra:dictation', { detail: { active: true } }))`)
+    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'true'`, 'mic pressed while dictating')
+    await tshot('terminal-ribbon-mic.png')
+    await tjs(`window.dispatchEvent(new CustomEvent('ec2ra:dictation', { detail: { active: false } }))`)
+    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'false'`, 'mic released')
+    // On a light scheme the ribbon follows the terminal's colours.
+    const termTheme = async (id) => {
+      await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+      await tuntil(`!!document.querySelector('.settings-nav [data-section="terminal"]')`, 'settings')
+      await tjs(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
+      await tuntil(`!!document.querySelector('[role="dialog"] select option[value="${id}"]')`, `${id} offered`)
+      await tjs(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="${id}"]').closest('select'); sel.value = '${id}'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+      await tjs(`document.querySelector('[role="dialog"] [aria-label="Close dialog"]').click()`)
+      await tuntil(`!document.querySelector('[role="dialog"]')`)
+    }
+    const themeBeforeRibbon = settings.terminalTheme ?? 'auto'
+    await termTheme('github-light')
+    await tuntil(`getComputedStyle(${ribbon}).backgroundColor !== '' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).getPropertyValue('--term-bg').trim() === '#ffffff'`, 'light scheme')
+    await tshot('terminal-ribbon-light.png')
+    await termTheme(themeBeforeRibbon)
+    // The folder chip's menu copies the path; the branch chip copies the branch name.
+    await tjs(`${ribbon}.querySelector('.trib-chip.folder').click()`)
+    await tuntil(`!!document.querySelector('.popover .menu-item')`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent === 'Copy path').click()`)
+    await tuntil(`!document.querySelector('.popover')`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== '/Users/fixture/proj'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], '/Users/fixture/proj')
+    await tjs(`${ribbon}.querySelector('.trib-chip.branch').click()`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== 'main'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'main')
     // A command typed in the input box runs in the shell and becomes a block.
     await typeCmd('echo hi')
     await pressIn('Enter')
@@ -1194,6 +1267,13 @@ app.whenReady().then(async () => {
     twin.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
     twin.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
     await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'input box back at the next prompt')
+    // Workflows (saved commands) from the ribbon: one marked to run is run.
+    await tjs(`[...document.querySelector('.term-slot:not([style*="none"]) .tribbon').querySelectorAll('.trib-chip')].find((b) => b.getAttribute('aria-label') === 'Workflows').click()`)
+    await tuntil(`[...document.querySelectorAll('.popover .menu-item')].some((b) => b.textContent.includes('Disk usage'))`, 'ribbon: workflows listed')
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes('Disk usage')).click()`)
+    for (let n = 0; n < 50 && !termWrites().some((d) => d.includes('df -h')); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(termWrites().some((d) => d.includes('df -h') && d.endsWith('\r')), 'the workflow runs')
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'back at the prompt after the workflow')
     // Splits: ⌘D opens a pane in the same folder, ⌥⌘← moves focus, ⌘W closes the focused pane.
     const opens = () => calls.filter((c) => c.channel === 'term:open').map((c) => c.args[0])
     const opensAtSplit = opens().length
@@ -1202,6 +1282,8 @@ app.whenReady().then(async () => {
     assert.equal(opens().length, opensAtSplit + 1)
     assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'the new pane starts in the same folder')
     await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"]) .tdock textarea').length === 2`)
+    // Half the width: the ribbon folds its labels away to icons and still fits.
+    await tuntil(`[...document.querySelectorAll('.term-slot:not([style*="none"]) .tribbon')].every((r) => r.clientWidth > 0 && r.clientWidth < 700 && r.scrollWidth <= r.clientWidth && [...r.querySelectorAll('.trib-label')].every((l) => getComputedStyle(l).display === 'none') && !!r.querySelector('.trib-chip.branch') && r.querySelector('.trib-count')?.textContent === '6')`, 'narrow panes: icon-only ribbon without overflow')
     await tshot('terminal-split.png')
     await tkey('ArrowLeft', { metaKey: true, altKey: true })
     await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tpane.focused') === document.querySelectorAll('.term-slot:not([style*="none"]) .tpane')[0]`, 'focus moves left')
@@ -1239,7 +1321,7 @@ app.whenReady().then(async () => {
     await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes('Production')).click()`)
     await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelector('.term-tab.on .term-tab-aws')?.textContent === 'production'`, 'AWS profile tab')
     assert.deepEqual(opens().at(-1).env, { AWS_PROFILE: 'production' })
-    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tchip.aws')?.textContent === 'production'`, 'AWS chip')
+    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tribbon .trib-chip.aws')?.textContent === 'production'`, 'AWS chip')
     // Each tab: the folder as its name, and underneath, as in Warp, the Git branch (the fixture's shell reports "main").
     await tuntil(`document.querySelectorAll('.term-side .term-tab-sub')[0]?.textContent.startsWith('main') && !!document.querySelectorAll('.term-side .term-tab-sub')[0].querySelector('.term-tab-branch-icon')`, 'side list shows the branch')
     await tshot('terminal-vertical-tabs.png')

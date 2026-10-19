@@ -5,6 +5,7 @@ import type {
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState } from './types'
+import type { GitStatus } from './gitStatus'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -124,6 +125,8 @@ export interface IpcApi {
   'term:history': () => Promise<string[]>
   'term:loadState': () => Promise<TerminalState | null>
   'term:saveState': (state: TerminalState) => Promise<void>
+  /** Git status of a terminal's folder for its ribbon (branch, changed files, lines); null outside a repository. */
+  'term:git': (cwd: string) => Promise<GitStatus | null>
   /** Opens a downloaded file, shows it in Finder, or opens the Downloads folder (no path). Only inside Downloads. */
   'browser:openDownload': (path: string | null, how: 'open' | 'reveal') => Promise<void>
   'browser:cancelDownload': (id: string) => Promise<void>

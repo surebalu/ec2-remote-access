@@ -1,19 +1,12 @@
 import type { ReactElement } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Snippet } from '@shared/types'
-import { suggestFromHistory, tildify } from '@shared/termIntegration'
+import { suggestFromHistory } from '@shared/termIntegration'
 import { matchesWords } from '@shared/browser'
-import { useStore } from '../../store'
 import { Icon } from '../icons'
 import { history } from './history'
 
-export interface Chips {
-  cwd?: string
-  git?: string
-  aws?: string
-}
-
-const EMPTY: Snippet[] = []
+/** Asked of the input box from outside (the ribbon): search history, or put a workflow's command in it. */
+export type DockRequest = { n: number } & ({ kind: 'search' } | { kind: 'insert'; text: string })
 
 const elapsed = (ms: number): string => {
   const s = Math.floor(ms / 1000)
@@ -21,32 +14,32 @@ const elapsed = (ms: number): string => {
 }
 
 /**
- * The bottom of a pane, as in Warp: while the shell waits at its prompt, an input box (multi-line editing, history
- * on ↑/↓, a suggestion from history to accept with →, ⌃R to search history, workflows) whose Enter sends the line
- * to the shell; Tab hands the line to the shell for its own completion. While a command runs, a bar with its name
- * and time, and the keyboard goes to the program.
+ * Above a pane's ribbon, as in Warp: while the shell waits at its prompt, an input box (multi-line editing, history
+ * on ↑/↓, a suggestion from history to accept with →, ⌃R to search history) whose Enter sends the line to the
+ * shell; Tab hands the line to the shell for its own completion, ⌃G switches to typing straight into the shell.
+ * While a command runs, a bar with its name and time, and the keyboard goes to the program.
  */
-export default function InputDock({ mode, chips, home, running, onRun, onHandoff, onKey, onReveal, focusKey, fontFamily }: {
+export default function InputDock({ mode, running, onRun, onHandoff, onKey, onToggleInput, request, onRequestDone, focusKey, fontFamily }: {
   mode: 'editor' | 'running'
-  chips: Chips
-  home?: string
   running: { command: string; startedAt: number } | null
   onRun: (text: string) => void
   onHandoff: (text: string) => void
   /** A control key for the shell (⌃C, ⌃D, ⌃L) pressed in the empty input box. */
   onKey: (data: string) => void
-  onReveal: (path: string) => void
+  /** ⌃G: type straight into the shell instead. */
+  onToggleInput: () => void
+  request: DockRequest | null
+  /** The request was carried out (so the box does not repeat it when it comes back after a command). */
+  onRequestDone: () => void
   /** Changing it puts the keyboard in the input box. */
   focusKey: number
   fontFamily: string
 }): ReactElement {
-  const snippets = useStore((s) => s.settings?.snippets ?? EMPTY)
   const [text, setText] = useState('')
   const [histAt, setHistAt] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState<string | null>(null)
   const [searchSel, setSearchSel] = useState(0)
-  const [flows, setFlows] = useState(false)
   const [, tick] = useState(0)
   const area = useRef<HTMLTextAreaElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
@@ -54,6 +47,16 @@ export default function InputDock({ mode, chips, home, running, onRun, onHandoff
   useEffect(() => {
     if (mode === 'editor') area.current?.focus()
   }, [mode, focusKey])
+  useEffect(() => {
+    if (!request || mode !== 'editor') return
+    onRequestDone()
+    if (request.kind === 'search') setSearch('')
+    else {
+      setText(request.text)
+      setHistAt(null)
+      setTimeout(() => { const a = area.current; if (a) { a.focus(); a.setSelectionRange(a.value.length, a.value.length) } }, 0)
+    }
+  }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
   // The running bar's clock.
   useEffect(() => {
     if (mode !== 'running') return
@@ -92,8 +95,6 @@ export default function InputDock({ mode, chips, home, running, onRun, onHandoff
     return out
   }, [search])
   useEffect(() => setSearchSel(0), [search])
-
-  const flowList = snippets.filter((s) => !s.hostKey)
 
   if (mode === 'running' && running) {
     return (
@@ -145,28 +146,6 @@ export default function InputDock({ mode, chips, home, running, onRun, onHandoff
           </div>
         </div>
       )}
-      {flows && (
-        <div className="tdock-pop">
-          <div className="tdock-pop-head"><Icon.snippet /><span className="flex-1">Workflows</span><button type="button" className="tdock-link" onClick={() => { setFlows(false); useStore.getState().set({ snippetsOpen: {} }) }}>Edit…</button></div>
-          <div className="tdock-pop-list">
-            {flowList.map((s) => (
-              <button key={s.id} type="button" className="tdock-pop-item flow" onClick={() => { setFlows(false); if (s.run) run(s.command); else { setText(s.command); setTimeout(() => area.current?.focus(), 0) } }}>
-                <span className="tdock-flow-name">{s.name}</span>
-                <span className="tdock-flow-cmd">{s.command}</span>
-              </button>
-            ))}
-            {!flowList.length && <div className="tdock-pop-empty">Saved commands (snippets) appear here. Add them with Edit….</div>}
-          </div>
-        </div>
-      )}
-      <div className="tdock-chips">
-        {chips.cwd && <button type="button" className="tchip" title={`${chips.cwd}\nShow in Finder`} onClick={() => onReveal(chips.cwd!)}><Icon.folder />{tildify(chips.cwd, home)}</button>}
-        {chips.git && <span className="tchip git" title="Git branch"><Icon.branch />{chips.git}</span>}
-        {chips.aws && <span className="tchip aws" title="AWS_PROFILE"><Icon.cloud />{chips.aws}</span>}
-        <span className="flex-1" />
-        <button type="button" className="tdock-icon" title="Search history (⌃R)" aria-label="Search history" onClick={() => setSearch('')}><Icon.search /></button>
-        <button type="button" className="tdock-icon" title="Workflows (saved commands)" aria-label="Workflows" onClick={() => setFlows((v) => !v)}><Icon.snippet /></button>
-      </div>
       <div className="tdock-edit">
         <span className="tdock-caret">❯</span>
         <div className="tdock-field" style={{ height: `${lines * 1.5}em` }}>
@@ -198,6 +177,7 @@ export default function InputDock({ mode, chips, home, running, onRun, onHandoff
               else if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'c') { e.preventDefault(); if (el.value) setText(''); else onKey('\x03') }
               else if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'd' && !el.value) { e.preventDefault(); onKey('\x04') }
               else if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'l') { e.preventDefault(); onKey('\x0c') }
+              else if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); onToggleInput() }
             }}
           />
         </div>

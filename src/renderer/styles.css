@@ -1080,15 +1080,6 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .tdock-hint { opacity: .5; font: 10.5px/1.3 -apple-system, system-ui, sans-serif; white-space: nowrap; }
 .tdock-btn { flex-shrink: 0; padding: 4px 9px; border-radius: 6px; background: rgba(248, 81, 73, .18); color: #ff7b72; font: 600 11px/1 -apple-system, system-ui, sans-serif; }
 .tdock-btn:hover { background: rgba(248, 81, 73, .3); }
-.tdock-chips { display: flex; align-items: center; gap: 6px; height: 20px; font: 11px/1 -apple-system, system-ui, sans-serif; }
-.tchip { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; height: 20px; padding: 0 7px; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--term-fg) 9%, transparent); color: color-mix(in srgb, var(--term-fg) 82%, transparent); text-overflow: ellipsis; white-space: nowrap; }
-.tchip svg { width: 11px; height: 11px; flex-shrink: 0; }
-button.tchip:hover { background: color-mix(in srgb, var(--term-fg) 15%, transparent); }
-.tchip.git { color: #d2a8ff; }
-.tchip.aws { color: #f0883e; }
-.tdock-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; border-radius: 5px; color: var(--term-fg); opacity: .6; }
-.tdock-icon:hover { background: color-mix(in srgb, var(--term-fg) 12%, transparent); opacity: 1; }
-.tdock-icon svg { width: 12px; height: 12px; }
 .tdock-edit { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; line-height: 1.5; }
 .tdock-caret { color: #7ee787; font-weight: 700; }
 .tdock-field { position: relative; flex: 1; min-width: 0; min-height: 1.5em; }
@@ -1104,11 +1095,7 @@ button.tchip:hover { background: color-mix(in srgb, var(--term-fg) 15%, transpar
 .tdock-pop-list { overflow-y: auto; padding: 4px; }
 .tdock-pop-item { display: block; width: 100%; padding: 5px 9px; overflow: hidden; border-radius: 6px; color: var(--term-fg); font: 12.5px/1.45 'SF Mono', ui-monospace, Menlo, monospace; text-align: left; text-overflow: ellipsis; white-space: pre; }
 .tdock-pop-item:hover, .tdock-pop-item.on { background: color-mix(in srgb, var(--accent) 26%, transparent); }
-.tdock-pop-item.flow { display: flex; flex-direction: column; }
-.tdock-flow-name { font: 600 12px/1.4 -apple-system, system-ui, sans-serif; }
-.tdock-flow-cmd { opacity: .7; overflow: hidden; text-overflow: ellipsis; }
 .tdock-pop-empty { padding: 10px; opacity: .6; font: 12px/1.4 -apple-system, system-ui, sans-serif; }
-.tdock-link { color: var(--accent); font-size: 11.5px; font-weight: 600; }
 
 /* Whiteboard (components/board) */
 .board { --board-ink: var(--text); --board-paper: var(--bg-elev); --board-dot: color-mix(in srgb, var(--text) 17%, transparent); --board-line: color-mix(in srgb, var(--text) 7%, transparent); --board-glass: color-mix(in srgb, var(--panel) 86%, transparent); position: relative; display: flex; height: 100%; min-height: 0; background: var(--board-paper); }
@@ -1389,3 +1376,84 @@ tr.group-row .group-head:hover .group-run, tr.group-row .group-run:focus-visible
 .term-tab-rest { flex-shrink: 0; color: var(--muted); }
 .term-tab-chip { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; max-width: 130px; padding: 1px 6px; overflow: hidden; border-radius: 5px; background: var(--accent-soft); color: var(--text-2); font: 500 10.5px/16px 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .term-tab-chip svg { flex-shrink: 0; width: 10px; height: 10px; color: var(--accent); }
+
+/* Terminal ribbon (components/terminal/Ribbon.tsx): Warp's slim bar along the bottom of each pane, under the input
+   box. The pane is a size container so the foot can repaint the scheme's backdrop (a gradient for Cyber Wave) exactly
+   where it sits, opaque over terminal text when a multi-line command grows the input box. */
+.tpane { --trib-h: 28px; --trib-line: color-mix(in srgb, var(--term-fg) 14%, transparent); --trib-dim: color-mix(in srgb, var(--term-fg) 62%, transparent); container: tpane / size; }
+.tpane-foot { position: absolute; z-index: 4; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; background: var(--term-backdrop, var(--term-bg)); background-position: center bottom; background-repeat: no-repeat; background-size: 100% 100cqh; color: var(--term-fg); }
+.tpane-foot > .tdock, .tpane-foot > .tpane-keys { position: relative; right: auto; bottom: auto; left: auto; }
+.tpane-foot > .tdock { justify-content: center; min-height: 46px; padding: 12px 14px 10px; background: color-mix(in srgb, var(--term-fg) 5%, transparent); }
+.tpane-foot .tdock-caret { color: color-mix(in srgb, #3fb950 80%, var(--term-fg)); }
+/* Phones type at 16px (so iOS does not zoom); the box's height follows. */
+html[data-mobile] .tpane-foot .tdock-edit { font-size: 16px; }
+.tpane-term.with-dock { bottom: 46px; }
+.tpane-term.with-ribbon { bottom: var(--trib-h); }
+.tpane-term.with-dock.with-ribbon, .tpane-term.with-keys.with-ribbon { bottom: calc(46px + var(--trib-h)); }
+
+.tribbon { container: tribbon / inline-size; display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: var(--trib-h); padding: 0 7px 1px; overflow: hidden; background: color-mix(in srgb, var(--term-fg) 5%, transparent); font: 500 11px/1 -apple-system, system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+.tpane-foot > .tribbon:first-child { border-top: 1px solid color-mix(in srgb, var(--term-fg) 11%, transparent); }
+.trib-side { display: flex; flex-shrink: 0; align-items: center; gap: 4px; min-width: 0; }
+.trib-side.right { flex-shrink: 1; justify-content: flex-end; overflow: hidden; }
+.trib-gap { flex: 1 1 0; min-width: 2px; }
+.trib-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--trib-line); border-radius: 6px; color: var(--trib-dim); white-space: nowrap; transition: color .12s var(--ease), background-color .12s var(--ease), border-color .12s var(--ease); }
+.trib-chip svg { width: 12px; height: 12px; flex-shrink: 0; }
+button.trib-chip { cursor: default; }
+button.trib-chip:hover { border-color: color-mix(in srgb, var(--term-fg) 26%, transparent); background: color-mix(in srgb, var(--term-fg) 8%, transparent); color: var(--term-fg); }
+button.trib-chip:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+.trib-chip.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--term-fg); }
+button.trib-chip.on:hover { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.trib-chip.square { justify-content: center; width: 22px; padding: 0; }
+.trib-chip.square svg { width: 13px; height: 13px; }
+.trib-chip.mic.rec { border-color: color-mix(in srgb, #ff453a 60%, transparent); background: color-mix(in srgb, #ff453a 22%, transparent); color: color-mix(in srgb, #ff453a 70%, var(--term-fg)); animation: trib-rec 1.6s var(--ease) infinite; }
+@keyframes trib-rec { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, #ff453a 45%, transparent) } 60% { box-shadow: 0 0 0 4px transparent } }
+.trib-kbd { padding: 2px 3px; border: 0; border-radius: 3px; background: color-mix(in srgb, var(--term-fg) 10%, transparent); color: inherit; font: 600 9.5px/1 -apple-system, system-ui, sans-serif; opacity: .8; }
+.trib-chip.git { gap: 4px; font-variant-numeric: tabular-nums; }
+.trib-pm { font-size: 12px; font-weight: 600; }
+.trib-lines { margin-left: 2px; font: 10.5px/1 'SF Mono', ui-monospace, Menlo, monospace; }
+.trib-add { color: color-mix(in srgb, #3fb950 78%, var(--term-fg)); }
+.trib-del { color: color-mix(in srgb, #f85149 78%, var(--term-fg)); }
+.trib-side.right .trib-chip { flex-shrink: 1; min-width: 0; }
+.trib-chip.folder { flex-shrink: 3; }
+.trib-text { min-width: 0; overflow: hidden; font: 11px/1.2 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; }
+.trib-path-short { display: none; }
+.trib-ab { flex-shrink: 0; font: 10px/1 'SF Mono', ui-monospace, Menlo, monospace; opacity: .8; }
+.trib-chip.aws { color: color-mix(in srgb, #f0883e 75%, var(--term-fg)); }
+/* A narrow pane (a split, the grid, a phone): icons only on the left, the folder's last part on the right. */
+@container tribbon (max-width: 700px) {
+  .trib-label, .trib-kbd, .trib-lines { display: none; }
+  .trib-side:first-child .trib-chip:not(.git) { justify-content: center; width: 22px; padding: 0; }
+}
+@container tribbon (max-width: 430px) {
+  .trib-path-long { display: none; }
+  .trib-path-short { display: inline; }
+  .trib-side.right .trib-chip.aws { flex-shrink: 4; }
+}
+
+/* The ribbon's menus (app colours: they are popovers like every other menu). */
+.trib-pop-head { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px 1px; }
+.trib-pop-title { color: var(--text); font-size: 12.5px; font-weight: 650; }
+.trib-pop-lines { font: 11px/1 'SF Mono', ui-monospace, Menlo, monospace; }
+.trib-pop-lines .add { color: var(--ok); }
+.trib-pop-lines .del { color: var(--err); }
+.trib-pop-sub { padding: 0 12px 4px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.trib-files { max-height: 300px; overflow-y: auto; }
+.trib-file { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.trib-st { flex-shrink: 0; width: 12px; font: 700 11px/1 'SF Mono', ui-monospace, Menlo, monospace; text-align: center; }
+.trib-st.st-m, .trib-st.st-t { color: var(--warn); }
+.trib-st.st-a, .trib-st.st-new { color: var(--ok); }
+.trib-st.st-d, .trib-st.st-u { color: var(--err); }
+.trib-st.st-r, .trib-st.st-c { color: var(--info); }
+.trib-st.staged { text-decoration: underline; text-underline-offset: 2px; }
+.trib-file-path { min-width: 0; overflow: hidden; font: 11.5px/1.3 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item:hover .trib-st { color: inherit; }
+.trib-flow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.trib-flow-name { font-weight: 600; }
+.trib-flow-cmd { overflow: hidden; opacity: .7; font: 11px/1.3 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+/* Fingers on a phone or iPad need bigger chips. */
+html[data-mobile] .tpane { --trib-h: 38px; }
+html[data-mobile] .trib-chip { height: 28px; border-radius: 8px; }
+html[data-mobile] .trib-chip.square { width: 30px; }
+@container tribbon (max-width: 700px) {
+  html[data-mobile] .trib-side:first-child .trib-chip:not(.git) { width: 30px; }
+}
