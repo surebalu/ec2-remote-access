@@ -13,7 +13,7 @@ function ThemeCard({ t }: { t: TerminalTheme }): ReactElement {
     [th.magenta ?? th.foreground, 18], [th.yellow ?? th.foreground, 36]
   ] as [string | undefined, number][]
   return (
-    <span className="theme-card" style={{ background: th.background, borderColor: 'color-mix(in srgb, var(--border) 60%, transparent)' }}>
+    <span className="theme-card" style={{ background: t.backdrop ?? th.background, borderColor: 'color-mix(in srgb, var(--border) 60%, transparent)' }}>
       <span className="theme-card-bar" style={{ background: th.brightBlack ?? th.foreground, opacity: 0.35 }} />
       {[0, 2, 4].map((i) => (
         <span key={i} className="flex gap-[3px]">

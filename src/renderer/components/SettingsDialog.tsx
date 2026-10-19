@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
 import type { AccentColor } from '@shared/types'
-import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isDarkMode } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
 import { Icon } from './icons'
@@ -231,7 +231,7 @@ export default function SettingsDialog(): ReactElement | null {
   const terminal = (
     <>
       <Group title="Appearance">
-        <div className="set-preview" style={{ background: t.background, color: t.foreground, fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE }}>
+        <div className="set-preview" style={{ background: terminalBackdrop(draft.terminalTheme, isDarkMode()), color: t.foreground, fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE }}>
           <div><span style={{ color: t.green ?? t.foreground }}>ec2-user@ip-10-0-2-149</span>:<span style={{ color: t.blue ?? t.foreground }}>~</span>$ ls -la</div>
           <div className="flex gap-1 pt-1.5">{ansi.map((c, i) => <span key={i} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />)}</div>
         </div>

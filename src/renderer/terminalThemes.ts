@@ -11,6 +11,11 @@ export interface TerminalTheme {
   /** Whether the scheme has a dark background; drives contrast for the settings preview. */
   dark: boolean
   theme: ITheme
+  /**
+   * A CSS background painted behind the text instead of the flat `theme.background` (Warp themes with a gradient).
+   * xterm keeps `theme.background` for what needs a solid colour: inverse video and the text under a block cursor.
+   */
+  backdrop?: string
 }
 
 const p = (
@@ -25,6 +30,15 @@ const p = (
 
 export const TERMINAL_THEMES: TerminalTheme[] = [
   { id: 'auto', name: 'Match app', dark: true, theme: {} },
+  {
+    // Warp's bundled Cyber Wave (warpdotdev/themes, warp_bundled/cyber_wave.yaml): deep teal fading to black, with
+    // a teal-to-purple accent. xterm has one cursor colour, so it takes a lighter shade of the accent's purple end.
+    id: 'cyber-wave', name: 'Cyber Wave', dark: true,
+    backdrop: 'linear-gradient(180deg, #002633 0%, #000000 100%)',
+    theme: p('#002633', '#ffffff', '#c26ad6', '#00797273',
+      '#616161', '#ff8272', '#b4fa72', '#fefdc2', '#a5d5fe', '#ff8ffd', '#d0d1fe', '#f1f1f1',
+      '#8e8e8e', '#ffc4bd', '#d6fcb9', '#fefdd5', '#c1e3fe', '#ffb1fe', '#e5e6fe', '#feffff')
+  },
   {
     id: 'dracula', name: 'Dracula', dark: true,
     theme: p('#282a36', '#f8f8f2', '#f8f8f2', '#44475a80',
@@ -106,6 +120,12 @@ const AUTO_LIGHT: ITheme = { background: '#ffffff', foreground: '#1c2128', curso
 export function resolveTerminalTheme(id: string | undefined, appDark: boolean): ITheme {
   const t = TERMINAL_THEMES.find((x) => x.id === id && x.id !== 'auto')
   return t ? t.theme : appDark ? AUTO_DARK : AUTO_LIGHT
+}
+
+/** What to paint behind a terminal: the scheme's gradient when it has one, else its flat background. */
+export function terminalBackdrop(id: string | undefined, appDark: boolean): string {
+  const t = TERMINAL_THEMES.find((x) => x.id === id && x.id !== 'auto')
+  return t?.backdrop ?? resolveTerminalTheme(id, appDark).background ?? (appDark ? AUTO_DARK.background! : AUTO_LIGHT.background!)
 }
 
 /** Fonts offered in Settings. Every one except JetBrains Mono / Fira Code ships with macOS. */

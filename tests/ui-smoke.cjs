@@ -1155,6 +1155,19 @@ app.whenReady().then(async () => {
     await tshot('terminal-blocks.png')
     await tjs(`document.querySelector('.tblock-bar button[title="Copy the output"]').click()`)
     for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== 'hi'; n++) await new Promise((r) => setTimeout(r, 30))
+    // Cyber Wave (Warp's theme): a teal-to-black gradient behind the text, with xterm's own background out of the way.
+    const themeBefore = settings.terminalTheme
+    await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await tuntil(`!!document.querySelector('.settings-nav [data-section="terminal"]')`, 'settings')
+    await tjs(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
+    await tuntil(`!!document.querySelector('[role="dialog"] select option[value="cyber-wave"]')`, 'cyber wave offered')
+    await tjs(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="cyber-wave"]').closest('select'); sel.value = 'cyber-wave'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await tuntil(`getComputedStyle(document.querySelector('.set-preview')).backgroundImage.includes('gradient')`, 'settings preview shows the gradient')
+    await tjs(`document.querySelector('[role="dialog"] [aria-label="Close dialog"]').click()`)
+    await tuntil(`!document.querySelector('[role="dialog"]') && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundImage.includes('linear-gradient')`, 'terminal pane has the gradient')
+    assert.equal(await tjs(`getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .xterm-scrollable-element')).backgroundColor`), 'rgba(0, 0, 0, 0)', 'xterm paints no background of its own')
+    await tshot('terminal-cyber-wave.png')
+    await tjs(`window.api.invoke('settings:set', { terminalTheme: ${JSON.stringify(themeBefore ?? 'auto')} })`)
     assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'hi')
     // History on ↑, and a suggestion from history.
     await typeCmd('')

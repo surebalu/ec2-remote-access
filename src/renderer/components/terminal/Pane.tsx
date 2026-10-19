@@ -6,7 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { parseMark, parseOsc7, type ShellMark } from '@shared/termIntegration'
 import { isDarkMode, useStore } from '../../store'
-import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../../terminalThemes'
+import { resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../../terminalThemes'
 import { Icon } from '../icons'
 import InputDock, { type Chips } from './InputDock'
 import KeyBar from '../mobile/KeyBar'
@@ -399,7 +399,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   return (
     <div
       className={`tpane ${focused && multi ? 'focused' : ''} ${multi && !focused ? 'dim' : ''}`}
-      style={{ '--term-bg': theme.background ?? '#0d1117', '--term-fg': theme.foreground ?? '#e6edf3' } as CSSProperties}
+      style={{ '--term-bg': theme.background ?? '#0d1117', '--term-backdrop': terminalBackdrop(settings?.terminalTheme, isDarkMode()), '--term-fg': theme.foreground ?? '#e6edf3' } as CSSProperties}
       onMouseDown={onFocus}
     >
       <div

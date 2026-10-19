@@ -6,7 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import type { DetachedShell, HostShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
-import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
 import HostActions, { openHostNote } from './HostActions'
 import TerminalAppearancePane from './TerminalAppearancePane'
@@ -131,7 +131,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const terminalsInSplit = useStore((s) => s.splitGroup.filter((id) => s.tabs.some((t) => t.id === id && t.kind === 'ssh')).length)
   const canBroadcast = inSplit && terminalsInSplit > 1
   const theme = resolveTerminalTheme(themeId, isDarkMode())
-  const background = theme.background ?? (isDarkMode() ? '#0f1115' : '#ffffff')
+  const background = terminalBackdrop(themeId, isDarkMode())
   const snippets = snippetsFor(tab.instanceKey, allSnippets)
 
   useEffect(() => {
