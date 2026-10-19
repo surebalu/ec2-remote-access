@@ -194,7 +194,7 @@ test('a paired page can neither open a shell on this computer nor see one, nor f
   const { gw, port } = await start({ 'term:open': async () => { opened = true; return {} }, 'browser:fill': async () => ['password'] })
   const c = await client(port, 'secret')
   assert.equal((await c.next()).t, 'hello')
-  for (const channel of ['term:open', 'term:write', 'browser:fill', 'browser:logins', 'browser:openDownload']) {
+  for (const channel of ['term:open', 'term:write', 'term:git', 'browser:fill', 'browser:logins', 'browser:openDownload']) {
     const r = await c.call(channel, { id: 'x', cols: 80, rows: 24 })
     assert.equal(r.t, 'error', channel)
     assert.match(r.message ?? '', /only available in the Mac app|Terminals from paired devices are off/)

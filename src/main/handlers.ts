@@ -12,6 +12,7 @@ import { getCachedInventory, getSettings, setSettings } from './store'
 import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
 import { opLogins, opSecrets } from './onepassword'
 import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
+import { localGitStatus } from './localgit'
 import { loginMatches } from '@shared/browser'
 import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
 import { deleteBoard, listBoards, loadBoard, saveBoard } from './boards'
@@ -171,6 +172,7 @@ export const handlers: Handlers = {
   'term:history': async () => shellHistory(),
   'term:loadState': async () => loadTerminalState(),
   'term:saveState': (state) => saveTerminalState(state),
+  'term:git': (cwd) => localGitStatus(cwd),
   'browser:logins': async (pageUrl, refresh) => (await opLogins(refresh)).map((l) => ({ ...l, matches: loginMatches(l.urls, pageUrl) })),
   'browser:fill': async (webContentsId, account, itemId, anySite) => {
     const login = (await opLogins()).find((l) => l.id === itemId && l.account === account)
