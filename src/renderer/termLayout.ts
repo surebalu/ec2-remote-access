@@ -1,7 +1,8 @@
 /**
- * Split panes of a Terminal tab as a tree (PaneNode): splitting, closing, resizing, and finding the pane in a
- * direction. Pure, so tests load it directly. The renderer draws every pane absolutely from `layoutRects`, so a
- * pane's terminal never moves in the DOM when the tree changes (a remount would throw its scrollback away).
+ * Split panes as a tree (PaneNode), for a Terminal tab's panes and for the app's side-by-side view of tabs: splitting,
+ * docking, closing, resizing, and finding the pane in a direction. Pure, so tests load it directly. The renderer draws
+ * every pane absolutely from `layoutRects`, so a pane never moves in the DOM when the tree changes (a remount would
+ * throw a terminal's scrollback away and reload a web page).
  */
 import type { PaneNode } from '@shared/types'
 
@@ -32,20 +33,35 @@ export function paneIds(node: PaneNode): string[] {
 
 /** Splits pane `target`, putting `id` after it; a split in the same direction gets another child instead of nesting. */
 export function splitPane(root: PaneNode, target: string, id: string, dir: 'row' | 'column'): PaneNode {
+  return insertPane(root, target, id, dir === 'row' ? 'right' : 'down')
+}
+
+/** Puts pane `id` on one side of pane `target`: into the split around it when that runs the same way, else nested. */
+export function insertPane(root: PaneNode, target: string, id: string, side: Direction): PaneNode {
+  const dir = side === 'left' || side === 'right' ? 'row' : 'column'
+  const before = side === 'left' || side === 'up'
+  const fresh: PaneNode = { type: 'pane', id }
   const visit = (node: PaneNode): PaneNode => {
     if (node.type === 'pane') {
-      return node.id === target ? { type: 'split', dir, children: [node, { type: 'pane', id }], sizes: [0.5, 0.5] } : node
+      return node.id === target ? { type: 'split', dir, children: before ? [fresh, node] : [node, fresh], sizes: [0.5, 0.5] } : node
     }
     const at = node.children.findIndex((c) => c.type === 'pane' && c.id === target)
     if (at >= 0 && node.dir === dir) {
       const half = node.sizes[at] / 2
-      const children = [...node.children.slice(0, at + 1), { type: 'pane', id } as PaneNode, ...node.children.slice(at + 1)]
+      const i = before ? at : at + 1
+      const children = [...node.children.slice(0, i), fresh, ...node.children.slice(i)]
       const sizes = [...node.sizes.slice(0, at), half, half, ...node.sizes.slice(at + 1)]
       return { ...node, children, sizes }
     }
     return { ...node, children: node.children.map(visit) }
   }
   return visit(root)
+}
+
+/** Panes `a` and `b` trade places; when only one of them is in the tree, the other takes its place. */
+export function swapPanes(root: PaneNode, a: string, b: string): PaneNode {
+  if (root.type === 'pane') return root.id === a ? { type: 'pane', id: b } : root.id === b ? { type: 'pane', id: a } : root
+  return { ...root, children: root.children.map((c) => swapPanes(c, a, b)) }
 }
 
 /** The tree without pane `id` (its share goes to its neighbour); null when it was the only pane. */
@@ -100,6 +116,16 @@ export function resizeSplit(root: PaneNode, path: number[], index: number, delta
   return { ...root, sizes }
 }
 
+/** The split at `path` with every child the same size again (double-clicking its border). */
+export function equalize(root: PaneNode, path: number[] = []): PaneNode {
+  if (root.type !== 'split') return root
+  if (path.length) {
+    const [head, ...rest] = path
+    return { ...root, children: root.children.map((c, i) => (i === head ? equalize(c, rest) : c)) }
+  }
+  return { ...root, sizes: root.children.map(() => 1 / root.children.length) }
+}
+
 /** The pane next to `from` in a direction: touching its edge, with the most overlap. */
 export function neighbor(root: PaneNode, from: string, dir: Direction): string | null {
   const { panes } = layoutRects(root)
@@ -142,4 +168,38 @@ export function presetLayout(kind: Preset, ids: string[]): PaneNode {
     case 'main': return split('row', [p(0), split('column', [p(1), p(2)])])
     case 'grid': return split('column', [split('row', [p(0), p(1)]), split('row', [p(2), p(3)])])
   }
+}
+
+/** Arrangements for any number of panes (the app's side-by-side view, unlike the fixed presets above). */
+export type Arrangement = 'columns' | 'rows' | 'main' | 'grid'
+
+/**
+ * `ids` (in reading order) laid out side by side, stacked, the first one large with the rest stacked beside it, or in
+ * rows of two (three from five panes up). Shares start equal, except the large pane's.
+ */
+export function arrange(kind: Arrangement, ids: string[]): PaneNode {
+  const p = (id: string): PaneNode => ({ type: 'pane', id })
+  const split = (dir: 'row' | 'column', children: PaneNode[], sizes?: number[]): PaneNode =>
+    children.length === 1 ? children[0] : { type: 'split', dir, children, sizes: sizes ?? children.map(() => 1 / children.length) }
+  if (ids.length < 2) return p(ids[0])
+  switch (kind) {
+    case 'columns': return split('row', ids.map(p))
+    case 'rows': return split('column', ids.map(p))
+    case 'main': return split('row', [p(ids[0]), split('column', ids.slice(1).map(p))], [0.6, 0.4])
+    case 'grid': {
+      const per = ids.length > 4 ? 3 : 2
+      const rows: PaneNode[] = []
+      for (let i = 0; i < ids.length; i += per) rows.push(split('row', ids.slice(i, i + per).map(p)))
+      return split('column', rows)
+    }
+  }
+}
+
+/** Where something dropped at (x, y) over pane rectangle `r` goes: beside it on the nearest edge, or in its place in the middle. */
+export function dockZone(r: Rect, x: number, y: number): Direction | 'center' {
+  const fx = (x - r.x) / r.w
+  const fy = (y - r.y) / r.h
+  if (fx > 0.3 && fx < 0.7 && fy > 0.3 && fy < 0.7) return 'center'
+  const gaps: Record<Direction, number> = { left: fx, right: 1 - fx, up: fy, down: 1 - fy }
+  return (Object.keys(gaps) as Direction[]).reduce((a, b) => (gaps[b] < gaps[a] ? b : a))
 }

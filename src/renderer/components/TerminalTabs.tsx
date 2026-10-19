@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { isSession, useStore, type Tab } from '../store'
 import TerminalTab from './TerminalTab'
@@ -10,6 +10,8 @@ import TerminalApp from './terminal/TerminalApp'
 import BoardTab from './board/BoardTab'
 import FinderTab from './finder/FinderTab'
 import { Icon } from './icons'
+import { DockShield, endDockDrag, SplitBar, SplitDividers, startDockDrag } from './SplitView'
+import { layoutRects, type Rect } from '../termLayout'
 
 const GAP = 4
 /** Session count at which the title-bar brand collapses to its logo. */
@@ -136,11 +138,11 @@ export default function TerminalTabs(): ReactElement {
       onAuxClick={(e) => { if (e.button === 1) void s.closeTab(t.id) }}
       title={tabTooltip(t)}
       draggable={!ghost}
-      onDragStart={(e) => { dragId.current = t.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.title) }}
+      onDragStart={(e) => { dragId.current = t.id; startDockDrag(e, { tabId: t.id }); e.dataTransfer.setData('text/plain', t.title) }}
       onDragOver={(e) => { if (dragId.current && dragId.current !== t.id) { e.preventDefault(); setDragOver(t.id) } }}
       onDragLeave={() => setDragOver((d) => (d === t.id ? null : d))}
       onDrop={(e) => { e.preventDefault(); if (dragId.current) s.moveTab(dragId.current, t.id); dragId.current = null; setDragOver(null) }}
-      onDragEnd={() => { dragId.current = null; setDragOver(null) }}
+      onDragEnd={() => { dragId.current = null; setDragOver(null); endDockDrag() }}
     >
       <span className="dot" style={{ background: dotFor(t.status), animation: t.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
       {iconFor(t)}
@@ -216,9 +218,13 @@ export default function TerminalTabs(): ReactElement {
   )
 }
 
+const WHOLE: Rect = { x: 0, y: 0, w: 1, h: 1 }
+
 /**
  * Session content areas, kept mounted so terminals retain their buffers. While the focused tab belongs to the split
- * group, every tab of the group is laid out side by side and a press inside a pane focuses it.
+ * group, every tab of the group is laid out from the split's tree (absolutely, so resizing or rearranging never moves
+ * a pane in the DOM: a terminal would lose its scrollback and a web page would reload), with draggable borders, a
+ * header per pane to drag it elsewhere, and the split bar above. A press inside a pane focuses it.
  *
  * `grid` tiles every session on one page with a header each. It is the same elements in a different layout, so nothing
  * reconnects; terminals refit to their tile, and desktops are letterboxed rather than resized (see RdpTab `tiled`).
@@ -228,56 +234,103 @@ export default function TerminalTabs(): ReactElement {
 export function SessionPanes({ grid = false, touch = false }: { grid?: boolean; touch?: boolean }): ReactElement {
   const s = useStore()
   const width = useWindowWidth()
+  const box = useRef<HTMLDivElement>(null)
   const tiled = grid && s.tabs.length > 0
   // A host grid tiles only that machine's terminals (every shell kept on it); the All grid tiles every tab.
   const inGrid = (t: Tab): boolean => isSession(t) && (!s.gridHost || (t.instanceKey === s.gridHost && t.kind === 'ssh'))
-  const split = !tiled && s.splitGroup.includes(s.activeTab) ? s.splitGroup : []
-  const shown = (id: string): boolean => (tiled ? inGrid(s.tabs.find((t) => t.id === id)!) : id === s.activeTab || split.includes(id))
+  const split = !tiled && s.splitTree && s.splitGroup.includes(s.activeTab) ? s.splitGroup : []
+  const zoomed = split.length && s.splitZoom === s.activeTab ? s.splitZoom : null
+  const rects = useMemo(() => (s.splitTree ? layoutRects(s.splitTree) : null), [s.splitTree])
+  const shown = (id: string): boolean => (tiled ? inGrid(s.tabs.find((t) => t.id === id)!) : split.length ? (zoomed ? id === zoomed : split.includes(id)) : id === s.activeTab)
   const anyShown = s.tabs.some((t) => shown(t.id))
   const n = tiled ? s.tabs.filter(inGrid).length : s.tabs.length
   const cols = Math.max(1, Math.min(n <= 3 ? n : Math.ceil(Math.sqrt(n)), Math.floor(width / 380)))
-  const focus = (id: string): void => {
-    if (s.activeTab !== id) s.set({ activeTab: id })
+  const rectOf = (id: string): Rect | undefined => (split.length && shown(id) ? (zoomed ? WHOLE : rects?.panes[id]) : undefined)
+  /** The pane under a point of the session area (in fractions of it), for docking. */
+  const paneAt = (x: number, y: number): { id: string; r: Rect } | null => {
+    if (!split.length || zoomed) return anyShown ? { id: zoomed ?? s.activeTab, r: WHOLE } : null
+    for (const id of split) {
+      const r = rects?.panes[id]
+      if (r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return { id, r }
+    }
+    return null
   }
+
+  // A pane given the keyboard from elsewhere (⌥⌘ arrows, the split bar) gets the DOM focus too, unless it already has
+  // it: terminals focus themselves, a page or an editor does not.
+  const splitOn = split.length > 0
+  useEffect(() => {
+    if (!splitOn) return
+    const el = box.current?.querySelector<HTMLElement>(`[data-tab-id="${s.activeTab}"]`)
+    if (!el || el.contains(document.activeElement)) return
+    requestAnimationFrame(() => {
+      if (el.contains(document.activeElement)) return
+      el.querySelector<HTMLElement>('.web-host.on webview, .cm-content, .xterm-helper-textarea, textarea, input')?.focus()
+    })
+  }, [s.activeTab, splitOn])
+
   return (
-    <div
-      className={tiled ? 'session-grid' : `session-panes min-h-0 flex-1 ${anyShown ? 'flex' : 'hidden'}`}
-      style={tiled ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } : undefined}
-    >
-      {s.tabs.map((t) => {
-        const shield = tiled && touch
-        return (
-          <div
-            key={t.id}
-            data-tab-id={t.id}
-            className={`session-pane min-h-0 min-w-0 flex-1 flex-col ${shown(t.id) ? 'flex' : 'hidden'} ${split.includes(t.id) ? 'split-pane' : ''} ${(split.length || tiled) && s.activeTab === t.id ? 'focused' : ''}`}
-            style={split.length ? { order: split.indexOf(t.id) } : undefined}
-            onMouseDownCapture={() => { if (split.length || tiled) focus(t.id) }}
-          >
-            <div className="tile-head" onDoubleClick={() => s.setActive(t.id)}>
-              <span className="dot" style={{ background: dotFor(t.status), animation: t.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
-              {iconFor(t)}
-              <span className="tile-title truncate">{t.title}</span>
-              {t.shellLabel && <span className="shell-chip">{t.shellLabel}</span>}
-              {t.status === 'connected' && t.route && <span className={`route-chip ${t.route}`}>{t.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
-              <span className="muted min-w-0 flex-1 truncate">{t.message ?? t.status}</span>
-              <button className="btn btn-ghost btn-sm btn-icon" title="Open full size" aria-label={`Open ${t.title}`} onClick={() => s.setActive(t.id)}><Icon.maximize /></button>
-              {/* Closing a tile never ends a persistent shell: that stays a deliberate End in the Sessions list. */}
-              <button className="btn btn-ghost btn-sm btn-icon" title={t.persistent ? 'Close this tile (the session keeps running on the host)' : 'Close'} aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id, { detach: !!t.persistent })}><Icon.x /></button>
+    <>
+      {splitOn && !touch && <SplitBar ids={split} />}
+      <div
+        ref={box}
+        className={tiled ? 'session-grid' : `session-panes min-h-0 flex-1 ${anyShown ? 'flex' : 'hidden'} ${splitOn ? 'split' : ''}`}
+        style={tiled ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } : undefined}
+      >
+        {s.tabs.map((t) => {
+          const shield = tiled && touch
+          const r = rectOf(t.id)
+          const inSplit = split.includes(t.id)
+          return (
+            <div
+              key={t.id}
+              data-tab-id={t.id}
+              className={`session-pane min-h-0 min-w-0 flex-1 flex-col ${shown(t.id) ? 'flex' : 'hidden'} ${inSplit ? 'split-pane' : ''} ${(splitOn || tiled) && s.activeTab === t.id ? 'focused' : ''}`}
+              style={r ? { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` } : undefined}
+              onMouseDownCapture={() => { if (splitOn) s.focusPane(t.id); else if (tiled && s.activeTab !== t.id) s.set({ activeTab: t.id }) }}
+            >
+              <div
+                className="tile-head"
+                draggable={inSplit && !touch}
+                onDragStart={(e) => startDockDrag(e, { tabId: t.id })}
+                onDragEnd={endDockDrag}
+                onDoubleClick={() => (inSplit ? s.set({ splitZoom: zoomed ? null : t.id, activeTab: t.id }) : s.setActive(t.id))}
+                title={inSplit ? 'Drag to move this pane; double-click to show it alone' : undefined}
+              >
+                {inSplit && <Icon.grip className="tile-grip" />}
+                <span className="dot" style={{ background: dotFor(t.status), animation: t.status === 'connecting' ? 'pulse 1.2s infinite' : undefined }} />
+                {iconFor(t)}
+                <span className="tile-title truncate">{t.title}</span>
+                {t.shellLabel && <span className="shell-chip">{t.shellLabel}</span>}
+                {t.status === 'connected' && t.route && <span className={`route-chip ${t.route}`}>{t.route === 'ssm' ? 'SSM' : 'DIR'}</span>}
+                <span className="muted min-w-0 flex-1 truncate">{isSession(t) ? (t.message ?? t.status) : (t.message ?? '')}</span>
+                {inSplit ? (
+                  <>
+                    <button className="btn btn-ghost btn-sm btn-icon" title={zoomed ? 'Show every pane again (⌘⇧↩)' : 'Show this pane alone for now (⌘⇧↩)'} aria-label={zoomed ? 'Show every pane' : `Show ${t.title} alone`} onClick={() => s.set({ splitZoom: zoomed ? null : t.id, activeTab: t.id })}>{zoomed ? <Icon.restore /> : <Icon.maximize />}</button>
+                    <button className="btn btn-ghost btn-sm btn-icon" title="Take out of the split (it stays open as a tab)" aria-label={`Take ${t.title} out of the split`} onClick={() => s.unsplit(t.id)}><Icon.openTab /></button>
+                  </>
+                ) : (
+                  <button className="btn btn-ghost btn-sm btn-icon" title="Open full size" aria-label={`Open ${t.title}`} onClick={() => s.setActive(t.id)}><Icon.maximize /></button>
+                )}
+                {/* Closing a tile never ends a persistent shell: that stays a deliberate End in the Sessions list. */}
+                <button className="btn btn-ghost btn-sm btn-icon" title={t.persistent ? 'Close this tile (the session keeps running on the host)' : 'Close'} aria-label={`Close ${t.title}`} onClick={() => void s.closeTab(t.id, { detach: !!t.persistent })}><Icon.x /></button>
+              </div>
+              <div className="tile-body relative flex min-h-0 flex-1 flex-col">
+                {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled || inSplit} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : t.kind === 'notes' ? <NotesTab tab={t} active={shown(t.id)} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={shown(t.id)} /> : t.kind === 'local' ? <TerminalApp tab={t} active={shown(t.id)} /> : t.kind === 'board' ? <BoardTab tab={t} active={shown(t.id)} /> : t.kind === 'finder' ? <FinderTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
+                {shield && (
+                  <div
+                    className="tile-shield"
+                    onClick={() => s.setActive(t.id)}
+                  />
+                )}
+              </div>
             </div>
-            <div className="tile-body relative flex min-h-0 flex-1 flex-col">
-              {t.kind === 'rdp' ? <RdpTab tab={t} active={shown(t.id)} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={shown(t.id)} /> : t.kind === 'notes' ? <NotesTab tab={t} active={shown(t.id)} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={shown(t.id)} /> : t.kind === 'local' ? <TerminalApp tab={t} active={shown(t.id)} /> : t.kind === 'board' ? <BoardTab tab={t} active={shown(t.id)} /> : t.kind === 'finder' ? <FinderTab tab={t} active={shown(t.id)} /> : <TerminalTab tab={t} active={s.activeTab === t.id} />}
-              {shield && (
-                <div
-                  className="tile-shield"
-                  onClick={() => s.setActive(t.id)}
-                />
-              )}
-            </div>
-          </div>
-        )
-      })}
-    </div>
+          )
+        })}
+        {splitOn && !zoomed && s.splitTree && rects && <SplitDividers tree={s.splitTree} dividers={rects.dividers} box={box} />}
+        {s.dockDrag && anyShown && !tiled && <DockShield box={box} paneRect={paneAt} />}
+      </div>
+    </>
   )
 }
 

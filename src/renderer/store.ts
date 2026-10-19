@@ -1,11 +1,12 @@
 import { create } from 'zustand'
-import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, HostShell } from '@shared/types'
+import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, HostShell, PaneNode } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { ssoWaitOutcome } from '@shared/ssoWait'
 import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
 import { applySectionZoom, type ZoomSection } from './sectionZoom'
+import { arrange, insertPane, paneIds, removePane, swapPanes, type Arrangement, type Direction } from './termLayout'
 
 export interface RdpTabRequest {
   user: string
@@ -43,6 +44,19 @@ export interface Tab {
   transient?: boolean
   /** Notes tab: the note it shows (relative to the notes folder). */
   notesPath?: string
+}
+
+/** The built-in tools: one tab each, opened from the app rail. */
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder'
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder' }
+
+/** How many tabs the side-by-side view shows at once. */
+export const MAX_SPLIT = 6
+
+/** Where a new tab opens: next to this tab, on that side (right by default). */
+export interface Beside {
+  tab: string
+  side?: Direction
 }
 
 export interface Toast {
@@ -90,14 +104,38 @@ interface State {
   quickSwitcherOpen: boolean
   /** Text the quick switcher opens with, e.g. '>' for the command list. */
   quickSwitcherQuery: string
-  openQuickSwitcher: (query?: string) => void
+  openQuickSwitcher: (query?: string, opts?: { beside?: string }) => void
+  /** The quick switcher is picking something to open beside this tab. */
+  quickSwitcherBeside: string | null
   recentHosts: string[]
-  /** Tabs shown side by side. The group is on screen while its focused pane (activeTab) is one of them. */
+  /**
+   * Tabs shown side by side, in reading order. The group is on screen while its focused pane (activeTab) is one of
+   * them. Always the panes of splitTree.
+   */
   splitGroup: string[]
+  /** How the split is laid out: rows and columns of tabs with their sizes (termLayout); null when nothing is split. */
+  splitTree: PaneNode | null
+  /** A pane of the split shown on its own for now (⌘⇧↩); the others keep their places. */
+  splitZoom: string | null
   /** Keystrokes typed in one pane of the split group go to every connected SSH pane in it. */
   broadcastInput: boolean
-  splitWith: (tabId: string, otherId: string) => void
+  /** Shows `otherId` beside `tabId` (on `side`, right by default), starting a split or joining tabId's. */
+  splitWith: (tabId: string, otherId: string, side?: Direction) => void
+  /** Moves tab `id` next to pane `target` of the split; `center` swaps the two (or shows `id` in its place). */
+  dockPane: (id: string, target: string, side: Direction | 'center') => void
   unsplit: (tabId: string) => void
+  setSplitTree: (tree: PaneNode) => void
+  arrangeSplit: (kind: Arrangement) => void
+  /** Leaves the side-by-side view: the focused pane stays on screen, the others stay open as tabs. */
+  endSplit: () => void
+  /** The tab that was in front before Hosts (⌘1), so a host can open beside it from the hosts list. */
+  lastTab: string | null
+  /** Gives a pane of the split the keyboard (a click or ⌥⌘ arrow); a pane shown alone goes back into the layout. */
+  focusPane: (id: string) => void
+  /** A session tab or a tool being dragged over the session area, to be docked beside a pane. */
+  dockDrag: { tabId?: string; tool?: ToolKind } | null
+  /** The tab of a tool, opened in the background when it is not open yet. */
+  toolTab: (kind: ToolKind) => string
   moveTab: (id: string, beforeId: string | null) => void
   /** Opens another session with the same parameters; `split` shows it next to the original. */
   duplicateTab: (id: string, split?: boolean) => void
@@ -129,7 +167,8 @@ interface State {
   shortcutsOpen: boolean
   clearFilters: () => void
   revealHost: (key: string) => void
-  connectFor: { kind: 'ssh' | 'rdp' | 'sftp'; key: string } | null
+  /** `beside`: where the new session opens, next to another tab. */
+  connectFor: { kind: 'ssh' | 'rdp' | 'sftp'; key: string; beside?: Beside } | null
   passwordFor: string | null
   settingsOpen: boolean
   /** null = closed; 'new' = add; otherwise the ManualHost id being edited */
@@ -186,7 +225,8 @@ interface State {
   toggleFavorite: (key: string) => Promise<void>
   toast: (kind: Toast['kind'], text: string) => void
   dismissToast: (id: number) => void
-  addTab: (tab: Tab) => void
+  /** `beside` shows the new tab next to another one in the split. */
+  addTab: (tab: Tab, opts?: { beside?: Beside }) => void
   updateTab: (id: string, patch: Partial<Tab>) => void
   /** `detach` leaves a persistent SSH shell running on the host instead of ending it. */
   closeTab: (id: string, opts?: { detach?: boolean }) => Promise<void>
@@ -248,20 +288,52 @@ export const useStore = create<State>((set, get) => ({
   detailsFor: null,
   quickSwitcherOpen: false,
   quickSwitcherQuery: '',
-  openQuickSwitcher: (query = '') => set({ quickSwitcherOpen: true, quickSwitcherQuery: query }),
+  quickSwitcherBeside: null,
+  openQuickSwitcher: (query = '', opts) => set({ quickSwitcherOpen: true, quickSwitcherQuery: query, quickSwitcherBeside: opts?.beside ?? null }),
   recentHosts: readRecentHosts(),
   splitGroup: [],
+  splitTree: null,
+  splitZoom: null,
   broadcastInput: false,
-  splitWith: (tabId, otherId) => set((s) => {
-    const group = s.splitGroup.includes(tabId) ? s.splitGroup.filter((id) => id !== otherId) : [tabId]
-    const at = group.indexOf(tabId)
-    group.splice(at + 1, 0, otherId)
-    return { splitGroup: group.slice(0, 4), activeTab: otherId }
-  }),
-  unsplit: (tabId) => set((s) => {
-    const splitGroup = s.splitGroup.filter((id) => id !== tabId)
-    return { splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
-  }),
+  splitWith: (tabId, otherId, side = 'right') => {
+    const s = get()
+    if (tabId === otherId || !s.tabs.some((t) => t.id === tabId) || !s.tabs.some((t) => t.id === otherId)) return
+    // Splitting a tab outside the current split starts a new one; a tab already in it moves rather than showing twice.
+    const base: PaneNode = s.splitTree && s.splitGroup.includes(tabId) ? s.splitTree : { type: 'pane', id: tabId }
+    const rest = paneIds(base).includes(otherId) ? removePane(base, otherId) ?? { type: 'pane', id: tabId } : base
+    if (paneIds(rest).length >= MAX_SPLIT) { s.toast('info', `Up to ${MAX_SPLIT} tabs fit side by side; take one out of the split first.`); return }
+    set((st) => ({ ...splitFields(insertPane(rest, tabId, otherId, side), { ...st, splitZoom: null }) }))
+    get().setActive(otherId)
+  },
+  dockPane: (id, target, side) => {
+    const s = get()
+    if (id === target || !s.tabs.some((t) => t.id === id)) return
+    const tree = s.splitTree && s.splitGroup.includes(target) ? s.splitTree : null
+    if (side !== 'center') {
+      if (!tree) { get().splitWith(target, id, side); return }
+      const rest = s.splitGroup.includes(id) ? removePane(tree, id) ?? { type: 'pane', id: target } : tree
+      if (!s.splitGroup.includes(id) && s.splitGroup.length >= MAX_SPLIT) { s.toast('info', `Up to ${MAX_SPLIT} tabs fit side by side; take one out of the split first.`); return }
+      set((st) => splitFields(insertPane(rest, target, id, side), { ...st, splitZoom: null }))
+    } else if (tree) {
+      // Two panes of the split trade places; a tab from outside takes the target's place (the target stays a tab).
+      set((st) => splitFields(swapPanes(tree, id, target), { ...st, splitZoom: null }))
+    }
+    get().setActive(id)
+  },
+  unsplit: (tabId) => set((s) => (s.splitTree ? splitFields(removePane(s.splitTree, tabId), s) : {})),
+  setSplitTree: (tree) => set((s) => splitFields(tree, s)),
+  arrangeSplit: (kind) => set((s) => (s.splitTree ? splitFields(arrange(kind, s.splitGroup), { ...s, splitZoom: null }) : {})),
+  endSplit: () => set((s) => splitFields(null, s)),
+  lastTab: null,
+  focusPane: (id) => set((s) => (s.activeTab === id ? {} : { activeTab: id, splitZoom: null })),
+  dockDrag: null,
+  toolTab: (kind) => {
+    const have = get().tabs.find((t) => t.kind === kind)
+    if (have) return have.id
+    const tab: Tab = { id: `${kind}-${Date.now().toString(36)}`, kind, instanceKey: '', title: TOOL_NAMES[kind], status: 'connected' }
+    set((s) => ({ tabs: [...s.tabs, tab] }))
+    return tab.id
+  },
   moveTab: (id, beforeId) => set((s) => {
     const tab = s.tabs.find((t) => t.id === id)
     if (!tab || id === beforeId) return {}
@@ -272,59 +344,28 @@ export const useStore = create<State>((set, get) => ({
   }),
   terminalRequest: null,
   openTerminal: (req) => {
-    let term = get().tabs.find((t) => t.kind === 'local')
-    if (!term) {
-      term = { id: `local-${Date.now().toString(36)}`, kind: 'local', instanceKey: '', title: 'Terminal', status: 'connected' }
-      const created = term
-      set((s) => ({ tabs: [...s.tabs, created] }))
-    }
+    const id = get().toolTab('local')
     if (req) set({ terminalRequest: { ...req, nonce: Date.now() + Math.random() } })
-    get().setActive(term.id)
+    get().setActive(id)
   },
   finderRequest: null,
   openFinder: (path) => {
-    let finder = get().tabs.find((t) => t.kind === 'finder')
-    if (!finder) {
-      finder = { id: `finder-${Date.now().toString(36)}`, kind: 'finder', instanceKey: '', title: 'Finder', status: 'connected' }
-      const created = finder
-      set((s) => ({ tabs: [...s.tabs, created] }))
-    }
+    const id = get().toolTab('finder')
     if (path) set({ finderRequest: { path, nonce: Date.now() + Math.random() } })
-    get().setActive(finder.id)
+    get().setActive(id)
   },
-  openBoard: () => {
-    let board = get().tabs.find((t) => t.kind === 'board')
-    if (!board) {
-      board = { id: `board-${Date.now().toString(36)}`, kind: 'board', instanceKey: '', title: 'Whiteboard', status: 'connected' }
-      const created = board
-      set((s) => ({ tabs: [...s.tabs, created] }))
-    }
-    get().setActive(board.id)
-  },
+  openBoard: () => get().setActive(get().toolTab('board')),
   browserRequest: null,
   openBrowser: (req) => {
-    const st = get()
-    let browser = st.tabs.find((t) => t.kind === 'browser')
-    if (!browser) {
-      browser = { id: `browser-${Date.now().toString(36)}`, kind: 'browser', instanceKey: '', title: 'Browser', status: 'connected' }
-      const created = browser
-      set((s) => ({ tabs: [...s.tabs, created] }))
-    }
+    const id = get().toolTab('browser')
     if (req?.url || req?.profile) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
-    get().setActive(browser.id)
+    get().setActive(id)
   },
   openNotes: (path, opts) => {
-    const st = get()
-    let notes = st.tabs.find((t) => t.kind === 'notes')
-    if (!notes) {
-      notes = { id: `notes-${Date.now().toString(36)}`, kind: 'notes', instanceKey: '', title: 'Notes', status: 'connected', notesPath: path }
-      const created = notes
-      set((s) => ({ tabs: [...s.tabs, created] }))
-    } else if (path) st.updateTab(notes.id, { notesPath: path })
-    if (opts?.beside && opts.beside !== notes.id && st.tabs.some((t) => t.id === opts.beside)) {
-      set({ gridView: false, gridHost: null })
-      get().splitWith(opts.beside, notes.id)
-    } else get().setActive(notes.id)
+    const id = get().toolTab('notes')
+    if (path) get().updateTab(id, { notesPath: path })
+    if (opts?.beside && opts.beside !== id && get().tabs.some((t) => t.id === opts.beside)) get().splitWith(opts.beside, id)
+    else get().setActive(id)
   },
   openShellTab: (fromId, shell) => {
     const st = get()
@@ -755,7 +796,10 @@ export const useStore = create<State>((set, get) => ({
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
-  addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id })),
+  addTab: (tab, opts) => {
+    set((s) => ({ tabs: [...s.tabs, tab], activeTab: tab.id }))
+    if (opts?.beside) get().splitWith(opts.beside.tab, tab.id, opts.beside.side)
+  },
   updateTab: (id, patch) => set((s) => {
     const tab = s.tabs.find((t) => t.id === id)
     if (tab && patch.status && patch.status !== tab.status) patch = { ...patch, connectedAt: patch.status === 'connected' ? Date.now() : undefined }
@@ -775,14 +819,15 @@ export const useStore = create<State>((set, get) => ({
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
       const tabs = s.tabs.filter((t) => t.id !== id)
-      const splitGroup = s.splitGroup.filter((t) => t !== id)
+      const tree = s.splitTree ? removePane(s.splitTree, id) : null
+      const left = tree ? paneIds(tree) : []
       const inSplit = s.splitGroup.includes(id)
       // Focus stays inside a split when a pane closes; otherwise the neighbour to the left takes over.
-      const next = inSplit && splitGroup.length ? splitGroup[Math.max(0, s.splitGroup.indexOf(id) - 1)] : (tabs[Math.max(0, idx - 1)]?.id ?? 'hosts')
+      const next = inSplit && left.length ? left[Math.max(0, s.splitGroup.indexOf(id) - 1)] : (tabs[Math.max(0, idx - 1)]?.id ?? 'hosts')
       const activeTab = s.activeTab === id ? next : s.activeTab
       // The host grid ends with the last of its host's terminals.
       const hostGrid = !!s.gridHost && tabs.some((t) => t.instanceKey === s.gridHost && t.kind === 'ssh')
-      return { tabs, activeTab, gridView: s.gridView && tabs.some(isSession) && (!s.gridHost || hostGrid), gridHost: hostGrid ? s.gridHost : null, splitGroup: splitGroup.length > 1 ? splitGroup : [], broadcastInput: splitGroup.length > 1 && s.broadcastInput }
+      return { tabs, activeTab, gridView: s.gridView && tabs.some(isSession) && (!s.gridHost || hostGrid), gridHost: hostGrid ? s.gridHost : null, ...splitFields(tree, s) }
     })
   },
   toggleTerminalPane: (open) => {
@@ -793,7 +838,8 @@ export const useStore = create<State>((set, get) => ({
   // Picking a tab or Hosts shows it on its own; tiles in the grid take focus through set({ activeTab }).
   // Leaving a host grid closes its transient tabs, except the one picked, which becomes a normal tab.
   setActive: (id) => set((s) => ({
-    activeTab: id, gridView: false, gridHost: null,
+    activeTab: id, gridView: false, gridHost: null, splitZoom: s.splitZoom === id ? id : null,
+    lastTab: id === 'hosts' && s.activeTab !== 'hosts' && !s.gridView ? s.activeTab : s.lastTab,
     tabs: s.tabs.some((t) => t.transient) ? s.tabs.filter((t) => !t.transient || t.id === id).map((t) => (t.id === id && t.transient ? { ...t, transient: false } : t)) : s.tabs
   }))
 }))
@@ -802,6 +848,13 @@ export const useStore = create<State>((set, get) => ({
 /** Remote sessions, as opposed to the Notes, Browser, Terminal and Whiteboard tabs: only sessions are tiles, counted, or saved in workspaces. */
 export function isSession(t: Tab): boolean {
   return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local' && t.kind !== 'board' && t.kind !== 'finder'
+}
+
+/** The split fields for a layout tree: a tree of one pane (or none) is no split. */
+function splitFields(tree: PaneNode | null, s: Pick<State, 'broadcastInput' | 'splitZoom'>): Pick<State, 'splitTree' | 'splitGroup' | 'broadcastInput' | 'splitZoom'> {
+  const ids = tree ? paneIds(tree) : []
+  const on = ids.length > 1
+  return { splitTree: on ? tree : null, splitGroup: on ? ids : [], broadcastInput: on && s.broadcastInput, splitZoom: on && s.splitZoom && ids.includes(s.splitZoom) ? s.splitZoom : null }
 }
 
 /** A tab that attaches one of a host's persistent shells on another tab's connection, replaying its scrollback. */

@@ -21,6 +21,7 @@ import { CopySheet, PasteSheet } from './mobile/ClipboardSheets'
 import { DetachedShells, NameBar, ShellList } from './Shells'
 import { registerDictationTarget, xtermTarget } from '../voice'
 import MicButton from './MicButton'
+import { findInAllPanes, onFindAll, reportFindCount } from '../paneFind'
 
 /** Sends keystrokes to this session, or to every connected SSH pane of the split while broadcasting. */
 function writeInput(fromId: string, data: string): void {
@@ -100,6 +101,10 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [hits, setHits] = useState<{ index: number; count: number } | null>(null)
+  /** What the split bar is looking for in every pane ('' when nothing): this terminal reports its count for it. */
+  const findAllRef = useRef('')
+  /** A short selection in a terminal of a split, offered to the other panes (where the mouse let go). */
+  const [selChip, setSelChip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [menu, setMenu] = useState<'snippets' | 'split' | 'shells' | null>(null)
   const shellsBtn = useRef<HTMLButtonElement>(null)
   /** The host's persistent shells for the session list (null while loading). */
@@ -129,7 +134,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const allSnippets = useStore((s) => s.settings?.snippets)
   const splitGroup = useStore((s) => s.splitGroup)
   const broadcast = useStore((s) => s.broadcastInput)
-  const otherTabs = useStore((s) => s.tabs).filter((t) => t.id !== tab.id && t.kind !== 'rdp')
+  const otherTabs = useStore((s) => s.tabs).filter((t) => t.id !== tab.id && !t.transient)
   const inSplit = splitGroup.includes(tab.id)
   // Broadcasting types into every terminal of the split; with only one terminal there (beside a note, say) it does nothing.
   const terminalsInSplit = useStore((s) => s.splitGroup.filter((id) => s.tabs.some((t) => t.id === id && t.kind === 'ssh')).length)
@@ -161,7 +166,10 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     termRef.current = term
     fitRef.current = fit
     searchRef.current = search
-    const onHits = search.onDidChangeResults((r) => setHits(r.resultCount ? { index: r.resultIndex, count: r.resultCount } : { index: -1, count: 0 }))
+    const onHits = search.onDidChangeResults((r) => {
+      setHits(r.resultCount ? { index: r.resultIndex, count: r.resultCount } : { index: -1, count: 0 })
+      if (findAllRef.current) reportFindCount(tab.id, r.resultCount)
+    })
 
     const id = tab.id
     let opened = false
@@ -257,14 +265,68 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     }
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => onTerminalAction(tab.id, (action) => {
+  useEffect(() => onTerminalAction(tab.id, (action, text) => {
     if (action === 'find') {
       setFindOpen(true)
-      const sel = termRef.current?.getSelection()
+      const sel = text ?? termRef.current?.getSelection()
       if (sel && !sel.includes('\n')) setQuery(sel)
       requestAnimationFrame(() => findInput.current?.select())
     } else if (action === 'snippets') setMenu('snippets')
+    else if (action === 'paste' && text) {
+      // Text from a page beside this terminal: pasted at the prompt for the user to read and run, never run for them.
+      const st = useStore.getState()
+      const t = st.tabs.find((x) => x.id === tab.id)
+      if (t?.status !== 'connected') { toast('info', `${t?.title ?? 'This terminal'} is not connected.`); return }
+      st.focusPane(tab.id)
+      termRef.current?.paste(text)
+      termRef.current?.focus()
+    }
+  }), [tab.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The split bar's "find in all panes": highlight every match here and report how many, or step to the next one.
+  useEffect(() => onFindAll((req) => {
+    const sr = searchRef.current
+    if (!sr || !req.ids.includes(tab.id)) return
+    const opts = { caseSensitive: false, decorations: SEARCH_DECOR }
+    if (req.step) {
+      if (req.step.tabId === tab.id && req.text) {
+        if (req.step.back) sr.findPrevious(req.text, opts)
+        else sr.findNext(req.text, opts)
+      }
+      return
+    }
+    findAllRef.current = req.text
+    if (!req.text) { sr.clearDecorations(); setHits(null); return }
+    sr.findNext(req.text, { ...opts, incremental: true })
   }), [tab.id])
+
+  // Letting go of a short selection in a split offers it to the other panes (find it in the ticket and the hosts).
+  useEffect(() => {
+    const el = ref.current
+    const term = termRef.current
+    if (!el || !term || mobile) return
+    const up = (e: MouseEvent): void => {
+      if (e.button !== 0) return
+      setTimeout(() => {
+        const text = term.getSelection().trim()
+        const st = useStore.getState()
+        const others = st.splitGroup.includes(tab.id) && st.splitGroup.some((id) => id !== tab.id && st.tabs.some((t) => t.id === id && (t.kind === 'ssh' || t.kind === 'browser')))
+        if (!text || text.includes('\n') || text.length > 200 || !others) { setSelChip(null); return }
+        const b = el.getBoundingClientRect()
+        setSelChip({ x: Math.min(Math.max(e.clientX - b.left, 110), b.width - 110), y: Math.max(e.clientY - b.top, 44), text })
+      }, 0)
+    }
+    el.addEventListener('mouseup', up)
+    const cleared = term.onSelectionChange(() => { if (!term.hasSelection()) setSelChip(null) })
+    const scrolled = term.onScroll(() => setSelChip(null))
+    const typed = term.onKey(() => setSelChip(null))
+    return () => {
+      el.removeEventListener('mouseup', up)
+      cleared.dispose()
+      scrolled.dispose()
+      typed.dispose()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const find = (dir: 'next' | 'prev', q = query): void => {
     const s = searchRef.current
@@ -619,10 +681,11 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       {menu === 'split' && (
         <Popover anchor={splitBtn.current} align="right" width={280} onClose={() => setMenu(null)}>
           <MenuItem hint="⌘D" onClick={() => { setMenu(null); useStore.getState().duplicateTab(tab.id, true) }}>New session to this host, beside this one</MenuItem>
+          <MenuItem hint={'⌘\\'} onClick={() => { setMenu(null); useStore.getState().openQuickSwitcher('', { beside: tab.id }) }}>A host, tab or tool beside this one…</MenuItem>
           {otherTabs.filter((t) => !splitGroup.includes(t.id)).length > 0 && <MenuLabel>Show beside</MenuLabel>}
           {otherTabs.filter((t) => !splitGroup.includes(t.id)).map((t) => (
             <MenuItem key={t.id} onClick={() => { setMenu(null); useStore.getState().splitWith(tab.id, t.id) }}>
-              {t.kind === 'sftp' ? 'Files: ' : ''}{t.title}
+              {t.kind === 'sftp' ? 'Files: ' : t.kind === 'rdp' ? 'Desktop: ' : ''}{t.title}
             </MenuItem>
           ))}
           {inSplit && <><MenuSep /><MenuItem onClick={() => { setMenu(null); useStore.getState().unsplit(tab.id) }}>Move this pane to its own tab</MenuItem></>}
@@ -653,9 +716,19 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <button className="btn btn-ghost btn-sm btn-icon" title="Close (Esc)" onClick={closeFind}><Icon.x /></button>
         </div>
       )}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <div ref={ref} className="min-h-0 min-w-0 flex-1" style={{ background }} />
         {paneOpen && active && <TerminalAppearancePane />}
+        {selChip && (
+          <div className="sel-chip" style={{ left: selChip.x, top: selChip.y }} onMouseDown={(e) => e.preventDefault()}>
+            <button type="button" title="Highlight this in every terminal and page of the split, with a count for each" onClick={() => { findInAllPanes(selChip.text); setSelChip(null) }}>
+              <Icon.search /> Find in all panes
+            </button>
+            <button type="button" onClick={() => { void window.api.invoke('clipboard:write', selChip.text).then(() => toast('success', 'Copied')); setSelChip(null) }}>
+              <Icon.copy /> Copy
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

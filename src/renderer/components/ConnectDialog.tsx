@@ -108,7 +108,7 @@ export default function ConnectDialog(): ReactElement | null {
           title: `${inst.name} @ ${inst.profile}`,
           status: 'connecting',
           rdpRequest: { user, password, port: Number(port) || 3389, forceRoute: force }
-        })
+        }, { beside: target.beside })
         close()
         return
       }
@@ -121,7 +121,7 @@ export default function ConnectDialog(): ReactElement | null {
           title: `${inst.name} @ ${inst.profile}`,
           status: 'connecting',
           sftpRequest: { instanceKey: inst.key, user, port: Number(port) || 22, identityFile: identity || undefined, useAgent, forceRoute: force }
-        })
+        }, { beside: target.beside })
         close()
         return
       }
@@ -145,7 +145,7 @@ export default function ConnectDialog(): ReactElement | null {
       }
       const id = `ssh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       const { cols: _c, rows: _r, ...request } = req
-      s.addTab({ id, kind: 'ssh', instanceKey: inst.key, title: `${inst.name} @ ${inst.profile}`, status: 'connecting', request: { ...request, sessionId: id } })
+      s.addTab({ id, kind: 'ssh', instanceKey: inst.key, title: `${inst.name} @ ${inst.profile}`, status: 'connecting', request: { ...request, sessionId: id } }, { beside: target.beside })
       close()
     } catch (e) {
       s.noteOperationError((e as Error).message)

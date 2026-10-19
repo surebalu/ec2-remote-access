@@ -12,9 +12,10 @@ import { isDictationKey } from '@shared/dictation'
 import type { WebDownload } from '@shared/types'
 import { getSettings } from './store'
 import { isDictating } from './voice'
+import { getPaneTargets } from './browser'
 
-/** Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them). */
-const FORWARDED = new Set(['t', 'w', 'l', 'r', '[', ']', '{', '}', 'f', 'k', 's', 'd', '=', '+', '-', '0', 'n', 'b', 'c'])
+/** Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them); ⌘\ opens beside. */
+const FORWARDED = new Set(['t', 'w', 'l', 'r', '[', ']', '{', '}', 'f', 'k', 's', 'd', '=', '+', '-', '0', 'n', 'b', 'c', '\\'])
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen'])
 
 export function initWebviews(win: BrowserWindow): void {
@@ -158,8 +159,10 @@ app.on('web-contents-created', (_e, contents) => {
   contents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return
     const key = input.key.toLowerCase()
-    // ⌥⌘↑/↓ switch spaces; plain ⌘↑/↓ stay with the page (top / bottom of a field or the page).
-    const forward = (input.control && key === 'tab') || (input.meta && (FORWARDED.has(key) || /^[1-9]$/.test(key) || (input.alt && (key === 'arrowup' || key === 'arrowdown'))))
+    // ⌥⌘↑/↓ switch spaces and ⌥⌘←/→ move between the panes of a split; plain ⌘ arrows stay with the page (top /
+    // bottom of a field or the page). ⌘⇧↩ shows the split's focused pane alone.
+    const arrow = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright'
+    const forward = (input.control && key === 'tab') || (input.meta && (FORWARDED.has(key) || /^[1-9]$/.test(key) || (input.alt && arrow) || (input.shift && key === 'enter')))
     // The page keeps its editing keys (copy, paste, select all, undo); ⌘⇧C (copy the address) is the browser's.
     if (!forward || (input.meta && !input.shift && ['c', 'v', 'x', 'a', 'z'].includes(key))) return
     e.preventDefault()
@@ -199,6 +202,13 @@ app.on('web-contents-created', (_e, contents) => {
         { label: `Search Google for “${text.length > 30 ? `${text.slice(0, 30)}…` : text}”`, click: () => send(`https://www.google.com/search?q=${encodeURIComponent(text)}`, false) },
         { type: 'separator' }
       )
+      // Beside terminals in a split: hand them the selection (pasted at the prompt, never run), or look for it everywhere.
+      const targets = getPaneTargets()
+      if (targets.length) {
+        const menu = (action: 'paste' | 'find', target?: string): void => h?.send('web:menu', { webContentsId: contents.id, action, url: contents.getURL(), title: contents.getTitle(), text, target })
+        for (const t of targets) items.push({ label: `Paste into ${t.title}`, click: () => menu('paste', t.id) })
+        items.push({ label: 'Find in All Panes', click: () => menu('find') }, { type: 'separator' })
+      }
     }
     items.push(
       { label: 'Back', enabled: contents.navigationHistory.canGoBack(), click: () => contents.navigationHistory.goBack() },

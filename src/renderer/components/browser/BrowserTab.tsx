@@ -5,9 +5,12 @@ import {
   consoleHome, frequentSites, hostOf, isAwsConsoleUrl, isAwsSignInPage, isFederationUrl, isWebUrl, lastGrapheme, matchesWords, normalizeInput,
   partitionFor, restorableUrl, searchHistory, signInDestination, spaceIdForProfile
 } from '@shared/browser'
-import { useStore, type Tab } from '../../store'
+import { hostsInText, type PageHost } from '@shared/pageHosts'
+import { allInstances, isSession, routeOf, useStore, type Beside, type Tab } from '../../store'
 import { ACCENTS, metaFor } from '../../colors'
-import { setBrowserKeys, type TabKey as BrowserKey } from '../../shortcuts'
+import { setBrowserKeys, terminalAction, type TabKey as BrowserKey } from '../../shortcuts'
+import { openDefaultFor } from '../../quickConnect'
+import { findInAllPanes, onFindAll, reportFindCount } from '../../paneFind'
 import { Icon } from '../icons'
 import Popover, { MenuItem, MenuLabel, MenuSep } from '../Popover'
 import Webview, { type WebviewEl, type WebviewEvents } from './Webview'
@@ -92,6 +95,13 @@ type MenuState =
   | { kind: 'editTab'; id: string; anchor: HTMLElement }
   | { kind: 'downloads'; anchor: HTMLElement }
   | { kind: 'fill'; anchor: HTMLElement; tabId: string }
+  | { kind: 'hosts'; anchor: HTMLElement }
+
+/** The page's visible text, for spotting the hosts it mentions (capped: a long ticket is still a few hundred KB). */
+const PAGE_TEXT = `(() => { try { return (document.body ? document.body.innerText : '').slice(0, 400000) } catch { return '' } })()`
+
+const NO_HOSTS: PageHost[] = []
+const sameHosts = (a: PageHost[], b: PageHost[]): boolean => a.length === b.length && a.every((h, i) => h.key === b[i].key && h.match === b[i].match)
 
 function initialState(saved: BrowserState | null): BrowserState {
   const s = saved ?? { spaces: [GENERAL], tabs: [], activeSpace: GENERAL.id, activeTab: {}, history: [] }
@@ -120,7 +130,7 @@ export default function BrowserTab({ tab, active }: { tab: Tab; active: boolean 
   return <Browser tab={tab} active={active} />
 }
 
-function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
+function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const profiles = useStore((s) => s.profiles)
   const settings = useStore((s) => s.settings)
   const statuses = useStore((s) => s.statuses)
@@ -145,6 +155,14 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const [resizing, setResizing] = useState<{ x: number; width: number } | null>(null)
   /** Bumped to focus the start page's command bar (⌘T / ⌘L while it shows). */
   const [startFocus, setStartFocus] = useState(0)
+  /** Hosts the page on screen mentions (a ticket's servers), for opening them beside it. */
+  const [pageHosts, setPageHosts] = useState<{ tabId: string; url: string; hosts: PageHost[] } | null>(null)
+  /** The page whose hosts pill was closed. */
+  const [hostsHidden, setHostsHidden] = useState<string | null>(null)
+  const scanTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scanSeq = useRef(0)
+  /** What the split bar is looking for in every pane ('' when nothing): this page reports its count for it. */
+  const findAllRef = useRef('')
 
   const views = useRef(new Map<string, WebviewEl>())
   const wcTab = useRef(new Map<number, string>())
@@ -653,14 +671,20 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
         const t = id ? findTab(id) : undefined
         if (t) openInNewTab(t.spaceId, d.url, { background: d.background, after: t.id })
       }),
-      // A click inside a page never reaches this document; main reports it so open menus close as they would.
+      // A click inside a page never reaches this document; main reports it so open menus close as they would, and so
+      // the browser takes the keyboard when it is one pane of a split.
       window.api.on('web:pointer', (d) => {
-        if (tabForWc(d.webContentsId)) setMenu(null)
+        if (!tabForWc(d.webContentsId)) return
+        setMenu(null)
+        const s = useStore.getState()
+        if (s.splitGroup.includes(tab.id)) s.focusPane(tab.id)
       }),
       window.api.on('web:menu', (d) => {
         if (!tabForWc(d.webContentsId)) return
         if (d.action === 'note') addToNote(d.url, d.title)
         else if (d.action === 'fill') openFill()
+        else if (d.action === 'paste' && d.text && d.target) terminalAction(d.target, 'paste', d.text)
+        else if (d.action === 'find' && d.text) findInAllPanes(d.text)
       }),
       window.api.on('web:download', (d) => {
         update((s) => {
@@ -723,13 +747,16 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       const v = views.current.get(id)
       if (loading) patchRt(id, { loading })
       else {
+        if (id === currentRef.current?.id) scanPage(700)
         const url = v ? safely(() => v.getURL(), '') : ''
         patchRt(id, { loading, back: !!v && safely(() => v.canGoBack(), false), fwd: !!v && safely(() => v.canGoForward(), false), ...(isFederationUrl(url) || isAwsSignInPage(url) ? {} : { signingIn: false }) })
       }
     },
     onFail: (id, error) => patchRt(id, { error, loading: false, signingIn: false }),
     onFound: (id, act, matches) => {
-      if (id === currentRef.current?.id) setFind((f) => (f ? { ...f, active: act, matches } : f))
+      if (id !== currentRef.current?.id) return
+      setFind((f) => (f ? { ...f, active: act, matches } : f))
+      if (findAllRef.current) reportFindCount(tab.id, matches)
     },
     onReady: (id, v) => {
       const wc = safely(() => v.getWebContentsId(), 0)
@@ -764,6 +791,78 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     if (open) activate(open.id)
     else openInNewTab(spaceId, request.url)
   }, [request, !!st]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ----- side by side: the hosts a page mentions, finding across panes, text for the terminals beside -----
+
+  /** Reads the page on screen for hosts it mentions, `delay` ms from now (pages such as Jira render after loading). */
+  const scanPage = (delay = 0): void => {
+    clearTimeout(scanTimer.current)
+    scanTimer.current = setTimeout(() => {
+      const c = currentRef.current
+      const v = c ? views.current.get(c.id) : undefined
+      if (!c?.url || !v) { setPageHosts(null); return }
+      const seq = ++scanSeq.current
+      const url = c.url
+      Promise.resolve(safely(() => v.executeJavaScript(PAGE_TEXT), Promise.resolve(''))).then((text) => {
+        if (seq !== scanSeq.current) return
+        const hosts = typeof text === 'string' && text ? hostsInText(text, allInstances(useStore.getState())) : []
+        setPageHosts((p) => (p && p.tabId === c.id && p.url === url && sameHosts(p.hosts, hosts) ? p : { tabId: c.id, url, hosts }))
+      }, () => undefined)
+    }, delay)
+  }
+  useEffect(() => {
+    scanPage(900)
+    // Another page of the split's find: look for the same text on this one.
+    if (findAllRef.current) act((v) => v.findInPage(findAllRef.current, { findNext: true }))
+  }, [current?.id, current?.url]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Tickets fill in comments and fields after loading; a slow look now and then keeps the list current.
+  useEffect(() => {
+    if (!active) return
+    const t = setInterval(() => { if (document.visibilityState === 'visible') scanPage() }, 8000)
+    return () => { clearInterval(t); clearTimeout(scanTimer.current) }
+  }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Opens a host the page mentions beside it: the first on its right, more stacked under the last session there. */
+  const openHostBeside = (key: string): void => {
+    const s = useStore.getState()
+    const sessions = s.splitGroup.includes(tab.id) ? s.splitGroup.filter((id) => { const t = s.tabs.find((x) => x.id === id); return !!t && isSession(t) }) : []
+    const beside: Beside = sessions.length ? { tab: sessions[sessions.length - 1], side: 'down' } : { tab: tab.id, side: 'right' }
+    const open = s.tabs.find((t) => t.instanceKey === key && (t.kind === 'ssh' || t.kind === 'rdp') && !t.transient)
+    if (open && s.splitGroup.includes(open.id) && s.splitGroup.includes(tab.id)) s.focusPane(open.id)
+    else if (open) s.splitWith(beside.tab, open.id, beside.side)
+    else openDefaultFor(key, beside)
+  }
+
+  useEffect(() => onFindAll((req) => {
+    if (!req.ids.includes(tab.id)) return
+    if (req.step) {
+      const back = !!req.step.back
+      if (req.step.tabId === tab.id && req.text) act((v) => v.findInPage(req.text, { forward: !back, findNext: false }))
+      return
+    }
+    findAllRef.current = req.text
+    if (!req.text || !currentRef.current?.url) {
+      act((v) => v.stopFindInPage('clearSelection'))
+      reportFindCount(tab.id, null)
+      return
+    }
+    act((v) => v.findInPage(req.text, { findNext: true }))
+  }), [tab.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The terminals beside this page, for its context menu's "Paste into …" (main builds that menu).
+  const targetsKey = useStore((s) => (s.splitGroup.includes(tab.id)
+    ? s.splitGroup.map((id) => s.tabs.find((t) => t.id === id)).filter((t): t is Tab => t?.kind === 'ssh').map((t) => `${t.id}\t${t.title}${t.shellLabel ? ` (${t.shellLabel})` : ''}`).join('\n')
+    : ''))
+  useEffect(() => {
+    const targets = targetsKey ? targetsKey.split('\n').map((line) => { const [id, title] = line.split('\t'); return { id, title } }) : []
+    void window.api.invoke('browser:paneTargets', targets).catch(() => undefined)
+  }, [targetsKey])
+
+  // The page on screen names the Browser's pane in a split ("jira.example.com · INC-123 …").
+  const pageLabel = current?.url ? `${hostOf(current.url)}${current.title ? ` · ${current.title}` : ''}` : ''
+  useEffect(() => {
+    if ((tab.message ?? '') !== pageLabel) useStore.getState().updateTab(tab.id, { message: pageLabel || undefined })
+  }, [pageLabel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ----- command bar suggestions -----
 
@@ -1058,6 +1157,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
 
   const tabMenuFor = menu?.kind === 'tab' ? findTab(menu.id) : undefined
   const menuSpace = menu?.kind === 'space' ? spaces.find((x) => x.id === menu.id) : undefined
+  const hostsHere = pageHosts && pageHosts.tabId === current?.id && pageHosts.url === current?.url ? pageHosts.hosts : NO_HOSTS
+  const known = new Map(hostsHere.length ? allInstances(useStore.getState()).map((i) => [i.key, i]) : [])
   // The space form edits an AWS account space: colour of its own and icon only.
   const editingAccount = menu?.kind === 'newSpace' && menu.edit ? spaces.find((x) => x.id === menu.edit && x.profile) : undefined
 
@@ -1164,6 +1265,16 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           )}
 
           {cmd && !showStart && commandBarFor(false)}
+
+          {hostsHere.length > 0 && !showStart && hostsHidden !== current?.url && (
+            <div className="web-hosts-pill">
+              <button type="button" title="Hosts this page mentions: open one beside it" aria-haspopup="menu" onClick={(e) => setMenu(menu?.kind === 'hosts' ? null : { kind: 'hosts', anchor: e.currentTarget })}>
+                <Icon.server />
+                {hostsHere.length === 1 ? (known.get(hostsHere[0].key)?.name ?? '1 host') : `${hostsHere.length} hosts`} on this page
+              </button>
+              <button type="button" className="web-hosts-x" title="Hide for this page" aria-label="Hide the hosts on this page" onClick={() => { setHostsHidden(current?.url ?? null); if (menu?.kind === 'hosts') setMenu(null) }}><Icon.x /></button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1209,6 +1320,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           <MenuItem onClick={() => { setMenu(null); toggleFavorite(current.id) }} hint="⌘⇧D">{current.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</MenuItem>
           {!current.favorite && <MenuItem onClick={() => { setMenu(null); togglePin(current.id) }} hint="⌘D">{current.pinned ? 'Unpin tab' : 'Pin tab'}</MenuItem>}
           <MenuItem onClick={() => { setMenu(null); sharePage() }}>Share…</MenuItem>
+          <MenuItem onClick={() => { setMenu(null); useStore.getState().openQuickSwitcher('', { beside: tab.id }) }} hint={'⌘\\'}>Open a host beside this page…</MenuItem>
           <MenuSep />
           <MenuItem onClick={() => zoomStep(-1)} hint="⌘−">Zoom out</MenuItem>
           <MenuItem onClick={() => setZoom(1)} hint="⌘0">Actual size ({Math.round((st.zoom ?? 1) * 100)}%, all pages)</MenuItem>
@@ -1216,6 +1328,38 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           <MenuSep />
           <MenuItem onClick={() => { setMenu(null); act((v) => v.reloadIgnoringCache()) }} hint="⌘⇧R">Reload without cache</MenuItem>
           <MenuItem onClick={() => { setMenu(null); openExternal() }}>Open in your browser</MenuItem>
+        </Popover>
+      )}
+
+      {menu?.kind === 'hosts' && hostsHere.length > 0 && (
+        <Popover anchor={menu.anchor} align="right" width={340} onClose={() => setMenu(null)}>
+          <MenuLabel>Hosts this page mentions</MenuLabel>
+          {hostsHere.map((h) => {
+            const i = known.get(h.key)
+            if (!i) return null
+            const route = routeOf(i, settings).route
+            const reachable = route === 'ssm' || route === 'direct'
+            const open = useStore.getState().tabs.some((t) => t.instanceKey === h.key && (t.kind === 'ssh' || t.kind === 'rdp') && !t.transient)
+            return (
+              <MenuItem
+                key={h.key}
+                disabled={!open && !reachable}
+                title={`${i.name} (${i.instanceId}) in ${i.profile} · ${i.region}. Found by ${h.via}: ${h.match}`}
+                hint={open ? 'Show beside' : reachable ? `${i.platform === 'windows' ? 'Desktop' : 'SSH'} beside` : i.state === 'running' ? 'Unreachable' : i.state}
+                onClick={() => { setMenu(null); openHostBeside(h.key) }}
+              >
+                <span className="web-page-host">
+                  {i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />}
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{i.name}</span>
+                    <span className="muted block truncate text-[10.5px]">{i.profile} · {h.via === 'instance ID' ? i.privateIp ?? i.region : `${h.via} ${h.match}`}{h.via === 'instance ID' ? ` · ${i.instanceId}` : ''}</span>
+                  </span>
+                </span>
+              </MenuItem>
+            )
+          })}
+          <MenuSep />
+          <div className="muted px-3 pb-1.5 pt-0.5 text-[10.5px] leading-snug">Found by instance ID, IP address, EC2 host name or Name tag. The first opens beside this page, the next ones under it.</div>
         </Popover>
       )}
 

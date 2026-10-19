@@ -1,5 +1,5 @@
 import { useEffect, type ReactElement } from 'react'
-import { useStore } from './store'
+import { useStore, type Tab } from './store'
 import Sidebar from './components/Sidebar'
 import AppRail from './components/AppRail'
 import InstanceTable from './components/InstanceTable'
@@ -37,9 +37,14 @@ export default function App(): ReactElement {
   const init = useStore((s) => s.init)
   const activeTab = useStore((s) => s.activeTab)
   const gridView = useStore((s) => s.gridView)
-  // The tools (Browser, Terminal, Whiteboard, Notes) bring their own side lists; the hosts sidebar steps aside while
-  // one is in front on its own. A host's note open beside its session keeps the sidebar.
-  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && (t.kind === 'browser' || t.kind === 'local' || t.kind === 'board' || t.kind === 'notes' || t.kind === 'finder') && !s.splitGroup.includes(t.id)))
+  // The tools (Browser, Terminal, Whiteboard, Notes, Finder) bring their own side lists; the hosts sidebar steps aside
+  // while one is in front, alone or as a pane of a side-by-side view. A host's note open beside its session keeps it.
+  const browserInFront = useStore((s) => {
+    if (s.gridView) return false
+    const kindOf = (id: string): Tab['kind'] | undefined => s.tabs.find((t) => t.id === id)?.kind
+    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder'].includes(kindOf(id) ?? ''))
+    return ['browser', 'local', 'board', 'notes', 'finder'].includes(kindOf(s.activeTab) ?? '')
+  })
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)

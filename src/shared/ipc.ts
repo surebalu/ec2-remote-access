@@ -147,6 +147,8 @@ export interface IpcApi {
   'browser:fill': (webContentsId: number, account: string, itemId: string, anySite?: boolean) => Promise<string[]>
   /** The system Share menu for a page; false when the host has none (gateway). */
   'browser:share': (url: string) => Promise<boolean>
+  /** The terminals beside the Browser in a split, offered by its page menu as "Paste into …" (empty when none). */
+  'browser:paneTargets': (targets: { id: string; title: string }[]) => Promise<void>
   /** The macOS emoji picker, for the text field that has the keyboard (the Mac app only). */
   'app:emojiPanel': () => Promise<void>
   'clipboard:write': (text: string) => Promise<void>
@@ -202,8 +204,11 @@ export interface IpcEvents {
   'web:shortcut': { webContentsId: number; key: string; shift: boolean; alt: boolean }
   /** The mouse went down inside a page (the app's document never sees those clicks). */
   'web:pointer': { webContentsId: number }
-  /** A page context-menu action the app carries out (Add to note, Fill from 1Password). */
-  'web:menu': { webContentsId: number; action: 'note' | 'fill'; url: string; title: string }
+  /**
+   * A page context-menu action the app carries out: Add to note, Fill from 1Password, and with the page's selected
+   * `text`, paste it into the terminal `target` beside the page or find it in every pane of the split.
+   */
+  'web:menu': { webContentsId: number; action: 'note' | 'fill' | 'paste' | 'find'; url: string; title: string; text?: string; target?: string }
   /** Output and exit of a local terminal. */
   'term:event': LocalTermEvent
   /** A download started, progressed or finished (main/webviews.ts). */

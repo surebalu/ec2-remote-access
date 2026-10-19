@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome } from '@shared/browser'
 import type { Instance } from '@shared/types'
-import { filteredInstances, routeOf, useStore, visibleInstances } from '../store'
+import { filteredInstances, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind } from '../store'
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
@@ -38,6 +38,7 @@ interface Command {
 function commands(): Command[] {
   const s = useStore.getState()
   const active = s.tabs.find((t) => t.id === s.activeTab)
+  const inSplit = !s.gridView && s.splitGroup.includes(s.activeTab)
   const cmds: Command[] = [
     { id: 'rescan', title: 'Rescan inventory', keywords: 'refresh scan reload', icon: Icon.refresh, run: () => void s.scan() },
     { id: 'signin', title: 'Sign in / refresh SSO token', keywords: 'aws sso login token', icon: Icon.key, run: () => void s.refreshToken() },
@@ -63,7 +64,14 @@ function commands(): Command[] {
     { id: 'add-account', title: 'Add AWS account…', keywords: 'sso profile', icon: Icon.cloud, run: () => s.set({ addAccountOpen: true }) },
     { id: 'shortcuts', title: 'Keyboard shortcuts', hint: '⌘/', icon: Icon.keyboard, run: () => s.set({ shortcutsOpen: true }) },
     { id: 'close', title: 'Close current tab', hint: '⌘W', icon: Icon.x, run: () => void s.closeTab(active!.id), when: !!active },
-    { id: 'split', title: 'Split: same session beside this one', hint: '⌘D', icon: Icon.split, run: () => s.duplicateTab(active!.id, true), when: !!active && active.kind !== 'rdp' },
+    { id: 'beside', title: 'Open beside this tab…', keywords: 'split side by side compare next to pane', hint: '⌘\\', icon: Icon.split, run: () => s.openQuickSwitcher('', { beside: active!.id }), when: !!active },
+    { id: 'split', title: 'Split: same session beside this one', hint: '⌘D', icon: Icon.split, run: () => s.duplicateTab(active!.id, true), when: !!active && active.kind !== 'rdp' && active.kind !== 'browser' && active.kind !== 'local' && active.kind !== 'notes' && active.kind !== 'board' && active.kind !== 'finder' },
+    { id: 'arrange-columns', title: 'Side by side: all in a row', keywords: 'split layout arrange columns', icon: Icon.split, run: () => s.arrangeSplit('columns'), when: inSplit },
+    { id: 'arrange-rows', title: 'Side by side: stacked', keywords: 'split layout arrange rows', icon: Icon.splitRows, run: () => s.arrangeSplit('rows'), when: inSplit },
+    { id: 'arrange-main', title: 'Side by side: one large, the rest stacked', keywords: 'split layout arrange main', icon: Icon.splitMain, run: () => s.arrangeSplit('main'), when: inSplit && s.splitGroup.length > 2 },
+    { id: 'arrange-grid', title: 'Side by side: grid', keywords: 'split layout arrange grid', icon: Icon.grid, run: () => s.arrangeSplit('grid'), when: inSplit && s.splitGroup.length > 2 },
+    { id: 'split-zoom', title: s.splitZoom ? 'Side by side: show every pane' : 'Side by side: show this pane alone', keywords: 'split zoom maximize', hint: '⌘⇧↩', icon: Icon.maximize, run: () => s.set({ splitZoom: s.splitZoom ? null : s.activeTab }), when: inSplit },
+    { id: 'split-done', title: 'Side by side: done (show the focused pane on its own)', keywords: 'split unsplit exit close', icon: Icon.x, run: () => s.endSplit(), when: inSplit },
     { id: 'dup', title: 'Duplicate current session', hint: '⌘⇧D', icon: Icon.plus, run: () => s.duplicateTab(active!.id), when: !!active && active.kind !== 'rdp' },
     { id: 'broadcast', title: s.broadcastInput ? 'Stop broadcasting input' : 'Broadcast input to all panes in the split', hint: '⌘⇧I', icon: Icon.broadcast, run: () => s.set({ broadcastInput: !s.broadcastInput }), when: s.splitGroup.includes(s.activeTab) },
     { id: 'find', title: 'Find in terminal', hint: '⌘F', icon: Icon.search, run: () => terminalAction(active!.id, 'find'), when: active?.kind === 'ssh' }
@@ -92,6 +100,33 @@ function commands(): Command[] {
 }
 
 const fuzzy = (text: string, q: string): boolean => q.split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
+
+const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'notes' ? Icon.note : t.kind === 'browser' ? Icon.globe : t.kind === 'local' ? Icon.console : t.kind === 'board' ? Icon.board : t.kind === 'finder' ? Icon.finder : Icon.terminal)
+const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder }
+
+/**
+ * Picking what to show beside a tab (⌘\): open tabs not already beside it, the tools, then hosts (a new session there).
+ * Hosts come first once something is typed, since that is what a name or an IP most likely means.
+ */
+function besideResults(anchor: Tab, query: string, hosts: Instance[]): Result[] {
+  const s = useStore.getState()
+  const q = query.trim().toLowerCase()
+  const group = s.splitGroup.includes(anchor.id) ? s.splitGroup : [anchor.id]
+  const tabs = s.tabs.filter((t) => !t.transient && !group.includes(t.id) && `${t.title} ${t.shellLabel ?? ''} ${t.kind}`.toLowerCase().includes(q))
+  const tools = (Object.keys(TOOL_NAMES) as ToolKind[])
+    .filter((k) => (hasBrowser() || (k !== 'local' && k !== 'browser' && k !== 'finder')) && !s.tabs.some((t) => t.kind === k) && TOOL_NAMES[k].toLowerCase().includes(q))
+  const tabResults: Result[] = tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: t.message && !isSessionKind(t) ? t.message : `Open tab · ${t.kind === 'ssh' ? 'SSH' : t.kind.toUpperCase()}`, icon: tabIcon(t), hint: 'Show beside', action: () => s.splitWith(anchor.id, t.id) }))
+  const toolResults: Result[] = tools.map((k) => ({ id: `tool:${k}`, title: TOOL_NAMES[k], subtitle: 'Open beside', icon: TOOL_ICONS[k], hint: 'Open beside', action: () => s.splitWith(anchor.id, s.toolTab(k)) }))
+  const hostResults: Result[] = hosts.slice(0, 40).map((i) => {
+    const available = ['ssm', 'direct'].includes(routeOf(i, s.settings).route)
+    return { id: i.key, title: i.name, subtitle: `${i.profile} · ${i.region} · ${i.instanceId}${i.state !== 'running' ? ` · ${i.state}` : ''}`, key: i.key,
+      icon: i.platform === 'windows' ? Icon.monitor : Icon.terminal, hint: available ? `${i.platform === 'windows' ? 'Desktop' : 'SSH'} beside` : 'Details',
+      action: () => (available ? openDefaultFor(i.key, { tab: anchor.id }) : s.revealHost(i.key)) }
+  })
+  return q ? [...tabResults, ...hostResults, ...toolResults] : [...tabResults, ...toolResults, ...hostResults]
+}
+
+const isSessionKind = (t: Tab): boolean => t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp'
 
 /** "start web", "stop web", "forward db", "ssh web", "files web": a verb followed by a host query. */
 function hostVerbs(q: string, hosts: Instance[]): Result[] {
@@ -126,8 +161,9 @@ export default function QuickSwitcher(): ReactElement {
   const [selected, setSelected] = useState(0)
   const listId = useId()
   const listRef = useRef<HTMLDivElement>(null)
-  const close = (): void => s.set({ quickSwitcherOpen: false, quickSwitcherQuery: '' })
-  const commandMode = query.startsWith('>')
+  const close = (): void => s.set({ quickSwitcherOpen: false, quickSwitcherQuery: '', quickSwitcherBeside: null })
+  const beside = s.quickSwitcherBeside ? s.tabs.find((t) => t.id === s.quickSwitcherBeside) : undefined
+  const commandMode = !beside && query.startsWith('>')
   const q = commandMode ? query.slice(1).trim() : query.trim()
   const recentRank = (key: string): number => { const n = s.recentHosts.indexOf(key); return n < 0 ? 100 : n }
   const visible = visibleInstances(s)
@@ -136,7 +172,10 @@ export default function QuickSwitcher(): ReactElement {
     .filter((c) => !q || fuzzy(`${c.title} ${c.keywords ?? ''}`, q))
     .map((c) => ({ id: `cmd:${c.id}`, title: c.title, subtitle: commandMode ? '' : 'Command', icon: c.icon, hint: c.hint ?? '', action: c.run }))
   let results: Result[]
-  if (commandMode) results = cmdResults
+  if (beside) {
+    results = besideResults(beside, query, visible.filter((i) => matchesHost(i, query)).sort((a, b) =>
+      recentRank(a.key) - recentRank(b.key) || Number(s.isFavorite(b.key)) - Number(s.isFavorite(a.key)) || a.name.localeCompare(b.name)))
+  } else if (commandMode) results = cmdResults
   else {
     const hosts = visible.filter((i) => matchesHost(i, query)).sort((a, b) =>
       recentRank(a.key) - recentRank(b.key) || Number(s.isFavorite(b.key)) - Number(s.isFavorite(a.key)) || a.name.localeCompare(b.name)
@@ -166,18 +205,18 @@ export default function QuickSwitcher(): ReactElement {
     if (details && item.key) s.revealHost(item.key)
     else item.action()
   }
-  return <Modal title={commandMode ? 'Commands' : 'Quick switcher'} onClose={close} width="max-w-2xl">
+  return <Modal title={beside ? `Open beside ${beside.title}` : commandMode ? 'Commands' : 'Quick switcher'} onClose={close} width="max-w-2xl">
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-3 muted"><Icon.search /></span>
       <input autoFocus className="input !h-10 !pl-9 !text-sm" aria-label="Find a host or open session" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={results.length ? `${listId}-${index}` : undefined}
-        placeholder="Find a host, IP, account, region, tag or session. Type > for commands." value={query} onChange={(e) => setQuery(e.target.value)}
+        placeholder={beside ? 'A host (name, IP, instance ID), an open tab, or a tool' : 'Find a host, IP, account, region, tag or session. Type > for commands.'} value={query} onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSelected((index + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % (results.length || 1)) }
           if (e.key === 'Enter') { e.preventDefault(); activate(index, e.shiftKey) }
           if (e.key === 'Backspace' && query === '>') { e.preventDefault(); setQuery('') }
         }} />
     </div>
-    <p className="muted my-3 text-xs">{query ? `${results.length}${results.length === 60 ? '+' : ''} result${results.length === 1 ? '' : 's'}` : 'Open sessions, recent connections, and favorites first'}</p>
+    <p className="muted my-3 text-xs">{query ? `${results.length}${results.length === 60 ? '+' : ''} result${results.length === 1 ? '' : 's'}` : beside ? 'Shown side by side with it; drag a pane’s header to move it, or its border to resize' : 'Open sessions, recent connections, and favorites first'}</p>
     <div ref={listRef} id={listId} role="listbox" aria-label="Hosts and sessions" className="max-h-[50vh] overflow-y-auto space-y-1">
       {results.map((item, n) => <button key={item.id} id={`${listId}-${n}`} type="button" role="option" aria-selected={n === index} tabIndex={-1}
         className={`switcher-result ${n === index ? 'on' : ''}`} onMouseMove={() => setSelected(n)} onClick={() => activate(n)}>
