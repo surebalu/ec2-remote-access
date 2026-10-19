@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decodeBase64, folderName, parseHistory, parseMark, parseOsc7, suggestFromHistory, tildify } from '../src/shared/termIntegration.ts'
+import { decodeBase64, folderName, parseHistory, parseMark, parseOsc7, shortPath, suggestFromHistory, tildify } from '../src/shared/termIntegration.ts'
 
 test('shell integration marks: prompt, output, exit status, command line and properties', () => {
   assert.deepEqual(parseMark(133, 'A'), { kind: 'prompt' })
@@ -38,4 +38,16 @@ test('the input box suggests the latest matching single-line command', () => {
   assert.equal(suggestFromHistory(h, 'git status'), null)
   assert.equal(suggestFromHistory(h, '  '), null)
   assert.equal(suggestFromHistory(['for x\ndo'], 'for'), null)
+})
+
+test('short folder names for the ribbon: tildified, the last parts after …/', () => {
+  const home = '/Users/me'
+  assert.equal(shortPath('/Users/me/Documents/Surendra-Personal/codebase/Mainspring/remote-access-tool', home), '…/codebase/Mainspring/remote-access-tool')
+  assert.equal(shortPath('/Users/me/code/app', home), '~/code/app')
+  assert.equal(shortPath('/Users/me/a/b/c', home), '~/a/b/c')
+  assert.equal(shortPath('/Users/me', home), '~')
+  assert.equal(shortPath('/usr/local/share/man', home), '…/local/share/man')
+  assert.equal(shortPath('/etc', home), '/etc')
+  assert.equal(shortPath('/', home), '/')
+  assert.equal(shortPath('/Users/me/a/b/c/d', home, 1), '…/d')
 })
