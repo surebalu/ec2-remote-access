@@ -27,6 +27,8 @@ import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
 import { openDefaultFor } from './quickConnect'
+import { ZoomBadge, zoomSection } from './components/ZoomControls'
+import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
 import VoiceHud from './components/VoiceHud'
 import { installVoice } from './voice'
@@ -35,8 +37,9 @@ export default function App(): ReactElement {
   const init = useStore((s) => s.init)
   const activeTab = useStore((s) => s.activeTab)
   const gridView = useStore((s) => s.gridView)
-  // The browser brings its own sidebar (spaces and tabs); the hosts sidebar steps aside while it is in front.
-  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && (t.kind === 'browser' || t.kind === 'local' || t.kind === 'board') && !s.splitGroup.includes(t.id)))
+  // The tools (Browser, Terminal, Whiteboard, Notes) bring their own side lists; the hosts sidebar steps aside while
+  // one is in front on its own. A host's note open beside its session keeps the sidebar.
+  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && (t.kind === 'browser' || t.kind === 'local' || t.kind === 'board' || t.kind === 'notes') && !s.splitGroup.includes(t.id)))
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)
@@ -74,6 +77,17 @@ export default function App(): ReactElement {
         if (state.quickSwitcherOpen) state.set({ quickSwitcherOpen: false })
         else state.openQuickSwitcher()
         return
+      }
+      // ⌘+ / ⌘− with the pointer over the sidebar or the hosts list sizes just that section; elsewhere the View
+      // menu zooms the whole window as before. (⌘0 stays the all-sessions grid.)
+      if (e.metaKey && !e.ctrlKey && !e.altKey && !e.defaultPrevented && ['=', '+', '-', '_'].includes(e.key) && !document.querySelector('.modal-backdrop')) {
+        const hovered = [...document.querySelectorAll<HTMLElement>('[data-zoom-section]:hover')].pop()
+        if (hovered) {
+          e.preventDefault()
+          e.stopPropagation()
+          zoomSection(hovered.dataset.zoomSection as ZoomSection, e.key === '-' || e.key === '_' ? -1 : 1)
+          return
+        }
       }
       handleAppShortcut(e)
     }
@@ -141,6 +155,7 @@ export default function App(): ReactElement {
       {runCommandFor && <RunCommandDialog key={runCommandFor.runId ?? runCommandFor.keys.join('|')} />}
       <Toasts />
       <VoiceHud />
+      <ZoomBadge />
     </>
   )
   if (isMobile()) return <><MobileApp />{dialogs}</>
@@ -150,7 +165,8 @@ export default function App(): ReactElement {
       <header className="titlebar drag">
         <div className="brand">
           <span className="brand-mark">&gt;_</span>
-          <span className="brand-name">EC2 Remote Access</span>
+          {/* The name shown in the title bar; the app's internal name (bundle, data folder, Keychain) stays EC2 Remote Access. */}
+          <span className="brand-name">Remote Access Tool</span>
           <span className="flex-1" />
           {!browserInFront && (
             <button className="titlebar-btn no-drag" title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Collapse sidebar (⌘B)'} aria-label={sidebarCollapsed ? 'Show sidebar' : 'Collapse sidebar'} aria-pressed={!sidebarCollapsed} onClick={() => useStore.getState().toggleSidebar()}>
@@ -170,7 +186,7 @@ export default function App(): ReactElement {
         <div className={browserInFront ? 'hidden' : 'contents'}><Sidebar /></div>
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />
-          <div className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
+          <div data-zoom-section="hosts" className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
           <HostGridBar />
           <SessionPanes grid={gridView} />
           <TunnelBar />

@@ -2,10 +2,12 @@ import type { ReactElement } from 'react'
 import { getStroke } from 'perfect-freehand'
 import type { BoardItem } from '@shared/types'
 import { arrowHead, outlinePath, wrapText, type Box } from '../../boardGeometry'
+import { uiFontStack } from '../../uiFont'
 
 /** How whiteboard items look (SVG, in board units). The same elements are serialised for PNG export. */
 
-export const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif"
+/** Board text uses the app font (Settings → General → App font); the canvas that measures it needs the real stack. */
+export const FONT = 'var(--ui-font)'
 export const LINE_HEIGHT = 1.3
 export const NOTE_PAD = 14
 export const NOTE_FONT = 18
@@ -15,7 +17,7 @@ let ctx: CanvasRenderingContext2D | null = null
 export function measure(text: string, size: number): number {
   ctx ??= document.createElement('canvas').getContext('2d')
   if (!ctx) return text.length * size * 0.55
-  ctx.font = `${size}px ${FONT}`
+  ctx.font = `${size}px ${uiFontStack()}`
   return ctx.measureText(text).width
 }
 
@@ -131,7 +133,8 @@ export async function exportPng(itemsGroup: SVGGElement, defs: SVGDefsElement | 
   const h = Math.ceil(box.h + pad * 2)
   const ser = new XMLSerializer()
   const inner = (defs ? ser.serializeToString(defs) : '') + ser.serializeToString(itemsGroup)
-  const body = inner.replaceAll('var(--board-ink)', colors.ink).replaceAll('var(--board-paper)', colors.paper)
+  // An image drawn from the SVG cannot see the page's CSS variables, so the colours and the font are written in.
+  const body = inner.replaceAll('var(--board-ink)', colors.ink).replaceAll('var(--board-paper)', colors.paper).replaceAll('var(--ui-font)', uiFontStack().replaceAll('"', "'"))
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${box.x - pad} ${box.y - pad} ${w} ${h}"><rect x="${box.x - pad}" y="${box.y - pad}" width="${w}" height="${h}" fill="${colors.paper}"/>${body}</svg>`
   const img = new Image()
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`

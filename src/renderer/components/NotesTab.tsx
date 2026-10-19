@@ -57,7 +57,7 @@ const highlight = HighlightStyle.define([
   { tag: tags.emphasis, fontStyle: 'italic' },
   { tag: tags.strikethrough, textDecoration: 'line-through' },
   { tag: [tags.link, tags.url], color: 'var(--accent)' },
-  { tag: tags.monospace, fontFamily: "'SF Mono', ui-monospace, Menlo, monospace", color: 'var(--text-2)' },
+  { tag: tags.monospace, fontFamily: 'var(--mono-font)', color: 'var(--text-2)' },
   { tag: tags.quote, color: 'var(--muted)', fontStyle: 'italic' },
   { tag: highlightTag, backgroundColor: 'rgba(255, 213, 0, .38)', borderRadius: '2px' },
   // Marks (#, -, >, **) are dim; a list's text (tagged as a whole) keeps the normal colour.

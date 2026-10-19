@@ -10,6 +10,9 @@ import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTh
 import { isDarkMode } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
 import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
+import { DEFAULT_UI_FONT, UI_FONTS } from '../uiFont'
+import { ZOOM_SECTIONS } from '../sectionZoom'
+import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
 type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'voice' | 'phone' | 'requirements' | 'about'
@@ -215,10 +218,30 @@ export default function SettingsDialog(): ReactElement | null {
         <Row label="Appearance" hint={draft.colorTheme ? 'A colour theme picks light or dark itself; choose one here to go back to the default colours.' : 'Follows macOS by default.'}>
           <div className="seg w-64">
             {(['system', 'light', 'dark'] as const).map((t) => (
-              <button key={t} className={draft.theme === t && !draft.colorTheme ? 'on' : ''} onClick={() => { setDraft((d) => (d ? { ...d, theme: t, colorTheme: '' } : d)); void s.setTheme(t) }}>
+              <button key={t} className={draft.theme === t && !draft.colorTheme ? 'on' : ''} onClick={() => { setDraft((d) => (d ? { ...d, theme: t, colorTheme: '', terminalTheme: 'auto' } : d)); void s.setTheme(t) }}>
                 {t === 'system' ? 'Auto' : t[0].toUpperCase() + t.slice(1)}
               </button>
             ))}
+          </div>
+        </Row>
+        <Row label="Text size" hint="The hosts sidebar and the hosts list, each on its own. Point at either and press ⌘+ / ⌘− to change it there.">
+          <div className="flex flex-col items-end gap-1.5">
+            {ZOOM_SECTIONS.map((z) => (
+              <span key={z.id} className="flex items-center gap-2 text-[12px]"><span className="muted">{z.label}</span><ZoomStepper section={z.id} /></span>
+            ))}
+          </div>
+        </Row>
+        <Row label="App font" hint="Every label, menu and list in the app. Notes and terminals have their own font settings." stack>
+          <div className="font-choices" role="radiogroup" aria-label="App font">
+            {UI_FONTS.map((f) => {
+              const on = (draft.uiFont || DEFAULT_UI_FONT) === f.id
+              return (
+                <button key={f.id} type="button" role="radio" aria-checked={on} className={`font-choice ${on ? 'on' : ''}`} style={{ fontFamily: f.stack }} onClick={() => { upd('uiFont', f.id); void s.setUiFont(f.id) }}>
+                  <span className="font-choice-sample">Aa</span>
+                  <span className="font-choice-name">{f.label}</span>
+                </button>
+              )
+            })}
           </div>
         </Row>
         {IN_ELECTRON && (
@@ -236,11 +259,11 @@ export default function SettingsDialog(): ReactElement | null {
       </Group>
       <Group title="Colour theme">
         <div className="set-row stack">
-          <div className="set-hint !mt-0">Colours for the whole app, from the terminal schemes. Terminals set to “Match app” take the theme’s scheme too.</div>
+          <div className="set-hint !mt-0">Colours for the whole app, from the terminal schemes. Terminals switch to the same scheme; pick a different one under Terminal if you want them to differ.</div>
           <div className="ctheme-grid" role="radiogroup" aria-label="Colour theme">
             {[null, ...APP_THEMES].map((th) => {
               const on = (draft.colorTheme ?? '') === (th?.id ?? '')
-              const pick = (): void => { upd('colorTheme', th?.id ?? ''); void s.setColorTheme(th?.id ?? '') }
+              const pick = (): void => { setDraft((d) => (d ? { ...d, colorTheme: th?.id ?? '', terminalTheme: 'auto' } : d)); void s.setColorTheme(th?.id ?? '') }
               return <ThemePreview key={th?.id ?? 'default'} theme={th} on={on} onPick={pick} appDark={draft.theme === 'dark' || (draft.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)} />
             })}
           </div>

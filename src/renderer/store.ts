@@ -4,6 +4,8 @@ import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { ssoWaitOutcome } from '@shared/ssoWait'
 import { applyColorTheme } from './appThemes'
+import { applyUiFont } from './uiFont'
+import { applySectionZoom, type ZoomSection } from './sectionZoom'
 
 export interface RdpTabRequest {
   user: string
@@ -167,10 +169,14 @@ interface State {
   deleteFolder: (name: string, moveTo: string | null) => Promise<void>
   folders: () => string[]
   deleteManualHost: (id: string) => Promise<void>
-  /** Auto / Light / Dark. Picking one goes back to the default colours (it clears a colour theme). */
+  /** Auto / Light / Dark. Picking one goes back to the default colours (it clears a colour theme); the terminal follows. */
   setTheme: (theme: Theme) => Promise<void>
-  /** A colour theme for the whole app ('' for the default); it decides light or dark itself. */
+  /** A colour theme for the whole app ('' for the default); it decides light or dark itself, and the terminal follows. */
   setColorTheme: (id: string) => Promise<void>
+  /** The interface font (UI_FONTS id). */
+  setUiFont: (id: string) => Promise<void>
+  /** Text size of one section of the hosts view (1 = default). */
+  setSectionZoom: (section: ZoomSection, zoom: number) => Promise<void>
   toggleGroup: (key: string) => Promise<void>
   setAllGroups: (keys: string[], collapsed: boolean) => Promise<void>
   isFavorite: (key: string) => boolean
@@ -404,6 +410,8 @@ export const useStore = create<State>((set, get) => ({
       window.api.invoke('tunnels:list')
     ])
     set({ settings, tunnels })
+    applyUiFont(settings.uiFont)
+    applySectionZoom(settings.sectionZoom)
     const shade = applyAppearance(settings.theme, settings.colorTheme)
     if (settings.colorTheme) void window.api.invoke('theme:set', shade)
     if (cached) set({ instances: cached.instances, scanErrors: cached.errors, scannedAt: cached.scannedAt })
@@ -681,13 +689,27 @@ export const useStore = create<State>((set, get) => ({
   },
   setTheme: async (theme) => {
     applyAppearance(theme, '')
-    await get().saveSettings({ theme, colorTheme: '' })
+    // The terminal follows the main theme: picking one puts the terminal scheme back on "Match app".
+    await get().saveSettings({ theme, colorTheme: '', terminalTheme: 'auto' })
     await window.api.invoke('theme:set', theme)
+  },
+  setSectionZoom: async (section, zoom) => {
+    const cur = get().settings
+    const sectionZoom = { ...(cur?.sectionZoom ?? {}), [section]: Math.round(zoom * 100) / 100 }
+    // Kept in the store at once, not after the save: holding ⌘+ sends steps faster than a save round trip, and each
+    // step must start from the last one.
+    if (cur) set({ settings: { ...cur, sectionZoom } })
+    applySectionZoom(sectionZoom)
+    await get().saveSettings({ sectionZoom })
+  },
+  setUiFont: async (id) => {
+    applyUiFont(id)
+    await get().saveSettings({ uiFont: id })
   },
   setColorTheme: async (id) => {
     const theme = get().settings?.theme ?? 'system'
     const shade = applyAppearance(theme, id)
-    await get().saveSettings({ colorTheme: id })
+    await get().saveSettings({ colorTheme: id, terminalTheme: 'auto' })
     // Native controls, scrollbars and the window background follow the theme's light or dark.
     await window.api.invoke('theme:set', id ? shade : theme)
   },
