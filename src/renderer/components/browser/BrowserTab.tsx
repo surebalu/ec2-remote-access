@@ -8,7 +8,7 @@ import {
 import { hostsInText, type PageHost } from '@shared/pageHosts'
 import { allInstances, isSession, routeOf, useStore, type Beside, type Tab } from '../../store'
 import { ACCENTS, metaFor } from '../../colors'
-import { setBrowserKeys, terminalAction, type TabKey as BrowserKey } from '../../shortcuts'
+import { isSectionKeyFor, replayPageKey, setBrowserKeys, terminalAction, type TabKey as BrowserKey } from '../../shortcuts'
 import { openDefaultFor } from '../../quickConnect'
 import { findInAllPanes, onFindAll, reportFindCount } from '../../paneFind'
 import { Icon } from '../icons'
@@ -665,10 +665,10 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     const offs = [
       window.api.on('web:shortcut', (d) => {
         if (!tabForWc(d.webContentsId)) return
-        const ctrl = d.key === 'tab'
-        if (keyRef.current({ key: d.key, shift: d.shift, alt: d.alt, ctrl })) return
+        // A rail section's own shortcut goes to the app first, unless it is one of the browser's keys.
+        if (!isSectionKeyFor('browser', d) && keyRef.current({ key: d.key, shift: d.shift, alt: d.alt, ctrl: d.ctrl })) return
         // Not a browser key: hand it to the app's shortcuts as if the page had not swallowed it.
-        if (!ctrl) document.dispatchEvent(new KeyboardEvent('keydown', { key: d.key, metaKey: true, shiftKey: d.shift, altKey: d.alt, bubbles: true, cancelable: true }))
+        if (!(d.ctrl && d.key === 'tab')) replayPageKey(d)
       }),
       window.api.on('web:window', (d) => {
         const id = tabForWc(d.webContentsId)
@@ -852,15 +852,6 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     }
     act((v) => v.findInPage(req.text, { findNext: true }))
   }), [tab.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // The terminals beside this page, for its context menu's "Paste into …" (main builds that menu).
-  const targetsKey = useStore((s) => (s.splitGroup.includes(tab.id)
-    ? s.splitGroup.map((id) => s.tabs.find((t) => t.id === id)).filter((t): t is Tab => t?.kind === 'ssh').map((t) => `${t.id}\t${t.title}${t.shellLabel ? ` (${t.shellLabel})` : ''}`).join('\n')
-    : ''))
-  useEffect(() => {
-    const targets = targetsKey ? targetsKey.split('\n').map((line) => { const [id, title] = line.split('\t'); return { id, title } }) : []
-    void window.api.invoke('browser:paneTargets', targets).catch(() => undefined)
-  }, [targetsKey])
 
   // The page on screen names the Browser's pane in a split ("jira.example.com · INC-123 …").
   const pageLabel = current?.url ? `${hostOf(current.url)}${current.title ? ` · ${current.title}` : ''}` : ''

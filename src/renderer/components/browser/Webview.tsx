@@ -37,13 +37,15 @@ export interface WebviewEvents {
  * attached, which is why the host keys this component on the space. Hidden tabs stay laid out (visibility, not
  * display) so they keep their size and state.
  */
-export default function Webview({ tabId, partition, src, visible, events, register }: {
+export default function Webview({ tabId, partition, src, visible, events, register, userAgent }: {
   tabId: string
   partition: string
   src: string
   visible: boolean
   events: WebviewEvents
   register: (tabId: string, el: WebviewEl | null) => void
+  /** Set once, like the partition. */
+  userAgent?: string
 }): ReactElement {
   const host = useRef<HTMLDivElement>(null)
   const ev = useRef(events)
@@ -52,6 +54,7 @@ export default function Webview({ tabId, partition, src, visible, events, regist
   useEffect(() => {
     const el = document.createElement('webview') as WebviewEl
     el.setAttribute('partition', partition)
+    if (userAgent) el.setAttribute('useragent', userAgent)
     el.setAttribute('allowpopups', '')
     el.setAttribute('src', src || 'about:blank')
     el.className = 'web-view'

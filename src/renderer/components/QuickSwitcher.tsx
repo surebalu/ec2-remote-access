@@ -2,12 +2,13 @@ import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome } from '@shared/browser'
 import type { Instance } from '@shared/types'
-import { filteredInstances, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind } from '../store'
+import type { RailSection } from '@shared/keyCombos'
+import { DESKTOP_TOOLS, filteredInstances, isSession, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind } from '../store'
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
 import { APP_THEMES } from '../appThemes'
-import { terminalAction } from '../shortcuts'
+import { openKeyboardSettings, sectionKeyLabel, terminalAction } from '../shortcuts'
 import Modal from './Modal'
 import { Icon } from './icons'
 
@@ -39,6 +40,7 @@ function commands(): Command[] {
   const s = useStore.getState()
   const active = s.tabs.find((t) => t.id === s.activeTab)
   const inSplit = !s.gridView && s.splitGroup.includes(s.activeTab)
+  const keyOf = (section: RailSection): string | undefined => sectionKeyLabel(section, s.settings?.shortcuts) || undefined
   const cmds: Command[] = [
     { id: 'rescan', title: 'Rescan inventory', keywords: 'refresh scan reload', icon: Icon.refresh, run: () => void s.scan() },
     { id: 'signin', title: 'Sign in / refresh SSO token', keywords: 'aws sso login token', icon: Icon.key, run: () => void s.refreshToken() },
@@ -49,13 +51,15 @@ function commands(): Command[] {
     ...APP_THEMES.map((t) => ({ id: `color-theme:${t.id}`, title: `Theme: ${t.name}`, keywords: `colour color theme palette appearance ${t.dark ? 'dark' : 'light'}`, icon: Icon.palette, run: () => void s.setColorTheme(t.id) })),
     { id: 'sidebar', title: s.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar', hint: '⌘B', icon: Icon.panelRight, run: () => s.toggleSidebar() },
     { id: 'hosts', title: 'Go to hosts', hint: '⌘1', icon: Icon.cloud, run: () => s.setActive('hosts') },
-    { id: 'notes', title: 'Open notes', keywords: 'obsidian markdown vault', hint: '⌘⇧N', icon: Icon.note, run: () => s.openNotes() },
+    { id: 'notes', title: 'Open notes', keywords: 'obsidian markdown vault', hint: keyOf('notes'), icon: Icon.note, run: () => s.openNotes() },
     { id: 'notes-today', title: "Open today's note", keywords: 'daily journal obsidian', icon: Icon.note, run: () => void window.api.invoke('notes:daily').then((p) => s.openNotes(p)) },
     { id: 'run-command', title: 'Run a command on hosts…', keywords: 'ssm run command send fleet bulk script shell powershell many all', icon: Icon.broadcast, run: () => s.set({ runCommandFor: { keys: filteredInstances(s).filter((i) => !i.manual && i.state === 'running' && i.ssmOnline).map((i) => i.key) } }) },
-    { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
-    { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
-    { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', icon: Icon.board, run: () => s.openBoard() },
-    { id: 'terminal', title: 'New terminal tab', keywords: 'local shell zsh warp console', hint: '⌃`', icon: Icon.console, run: () => s.openTerminal({ newTab: true }), when: hasBrowser() },
+    { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', hint: keyOf('browser'), icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
+    { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', hint: keyOf('finder'), icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
+    { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', hint: keyOf('board'), icon: Icon.board, run: () => s.openBoard() },
+    { id: 'claude', title: 'Open Claude', keywords: 'ai assistant chat anthropic llm ask', hint: keyOf('claude'), icon: Icon.claude, run: () => s.openTool('claude') },
+    { id: 'chatgpt', title: 'Open ChatGPT', keywords: 'ai assistant chat openai gpt llm ask', hint: keyOf('chatgpt'), icon: Icon.chatgpt, run: () => s.openTool('chatgpt') },
+    { id: 'terminal', title: 'New terminal tab', keywords: 'local shell zsh warp console', icon: Icon.console, run: () => s.openTerminal({ newTab: true }), when: hasBrowser() },
     { id: 'notes-host', title: 'Open the note for this host', keywords: 'notes obsidian', icon: Icon.note, run: () => openHostNote(active!.instanceKey, active!.id), when: !!active?.instanceKey },
     { id: 'forward', title: 'Forward a port…', keywords: 'tunnel port forward database', icon: Icon.plug, run: () => s.set({ portForwardFor: {} }) },
     { id: 'snippets', title: 'Edit snippets…', keywords: 'commands saved', icon: Icon.snippet, run: () => s.set({ snippetsOpen: {} }) },
@@ -63,9 +67,10 @@ function commands(): Command[] {
     { id: 'add-host', title: 'Add a server outside AWS…', keywords: 'manual host', icon: Icon.server, run: () => s.set({ manualHostEditor: 'new' }) },
     { id: 'add-account', title: 'Add AWS account…', keywords: 'sso profile', icon: Icon.cloud, run: () => s.set({ addAccountOpen: true }) },
     { id: 'shortcuts', title: 'Keyboard shortcuts', hint: '⌘/', icon: Icon.keyboard, run: () => s.set({ shortcutsOpen: true }) },
+    { id: 'shortcuts-edit', title: 'Set keyboard shortcuts for the sections…', keywords: 'keys hotkey customize rail claude chatgpt terminal finder', icon: Icon.keyboard, run: () => openKeyboardSettings() },
     { id: 'close', title: 'Close current tab', hint: '⌘W', icon: Icon.x, run: () => void s.closeTab(active!.id), when: !!active },
     { id: 'beside', title: 'Open beside this tab…', keywords: 'split side by side compare next to pane', hint: '⌘\\', icon: Icon.split, run: () => s.openQuickSwitcher('', { beside: active!.id }), when: !!active },
-    { id: 'split', title: 'Split: same session beside this one', hint: '⌘D', icon: Icon.split, run: () => s.duplicateTab(active!.id, true), when: !!active && active.kind !== 'rdp' && active.kind !== 'browser' && active.kind !== 'local' && active.kind !== 'notes' && active.kind !== 'board' && active.kind !== 'finder' },
+    { id: 'split', title: 'Split: same session beside this one', hint: '⌘D', icon: Icon.split, run: () => s.duplicateTab(active!.id, true), when: !!active && active.kind !== 'rdp' && isSession(active) },
     { id: 'arrange-columns', title: 'Side by side: all in a row', keywords: 'split layout arrange columns', icon: Icon.split, run: () => s.arrangeSplit('columns'), when: inSplit },
     { id: 'arrange-rows', title: 'Side by side: stacked', keywords: 'split layout arrange rows', icon: Icon.splitRows, run: () => s.arrangeSplit('rows'), when: inSplit },
     { id: 'arrange-main', title: 'Side by side: one large, the rest stacked', keywords: 'split layout arrange main', icon: Icon.splitMain, run: () => s.arrangeSplit('main'), when: inSplit && s.splitGroup.length > 2 },
@@ -101,8 +106,8 @@ function commands(): Command[] {
 
 const fuzzy = (text: string, q: string): boolean => q.split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
-const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'notes' ? Icon.note : t.kind === 'browser' ? Icon.globe : t.kind === 'local' ? Icon.console : t.kind === 'board' ? Icon.board : t.kind === 'finder' ? Icon.finder : Icon.terminal)
-const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder }
+const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt }
+const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
 
 /**
  * Picking what to show beside a tab (⌘\): open tabs not already beside it, the tools, then hosts (a new session there).
@@ -114,7 +119,7 @@ function besideResults(anchor: Tab, query: string, hosts: Instance[]): Result[] 
   const group = s.splitGroup.includes(anchor.id) ? s.splitGroup : [anchor.id]
   const tabs = s.tabs.filter((t) => !t.transient && !group.includes(t.id) && `${t.title} ${t.shellLabel ?? ''} ${t.kind}`.toLowerCase().includes(q))
   const tools = (Object.keys(TOOL_NAMES) as ToolKind[])
-    .filter((k) => (hasBrowser() || (k !== 'local' && k !== 'browser' && k !== 'finder')) && !s.tabs.some((t) => t.kind === k) && TOOL_NAMES[k].toLowerCase().includes(q))
+    .filter((k) => (hasBrowser() || !DESKTOP_TOOLS.includes(k)) && !s.tabs.some((t) => t.kind === k) && TOOL_NAMES[k].toLowerCase().includes(q))
   const tabResults: Result[] = tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: t.message && !isSessionKind(t) ? t.message : `Open tab · ${t.kind === 'ssh' ? 'SSH' : t.kind.toUpperCase()}`, icon: tabIcon(t), hint: 'Show beside', action: () => s.splitWith(anchor.id, t.id) }))
   const toolResults: Result[] = tools.map((k) => ({ id: `tool:${k}`, title: TOOL_NAMES[k], subtitle: 'Open beside', icon: TOOL_ICONS[k], hint: 'Open beside', action: () => s.splitWith(anchor.id, s.toolTab(k)) }))
   const hostResults: Result[] = hosts.slice(0, 40).map((i) => {
@@ -183,7 +188,7 @@ export default function QuickSwitcher(): ReactElement {
     const tabs = s.tabs.filter((t) => !t.transient && `${t.title} ${t.shellLabel ?? ''} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
     results = [
       ...hostVerbs(query, visible),
-      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: t.kind === 'notes' || t.kind === 'browser' || t.kind === 'local' || t.kind === 'board' || t.kind === 'finder' ? 'Open tab' : `Open ${t.kind.toUpperCase()} session · ${t.status}`, key: t.instanceKey || undefined, icon: t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'notes' ? Icon.note : t.kind === 'browser' ? Icon.globe : t.kind === 'local' ? Icon.console : t.kind === 'board' ? Icon.board : Icon.terminal, action: () => s.setActive(t.id), hint: 'Switch' })),
+      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `Open ${t.kind.toUpperCase()} session · ${t.status}` : 'Open tab', key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch' })),
       ...hosts.map((i) => {
         const available = ['ssm', 'direct'].includes(routeOf(i, s.settings).route)
         return { id: i.key, title: i.name, subtitle: `${i.profile} · ${i.region} · ${i.instanceId}${i.staleReason ? ' · cached' : ''}`, key: i.key,

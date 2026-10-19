@@ -200,8 +200,11 @@ export interface IpcEvents {
   'phone:changed': PhoneAccessStatus
   /** A page asked for a new window (target=_blank, window.open) or "Open link in new tab": open it as a tab. */
   'web:window': { webContentsId: number; url: string; background: boolean }
-  /** A browser shortcut pressed while a page had the keyboard (pages swallow keys before the app sees them). */
-  'web:shortcut': { webContentsId: number; key: string; shift: boolean; alt: boolean }
+  /**
+   * A browser shortcut, or one of the rail sections' own (Settings → Keyboard), pressed while a page had the keyboard
+   * (pages swallow keys before the app sees them). `key` is lower-cased; `code` names the physical key.
+   */
+  'web:shortcut': { webContentsId: number; key: string; code: string; meta: boolean; ctrl: boolean; shift: boolean; alt: boolean }
   /** The mouse went down inside a page (the app's document never sees those clicks). */
   'web:pointer': { webContentsId: number }
   /**

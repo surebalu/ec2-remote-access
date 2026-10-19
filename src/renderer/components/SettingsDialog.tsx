@@ -1,7 +1,8 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { AppAbout, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
-import { CAN_DICTATE } from '../voice'
+import { checkCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
+import { CAN_DICTATE, voice } from '../voice'
 import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
@@ -15,7 +16,7 @@ import { ZOOM_SECTIONS } from '../sectionZoom'
 import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
-type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'voice' | 'phone' | 'requirements' | 'about'
+type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'keyboard' | 'voice' | 'phone' | 'requirements' | 'about'
 
 const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: 'general', label: 'General', blurb: 'Appearance, how hosts are found and how connections are routed.', icon: Icon.settings },
@@ -23,6 +24,7 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
   { id: 'ssh', label: 'SSH & RDP', blurb: 'Users, keys and the SSH agent used when a host has no settings of its own.', icon: Icon.key },
   { id: 'terminal', label: 'Terminal', blurb: 'How SSH tabs look, what runs when they connect, and recordings.', icon: Icon.terminal },
   { id: 'notes', label: 'Notes', blurb: 'Where your Markdown notes live.', icon: Icon.note },
+  { id: 'keyboard', label: 'Keyboard', blurb: 'Your own shortcut for each section down the left edge, Claude and ChatGPT included.', icon: Icon.keyboard },
   { id: 'voice', label: 'Voice', blurb: 'Talk instead of typing, wherever you type in the app.', icon: Icon.mic },
   { id: 'phone', label: 'Phone & iPad', blurb: 'Use this Mac’s sessions from your iPhone or iPad.', icon: Icon.phone },
   { id: 'requirements', label: 'Requirements', blurb: 'The command-line tools the app uses, and where they are.', icon: Icon.plug },
@@ -161,6 +163,146 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
         )}
         <Row label="Microphone" hint="Only on while you dictate.">{permission(st?.mic, 'microphone')}</Row>
         <Row label="Speech recognition" hint="Turns what you say into text.">{permission(st?.speech, 'speech')}</Row>
+      </Group>
+    </>
+  )
+}
+
+const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
+  hosts: Icon.server, overview: Icon.grid, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+}
+const SECTION_HINTS: Record<RailSection, string> = {
+  hosts: 'Every account’s hosts. ⌘1 always shows them too (Hosts is the first tab).',
+  overview: 'Every open session on one page.',
+  local: 'Shells on this Mac.',
+  finder: 'The files on this Mac.',
+  browser: 'AWS console spaces and web tabs.',
+  notes: 'Your Markdown notes.',
+  board: 'The scratch pad.',
+  claude: IN_ELECTRON ? 'claude.ai in its own tab, signed in on its own.' : 'Opens claude.ai in a new browser tab.',
+  chatgpt: IN_ELECTRON ? 'chatgpt.com in its own tab, signed in on its own.' : 'Opens chatgpt.com in a new browser tab.'
+}
+
+const heldMods = (e: KeyboardEvent): string => `${e.ctrlKey ? '⌃' : ''}${e.altKey ? '⌥' : ''}${e.shiftKey ? '⇧' : ''}${e.metaKey ? '⌘' : ''}`
+
+/**
+ * Settings → Keyboard: a shortcut for each section of the app rail, recorded by pressing it. Changes apply at once
+ * (and go into the draft, so Save keeps them). Only shortcuts that differ from the defaults are stored.
+ */
+function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (shortcuts: Record<string, string>) => void }): ReactElement {
+  const [recording, setRecording] = useState<RailSection | null>(null)
+  const [held, setHeld] = useState('')
+  const [notice, setNotice] = useState<{ section: RailSection; text: string; error?: boolean } | null>(null)
+  const keys = sectionKeys(draft.shortcuts)
+  const sections = RAIL_SECTIONS.filter((x) => IN_ELECTRON || (x !== 'local' && x !== 'finder'))
+
+  const assign = (section: RailSection, combo: string, from?: RailSection): void => {
+    const next = { ...(draft.shortcuts ?? {}) }
+    const put = (sec: RailSection, value: string): void => {
+      if (value === (DEFAULT_SHORTCUTS[sec] ?? '')) delete next[sec]
+      else next[sec] = value
+    }
+    if (from) put(from, '')
+    put(section, combo)
+    onChange(next)
+  }
+  const stop = (): void => {
+    setRecording(null)
+    setHeld('')
+  }
+
+  useEffect(() => {
+    if (!recording) return
+    // Window capture, so no app shortcut, dialog or the remote desktop sees the keys being recorded.
+    const down = (e: KeyboardEvent): void => {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+      if (plain && e.key === 'Escape') return stop()
+      if (plain && (e.key === 'Backspace' || e.key === 'Delete')) {
+        assign(recording, '')
+        setNotice(null)
+        return stop()
+      }
+      const combo = comboOf({ code: e.code, key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey })
+      if (!combo) return setHeld(heldMods(e))
+      // Holding Right Option a moment before the letter starts dictation; this was a shortcut instead.
+      voice.cancel()
+      if (e.repeat) return
+      const check = checkCombo(combo, recording, draft.shortcuts)
+      if (!check.ok) {
+        setHeld('')
+        setNotice({ section: recording, text: check.reason, error: true })
+        return
+      }
+      assign(recording, combo, check.from)
+      const notes = [...(check.from ? [`Moved from ${SECTION_NAMES[check.from]}, which has no shortcut now.`] : []), ...check.notes]
+      setNotice(notes.length ? { section: recording, text: notes.join(' ') } : null)
+      stop()
+    }
+    const up = (e: KeyboardEvent): void => {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      setHeld(heldMods(e))
+    }
+    const away = (e: MouseEvent): void => {
+      if (!(e.target instanceof Element && e.target.closest('.key-field.recording'))) stop()
+    }
+    // Not the window's blur: that fires whenever focus moves into a web page (the Browser's, say), not only on leaving.
+    window.addEventListener('keydown', down, true)
+    window.addEventListener('keyup', up, true)
+    window.addEventListener('mousedown', away, true)
+    return () => {
+      window.removeEventListener('keydown', down, true)
+      window.removeEventListener('keyup', up, true)
+      window.removeEventListener('mousedown', away, true)
+    }
+  }, [recording, draft.shortcuts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const customised = Object.keys(draft.shortcuts ?? {}).length > 0
+  return (
+    <>
+      <Group title="App sections">
+        {sections.map((sec) => {
+          const SecIcon = SECTION_ICONS[sec]
+          const rec = recording === sec
+          const def = DEFAULT_SHORTCUTS[sec] ?? ''
+          const note = notice?.section === sec ? notice : null
+          return (
+            <Row
+              key={sec}
+              label={<span className="flex items-center gap-2"><SecIcon className="set-key-icon" />{SECTION_NAMES[sec]}</span>}
+              hint={note ? <span className={note.error ? 'set-key-error' : 'set-key-note'}>{note.text}</span> : SECTION_HINTS[sec]}
+            >
+              <div className="flex items-center gap-1" data-shortcut-row={sec}>
+                <button
+                  type="button"
+                  className={`key-field ${rec ? 'recording' : ''} ${keys[sec] ? '' : 'empty'}`}
+                  aria-label={`Shortcut for ${SECTION_NAMES[sec]}`}
+                  title={rec ? 'Press the keys; Esc stops, ⌫ removes the shortcut' : 'Click, then press the keys'}
+                  onClick={() => { setNotice(null); if (rec) stop(); else { setHeld(''); setRecording(sec) } }}
+                >
+                  {rec ? (held ? <kbd className="kbd">{held}</kbd> : <span>Press keys…</span>) : keys[sec] ? <kbd className="kbd">{formatCombo(keys[sec])}</kbd> : <span>None</span>}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Remove the shortcut for ${SECTION_NAMES[sec]}`} title="Remove" disabled={!keys[sec] || rec} onClick={() => { setNotice(null); assign(sec, '') }}><Icon.x /></button>
+                <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Restore the shortcut for ${SECTION_NAMES[sec]}`} title={def ? `Back to ${formatCombo(def)}` : 'No shortcut by default'} disabled={!def || keys[sec] === def || rec} onClick={() => { setNotice(null); assign(sec, def) }}><Icon.refresh /></button>
+              </div>
+            </Row>
+          )
+        })}
+        <Row label="Start over" hint={`Back to ${RAIL_SECTIONS.filter((x) => DEFAULT_SHORTCUTS[x]).map((x) => `${formatCombo(DEFAULT_SHORTCUTS[x]!)} ${SECTION_NAMES[x]}`).join(', ')}, and none for the rest.`}>
+          <button type="button" className="btn" disabled={!customised} onClick={() => { setNotice(null); stop(); onChange({}) }}>Restore defaults</button>
+        </Row>
+      </Group>
+      <Group title="How they work">
+        <div className="set-row stack">
+          <ul className="set-list">
+            <li><Icon.check /><span>Click a shortcut, then press the keys: ⌘ or ⌃ with a letter, number or symbol (⌃⌘C, ⌥⌘1), or an F-key. Esc stops recording, ⌫ removes the shortcut.</span></li>
+            <li><Icon.check /><span>They work all over the app, in terminals, remote desktops and web pages too.</span></li>
+            <li><Icon.check /><span>Press one again while its section is in front to go back to where you were, say from Claude to the session you were in.</span></li>
+            <li><Icon.check /><span>A tool keeps its own keys while it is in front: give ChatGPT ⌘L and the Browser still edits its address with it.</span></li>
+          </ul>
+        </div>
       </Group>
     </>
   )
@@ -451,6 +593,7 @@ export default function SettingsDialog(): ReactElement | null {
   )
 
   const voiceSection = <VoiceSettings draft={draft} upd={upd} />
+  const keyboard = <KeyboardSettings draft={draft} onChange={(shortcuts) => { upd('shortcuts', shortcuts); void s.saveSettings({ shortcuts }) }} />
 
 
   const requirements = (
@@ -508,7 +651,7 @@ export default function SettingsDialog(): ReactElement | null {
     </>
   )
 
-  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, voice: voiceSection, phone, requirements, about: aboutSection }
+  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, keyboard, voice: voiceSection, phone, requirements, about: aboutSection }
 
   return (
     <Modal title="Settings" onClose={close} width="max-w-[880px]" bare>
@@ -532,7 +675,7 @@ export default function SettingsDialog(): ReactElement | null {
           </header>
           <div className="settings-body">{body[section]}</div>
           <footer className="settings-foot">
-            <span className="muted text-[11px]">Appearance and terminal changes apply right away.</span>
+            <span className="muted text-[11px]">Appearance, terminal and keyboard changes apply right away.</span>
             <span className="flex-1" />
             <button className="btn" onClick={close}>Cancel</button>
             <button className="btn btn-primary" onClick={() => void save()}>Save</button>
