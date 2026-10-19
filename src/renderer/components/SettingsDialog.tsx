@@ -198,7 +198,7 @@ export default function SettingsDialog(): ReactElement | null {
   const save = async (): Promise<void> => {
     // Snippets, port-forward presets and workspaces are edited in their own dialogs while this one is open;
     // writing the draft's copy back would undo those edits.
-    const { snippets: _sn, portForwards: _pf, workspaces: _ws, ...rest } = draft
+    const { snippets: _sn, portForwards: _pf, workspaces: _ws, finderExtra: _fe, finderHidden: _fh, ...rest } = draft
     await s.saveSettings(rest)
     await s.refreshProfiles()
     close()

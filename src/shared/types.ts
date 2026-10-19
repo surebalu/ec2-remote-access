@@ -161,6 +161,10 @@ export interface Settings {
   persistentShells: boolean
   /** An icon in the macOS menu bar listing favorite hosts to connect to (Electron only). */
   menuBarIcon: boolean
+  /** Folders added to the Finder tab's Favorites in this app (besides the macOS Finder sidebar's). */
+  finderExtra: string[]
+  /** macOS Finder favorites hidden from the Finder tab (Finder itself keeps them). */
+  finderHidden: string[]
   /** A colour theme for the whole app (renderer/appThemes.ts), '' for the default look that follows `theme`. */
   colorTheme: string
   /** The font of the whole interface (renderer/uiFont.ts); notes and terminals have their own. Default Monaco. */

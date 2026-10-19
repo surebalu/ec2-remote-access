@@ -17,7 +17,7 @@ export interface RdpTabRequest {
 
 export interface Tab {
   id: string
-  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser' | 'local' | 'board'
+  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser' | 'local' | 'board' | 'finder'
   instanceKey: string
   title: string
   route?: Route
@@ -114,6 +114,9 @@ interface State {
   terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; nonce: number } | null
   /** Shows the Whiteboard tab (there is one). */
   openBoard: () => void
+  /** Shows the Finder tab (local files; there is one), at `path` when given. */
+  openFinder: (path?: string) => void
+  finderRequest: { path: string; nonce: number } | null
   portForwardFor: { key?: string; presetId?: string } | null
   /** Open Run Command dialog: the hosts it starts with (editable there), or a past run to show. */
   runCommandFor: { keys: string[]; runId?: string } | null
@@ -277,6 +280,17 @@ export const useStore = create<State>((set, get) => ({
     }
     if (req) set({ terminalRequest: { ...req, nonce: Date.now() + Math.random() } })
     get().setActive(term.id)
+  },
+  finderRequest: null,
+  openFinder: (path) => {
+    let finder = get().tabs.find((t) => t.kind === 'finder')
+    if (!finder) {
+      finder = { id: `finder-${Date.now().toString(36)}`, kind: 'finder', instanceKey: '', title: 'Finder', status: 'connected' }
+      const created = finder
+      set((s) => ({ tabs: [...s.tabs, created] }))
+    }
+    if (path) set({ finderRequest: { path, nonce: Date.now() + Math.random() } })
+    get().setActive(finder.id)
   },
   openBoard: () => {
     let board = get().tabs.find((t) => t.kind === 'board')
@@ -756,7 +770,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board') { /* nothing in main to close: they save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder') { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
@@ -787,7 +801,7 @@ export const useStore = create<State>((set, get) => ({
 
 /** Remote sessions, as opposed to the Notes, Browser, Terminal and Whiteboard tabs: only sessions are tiles, counted, or saved in workspaces. */
 export function isSession(t: Tab): boolean {
-  return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local' && t.kind !== 'board'
+  return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local' && t.kind !== 'board' && t.kind !== 'finder'
 }
 
 /** A tab that attaches one of a host's persistent shells on another tab's connection, replaying its scrollback. */

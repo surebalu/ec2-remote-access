@@ -69,6 +69,15 @@ app.on('session-created', (ses) => {
 })
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
+// The Finder tab's pretend disk under /Users/fixture, its Finder favorites and locations, and what it was asked to do.
+const fsEntry = (dir, name, type = 'file', size = 0, ageDays = 1) => ({ name, path: `${dir === '/' ? '' : dir}/${name}`, type, size, mtime: now - ageDays * 86400000, mode: 0 })
+const finderFs = {
+  '/Users/fixture': [fsEntry('/Users/fixture', 'Documents', 'dir'), fsEntry('/Users/fixture', 'Downloads', 'dir'), fsEntry('/Users/fixture', 'Projects', 'dir'), fsEntry('/Users/fixture', '.zshrc', 'file', 120)],
+  '/Users/fixture/Documents': [fsEntry('/Users/fixture/Documents', 'Surendra-Personal', 'dir'), fsEntry('/Users/fixture/Documents', 'Runbook.pdf', 'file', 1234567, 3), fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), fsEntry('/Users/fixture/Documents', 'photo.png', 'file', 250000, 40)],
+  '/Users/fixture/Documents/Surendra-Personal': [fsEntry('/Users/fixture/Documents/Surendra-Personal', 'codebase', 'dir'), fsEntry('/Users/fixture/Documents/Surendra-Personal', 'Passport.pdf', 'file', 900000)],
+  '/Users/fixture/Downloads': [], '/Users/fixture/Projects': [fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200)]
+}
+const finderDone = []
 // Run Command: runs the fixture "sent", and how they come back (the production host succeeds, the others fail).
 const runsSent = []
 const runState = (r) => {
@@ -172,6 +181,23 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'boards:delete': delete boardsSaved[args[0]]; return
     case 'notes:saveImage': noteImages.push(args[1]); return `EC2 Remote/Boards/${args[0]}.png`
     case 'local:home': return '/Users/fixture'
+    case 'local:list': { const l = finderFs[args[0]]; if (!l) throw new Error(`ENOENT: no such directory, scandir '${args[0]}'`); return l }
+    case 'local:mkdir': { const dir = args[0].replace(/\/[^/]+$/, ''); finderFs[dir].push(fsEntry(dir, args[0].split('/').pop(), 'dir', 0, 0)); finderFs[args[0]] = []; finderDone.push(['mkdir', args[0]]); return }
+    case 'local:rename': { const dir = args[0].replace(/\/[^/]+$/, ''); const e = finderFs[dir].find((x) => x.path === args[0]); e.name = args[1].split('/').pop(); e.path = args[1]; if (finderFs[args[0]]) { finderFs[args[1]] = finderFs[args[0]]; delete finderFs[args[0]] } finderDone.push(['rename', args[0], args[1]]); return }
+    case 'local:trash': for (const p of args[0]) { const dir = p.replace(/\/[^/]+$/, ''); finderFs[dir] = finderFs[dir].filter((x) => x.path !== p) } finderDone.push(['trash', ...args[0]]); return
+    case 'local:open': finderDone.push(['open', args[0]]); return
+    case 'local:quickLook': finderDone.push(['quickLook', args[0]]); return
+    case 'finder:places': return {
+      home: '/Users/fixture',
+      favorites: [
+        { name: 'Documents', path: '/Users/fixture/Documents', kind: 'documents', fromFinder: true },
+        { name: 'Downloads', path: '/Users/fixture/Downloads', kind: 'downloads', fromFinder: true },
+        ...(settings.finderExtra ?? []).map((p) => ({ name: p.split('/').pop(), path: p, kind: 'folder' }))
+      ].filter((f) => !(settings.finderHidden ?? []).includes(f.path)),
+      locations: [{ name: 'iCloud Drive', path: '/Users/fixture/Library/Mobile Documents/com~apple~CloudDocs', kind: 'icloud' }, { name: 'Google Drive - me@example.com', path: '/Users/fixture/Library/CloudStorage/GoogleDrive-me@example.com', kind: 'cloud' }, { name: 'Macintosh HD', path: '/', kind: 'computer' }]
+    }
+    case 'finder:recents': return [{ ...fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), lastUsed: now - 3600000 }, { ...fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200), lastUsed: now - 7200000 }]
+    case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
     case 'term:history': return ['ls -la', 'git status', 'git checkout main', 'npm test']
     case 'term:loadState': return termSaved
@@ -1507,6 +1533,50 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelectorAll('.term-tab .term-tab-title')[0]?.textContent === 'build'`, 'restored tabs')
     for (let n = 0; n < 60 && opens().length < opensBefore + 1; n++) await new Promise((r) => setTimeout(r, 50))
     assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'restored shell starts in its folder')
+
+    // The Finder tab: the Finder favorites and locations, folders and files with Finder's columns, going in and back, a
+    // new folder named in place, Quick Look, opening a file, Add to Favorites, Spotlight search, Recents and the Trash.
+    await tjs(`document.querySelector('button[aria-label="Finder"]').click()`)
+    await tuntil(`document.querySelectorAll('.fi-group .fi-place').length >= 5 && [...document.querySelectorAll('.fi-row')].some((r) => r.textContent.includes('Documents'))`, 'finder opens at home')
+    assert.equal(await tjs(`[...document.querySelectorAll('.fi-row')].some((r) => r.textContent.includes('.zshrc'))`), false, 'hidden files stay hidden')
+    assert.equal(await tjs(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
+    await tjs(`[...document.querySelectorAll('.fi-place')].find((b) => b.textContent === 'Documents').click()`)
+    await tuntil(`[...document.querySelectorAll('.fi-row')].some((r) => r.textContent.includes('Runbook.pdf'))`, 'documents favorite')
+    assert.equal(await tjs(`(() => { const r = [...document.querySelectorAll('.fi-row')].find((x) => x.textContent.includes('Runbook.pdf')); return r.querySelector('.kind').textContent + ' / ' + r.querySelector('.size').textContent })()`), 'PDF document / 1.2 MB')
+    const row = (name) => `[...document.querySelectorAll('.fi-row')].find((r) => r.querySelector('.name').textContent.startsWith(${JSON.stringify(name)}))`
+    await tjs(`${row('Surendra-Personal')}.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await tuntil(`document.querySelector('.fi-title').textContent === 'Surendra-Personal' && [...document.querySelectorAll('.fi-step')].map((s) => s.textContent.replace('›', '')).join('/').includes('Documents/Surendra-Personal')`, 'into a folder, path bar follows')
+    await tjs(`document.querySelector('.fi-btn[aria-label="Back"]').click()`)
+    await tuntil(`document.querySelector('.fi-title').textContent === 'Documents'`, 'back')
+    await tjs(`document.querySelector('.fi-btn[aria-label="New folder"]').click()`)
+    await tuntil(`document.querySelector('.fi-rename')?.value === 'untitled folder' && document.activeElement === document.querySelector('.fi-rename')`, 'new folder, named in place')
+    await tjs(`(() => { const i = document.querySelector('.fi-rename'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'Reports'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })()`)
+    await tuntil(`!document.querySelector('.fi-rename') && [...document.querySelectorAll('.fi-row')].some((r) => r.textContent.includes('Reports'))`, 'renamed')
+    assert.deepEqual(finderDone.at(-1), ['rename', '/Users/fixture/Documents/untitled folder', '/Users/fixture/Documents/Reports'])
+    await tjs(`${row('notes.md')}.click()`)
+    await tkey(' ')
+    await tuntil(`true`)
+    for (let n = 0; n < 40 && finderDone.at(-1)?.[0] !== 'quickLook'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(finderDone.at(-1), ['quickLook', '/Users/fixture/Documents/notes.md'], 'Space is Quick Look')
+    await tjs(`${row('Runbook.pdf')}.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    for (let n = 0; n < 40 && finderDone.at(-1)?.[0] !== 'open'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(finderDone.at(-1), ['open', '/Users/fixture/Documents/Runbook.pdf'], 'a file opens in its app')
+    await tjs(`${row('Surendra-Personal')}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 600, clientY: 300 }))`)
+    await tuntil(`[...document.querySelectorAll('.popover .menu-item')].some((b) => b.textContent === 'Add to Favorites')`, 'folder menu')
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent === 'Add to Favorites').click()`)
+    await tuntil(`[...document.querySelectorAll('.fi-place')].some((b) => b.textContent === 'Surendra-Personal')`, 'added to favorites')
+    assert.deepEqual(settings.finderExtra, ['/Users/fixture/Documents/Surendra-Personal'])
+    await tjs(`(() => { const i = document.querySelector('.fi-search input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'pass'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tuntil(`document.querySelector('.fi-banner')?.textContent.startsWith('1 found') && ${row('Passport.pdf')}?.querySelector('.fi-where')?.textContent === '~/Documents/Surendra-Personal'`, 'search finds it below the folder')
+    await tshot('finder.png')
+    await tjs(`document.querySelector('.fi-search button[aria-label="Clear search"]').click()`)
+    await tjs(`${row('Runbook.pdf')}.click()`)
+    await tkey('Backspace', { metaKey: true })
+    await tuntil(`![...document.querySelectorAll('.fi-row')].some((r) => r.textContent.includes('Runbook.pdf'))`, '⌘⌫ moves to the Trash')
+    assert.deepEqual(finderDone.at(-1), ['trash', '/Users/fixture/Documents/Runbook.pdf'])
+    await tjs(`[...document.querySelectorAll('.fi-place')].find((b) => b.textContent === 'Recents').click()`)
+    await tuntil(`document.querySelector('.fi-title').textContent === 'Recents' && document.querySelectorAll('.fi-row').length === 2 && document.querySelector('.fi-th.on')?.textContent.startsWith('Name') !== undefined`, 'recents')
+    assert.match(await tjs(`document.querySelectorAll('.fi-row')[0].querySelector('.date').textContent`), /^Today at /)
 
     // Run Command on the hosts listed: a confirmation for production, then each host's result and output; retry the failed.
     await tjs(`document.querySelector('button[aria-label="Hosts"]').click()`)

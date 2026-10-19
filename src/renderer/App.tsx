@@ -39,7 +39,7 @@ export default function App(): ReactElement {
   const gridView = useStore((s) => s.gridView)
   // The tools (Browser, Terminal, Whiteboard, Notes) bring their own side lists; the hosts sidebar steps aside while
   // one is in front on its own. A host's note open beside its session keeps the sidebar.
-  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && (t.kind === 'browser' || t.kind === 'local' || t.kind === 'board' || t.kind === 'notes') && !s.splitGroup.includes(t.id)))
+  const browserInFront = useStore((s) => !s.gridView && s.tabs.some((t) => t.id === s.activeTab && (t.kind === 'browser' || t.kind === 'local' || t.kind === 'board' || t.kind === 'notes' || t.kind === 'finder') && !s.splitGroup.includes(t.id)))
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)

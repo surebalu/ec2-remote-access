@@ -77,6 +77,18 @@ export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / reset (one zoom for every page)' }
 ]
 
+/** The Finder tab (files on this Mac), with Finder's own keys. */
+export const FINDER_SHORTCUTS: ShortcutInfo[] = [
+  { keys: '↑ / ↓ (⇧ to extend)', label: 'Select the previous / next item; type a name to jump to it' },
+  { keys: 'Double-click / ⌘O / ⌘↓', label: 'Open: go into a folder, or open a file in its app' },
+  { keys: '⌘↑ / ⌘[ / ⌘]', label: 'Enclosing folder / back / forward' },
+  { keys: 'Space', label: 'Quick Look' },
+  { keys: '↩', label: 'Rename' },
+  { keys: '⌘⇧N / ⌘⌫', label: 'New folder / move to the Trash' },
+  { keys: '⌘F / ⌘C / ⌘A', label: 'Search this folder (Spotlight) / copy the path / select all' },
+  { keys: '⌘⇧.', label: 'Show or hide hidden files' }
+]
+
 /** The Whiteboard tab: single keys pick tools, as in Presentify, while nothing is being typed. */
 export const WHITEBOARD_SHORTCUTS: ShortcutInfo[] = [
   { keys: 'V / H (or hold Space)', label: 'Select / pan' },
@@ -114,7 +126,7 @@ export interface TabKey {
 export type BrowserKey = TabKey
 
 /** The Browser, Terminal and Whiteboard tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
-type KeyedKind = 'browser' | 'local' | 'board'
+type KeyedKind = 'browser' | 'local' | 'board' | 'finder'
 const tabKeys: Partial<Record<KeyedKind, (k: TabKey) => boolean>> = {}
 
 /** Registers (or with null removes) the key handler of an app tab kind; it returns whether it used the key. */
@@ -167,7 +179,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
     return true
   }
   const inFront = st.gridView ? undefined : st.tabs.find((t) => t.id === st.activeTab)
-  const tabHandler = inFront && (inFront.kind === 'browser' || inFront.kind === 'local' || inFront.kind === 'board') ? tabKeys[inFront.kind] : undefined
+  const tabHandler = inFront && (inFront.kind === 'browser' || inFront.kind === 'local' || inFront.kind === 'board' || inFront.kind === 'finder') ? tabKeys[inFront.kind] : undefined
   const tabCombo = (e.metaKey && !e.ctrlKey) || (e.ctrlKey && !e.metaKey && e.key === 'Tab')
   if (tabHandler && tabCombo && !e.repeat && !modalOpen() && tabHandler({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
     e.preventDefault()

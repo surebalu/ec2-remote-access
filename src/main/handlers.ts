@@ -29,6 +29,7 @@ import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
+import { finderPlaces, finderRecents, finderSearch } from './finder'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
 
@@ -155,6 +156,11 @@ export const handlers: Handlers = {
   'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
   'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
   'app:emojiPanel': async () => host().showEmojiPanel?.(),
+  'local:open': (path) => host().openPath(path),
+  'local:quickLook': async (path) => host().quickLook?.(path),
+  'finder:places': () => finderPlaces(),
+  'finder:recents': () => finderRecents(),
+  'finder:search': (query, dir) => finderSearch(query, dir),
   'browser:openDownload': async (path, how) => {
     const dir = host().downloadsDir()
     if (!dir) return
