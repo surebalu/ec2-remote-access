@@ -176,8 +176,9 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
     .filter((p) => p.enabled && p.kind !== 'static')
     .map((p) => {
       const m = metaFor(p.name, settings)
-      return { id: spaceIdForProfile(p.name), name: m.label, color: m.color, profile: p.name, region: p.region, accountId: statuses[p.name]?.accountId ?? p.accountId }
-    }), [profiles, settings, statuses])
+      const id = spaceIdForProfile(p.name)
+      return { id, name: m.label, color: m.color, profile: p.name, region: p.region, accountId: statuses[p.name]?.accountId ?? p.accountId, ...st?.spaceLooks?.[id] }
+    }), [profiles, settings, statuses, st?.spaceLooks])
   const spaces = useMemo<Space[]>(() => [...(st?.spaces ?? [GENERAL]), ...awsSpaces], [st?.spaces, awsSpaces])
   const space = spaces.find((x) => x.id === st?.activeSpace) ?? spaces[0]
   const favorites = st ? st.tabs.filter((t) => t.favorite) : []
@@ -1057,6 +1058,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
 
   const tabMenuFor = menu?.kind === 'tab' ? findTab(menu.id) : undefined
   const menuSpace = menu?.kind === 'space' ? spaces.find((x) => x.id === menu.id) : undefined
+  // The space form edits an AWS account space: colour of its own and icon only.
+  const editingAccount = menu?.kind === 'newSpace' && menu.edit ? spaces.find((x) => x.id === menu.edit && x.profile) : undefined
 
   return (
     <div className={`browser ${hidden ? 'side-hidden' : ''}`} data-accent={space.color} style={{ '--web-zoom': chromeZoom, ...spaceVars(space) } as CSSProperties}>
@@ -1225,7 +1228,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               <MenuItem onClick={() => { setMenu(null); go(consoleHome(menuSpace.region ?? 'us-east-1'), true, menuSpace.id) }}>Open the console</MenuItem>
               <MenuItem onClick={() => { setMenu(null); federated.current.delete(menuSpace.id); toast('info', `${menuSpace.name} signs in again on its next console page.`) }}>Sign in again on next page</MenuItem>
               <MenuItem onClick={() => { setMenu(null); signInProfile(menuSpace.profile!) }}>Renew the AWS SSO login</MenuItem>
-              <div className="muted px-3 pb-1 pt-1 text-[10.5px]">Name and colour follow the account's settings in the hosts sidebar.</div>
+              <MenuItem onClick={() => { setSpaceDraft({ name: menuSpace.name, color: menuSpace.color, custom: menuSpace.custom, icon: menuSpace.icon }); setMenu({ kind: 'newSpace', anchor: menu.anchor, edit: menuSpace.id }) }}>Colour and icon…</MenuItem>
+              <div className="muted px-3 pb-1 pt-1 text-[10.5px]">The name follows the account in the hosts sidebar.</div>
             </>
           )}
           {!menuSpace.profile && (
@@ -1300,7 +1304,16 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               const name = spaceDraft.name.trim()
               if (!name) return
               const look = { color: spaceDraft.color, custom: spaceDraft.custom, icon: spaceDraft.icon || undefined }
-              if (menu.edit) update((s) => ({ ...s, spaces: s.spaces.map((x) => (x.id === menu.edit ? { ...x, name, ...look } : x)) }))
+              if (editingAccount) {
+                // An account space keeps the account's name and colour; only a colour of its own and an icon are stored.
+                const id = editingAccount.id
+                update((s) => {
+                  const looks = { ...(s.spaceLooks ?? {}) }
+                  if (look.custom || look.icon) looks[id] = { custom: look.custom, icon: look.icon }
+                  else delete looks[id]
+                  return { ...s, spaceLooks: looks }
+                })
+              } else if (menu.edit) update((s) => ({ ...s, spaces: s.spaces.map((x) => (x.id === menu.edit ? { ...x, name, ...look } : x)) }))
               else {
                 const id = `s-${newId()}`
                 update((s) => ({ ...s, spaces: [...s.spaces, { id, name, ...look }], activeSpace: id }))
@@ -1308,15 +1321,17 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               setMenu(null)
             }}
           >
-            <div className="section-title">{menu.edit ? 'Edit space' : 'New space'}</div>
-            <input className="input" autoFocus placeholder="Name (Work, Jira, Personal…)" value={spaceDraft.name} onChange={(e) => setSpaceDraft({ ...spaceDraft, name: e.target.value })} />
+            <div className="section-title">{editingAccount ? 'Colour and icon' : menu.edit ? 'Edit space' : 'New space'}</div>
+            {editingAccount
+              ? <div className="muted text-[11px] leading-snug">{editingAccount.name} is an AWS account: its name follows the hosts sidebar. Pick a colour of its own and an icon here.</div>
+              : <input className="input" autoFocus placeholder="Name (Work, Jira, Personal…)" value={spaceDraft.name} onChange={(e) => setSpaceDraft({ ...spaceDraft, name: e.target.value })} />}
             <div className="space-preview" data-accent={spaceDraft.color} style={spaceVars(spaceDraft)}>
               <SpaceAvatar space={{ id: 'draft', ...spaceDraft, name: spaceDraft.name || '?' }} size={30} />
               <span className="truncate">{spaceDraft.name || 'New space'}</span>
             </div>
             <div className="space-swatches">
-              {ACCENTS.map((c) => (
-                <button key={c} type="button" data-accent={c} className={`space-swatch ${!spaceDraft.custom && spaceDraft.color === c ? 'on' : ''}`} aria-label={c} onClick={() => setSpaceDraft({ ...spaceDraft, color: c, custom: undefined })} />
+              {(editingAccount ? [editingAccount.color] : ACCENTS).map((c) => (
+                <button key={c} type="button" data-accent={c} className={`space-swatch ${!spaceDraft.custom && spaceDraft.color === c ? 'on' : ''}`} aria-label={editingAccount ? `The account's colour (${c})` : c} title={editingAccount ? "The account's colour" : undefined} onClick={() => setSpaceDraft({ ...spaceDraft, color: c, custom: undefined })} />
               ))}
               <button
                 type="button"

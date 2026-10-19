@@ -491,6 +491,8 @@ export interface BrowserState {
   zoom?: number
   /** Sidebar width in px when the user dragged its edge; unset = the default. */
   sidebarWidth?: number
+  /** A colour of their own and an emoji for AWS account spaces, by space id (their name and named colour follow the account). */
+  spaceLooks?: Record<string, Pick<WebSpace, 'custom' | 'icon'>>
 }
 
 /** Where notes live (main/notes.ts) and how that was decided. */
