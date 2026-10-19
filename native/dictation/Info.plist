@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Embedded into the ec2ra-dictate binary (__TEXT,__info_plist) by scripts/build-dictation.sh. Inside the app, macOS
+  attributes the helper's microphone and speech access to EC2 Remote Access and shows the app's own descriptions
+  (mac.extendInfo in electron-builder.config.cjs); these apply when the helper is the responsible process itself.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.mainspring.ec2-remote-access.dictate</string>
+  <key>CFBundleName</key><string>ec2ra-dictate</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>NSMicrophoneUsageDescription</key><string>Voice dictation listens to the microphone only while you hold the dictation key or the mic button is on.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Voice dictation turns what you say into text, on this Mac when macOS supports it for your language.</string>
+</dict>
+</plist>

@@ -17,8 +17,9 @@
     "gateway": "node out/gateway/index.js",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:ui": "electron tests/ui-smoke.cjs",
-    "dist": "electron-vite build && electron-builder --config electron-builder.config.cjs --mac --publish never",
-    "dist:arm64": "electron-vite build && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
+    "build:native": "bash scripts/build-dictation.sh",
+    "dist": "bash scripts/build-dictation.sh && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --publish never",
+    "dist:arm64": "bash scripts/build-dictation.sh && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
