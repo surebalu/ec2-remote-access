@@ -18,6 +18,8 @@ import { applyStickyMods, keySequence, type StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
 import { CopySheet, PasteSheet } from './mobile/ClipboardSheets'
 import { DetachedShells, NameBar, ShellList } from './Shells'
+import { registerDictationTarget, xtermTarget } from '../voice'
+import MicButton from './MicButton'
 
 /** Sends keystrokes to this session, or to every connected SSH pane of the split while broadcasting. */
 function writeInput(fromId: string, data: string): void {
@@ -150,6 +152,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     term.loadAddon(search)
     term.loadAddon(new WebLinksAddon())
     term.open(el)
+    registerDictationTarget(el, xtermTarget(term))
     // App shortcuts (⌘K, ⌘W, ⌘1…) belong to the UI, not the remote shell.
     term.attachCustomKeyEventHandler((e) => !isAppShortcut(e))
     fit.fit()
@@ -555,6 +558,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <Icon.noteAdd />
         </button>
         <span className="tool-sep" />
+        {!disconnected && <MicButton target={() => ref.current} />}
         <button className={`btn btn-ghost btn-sm btn-icon ${findOpen ? 'on' : ''}`} title="Find in terminal (⌘F)" onClick={() => (findOpen ? closeFind() : onFindShortcut())}>
           <Icon.search />
         </button>

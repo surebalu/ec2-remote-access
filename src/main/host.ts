@@ -3,7 +3,7 @@
  * gateway. Modules under src/main call `host()` instead of importing 'electron', so the same SSH/SFTP/RDP/AWS
  * code runs inside the desktop app and inside `src/gateway` (a Node server reached from a phone's browser).
  */
-import type { Theme } from '@shared/types'
+import type { Theme, VoiceEvent, VoicePermission } from '@shared/types'
 
 export interface OpenDialogOptions {
   title: string
@@ -57,6 +57,22 @@ export interface Host {
   /** Secret storage for saved RDP passwords. `encrypt` returns null when no secure store is available. */
   encrypt(plain: string): Buffer | null
   decrypt(cipher: Buffer): string
+  /** Voice dictation needs this Mac's microphone and speech recognizer (see voice.ts); null where there are none (gateway). */
+  voice: VoiceHost | null
+}
+
+/** What dictation (voice.ts) needs from the Mac app. */
+export interface VoiceHost {
+  /** The ec2ra-dictate helper: in the app's Resources when packaged, build/native in development; null when missing. */
+  helperPath(): string | null
+  /** The app's microphone permission as macOS reports it, without asking. */
+  microphoneStatus(): VoicePermission
+  /** Asks macOS for the microphone (a prompt the first time only); true when allowed. Only on a real user action. */
+  askMicrophone(): Promise<boolean>
+  /** Delivers a dictation event to this computer's own windows, never to paired devices (unlike broadcast). */
+  send(channel: 'voice:event', payload: VoiceEvent): void
+  /** Opens System Settings at Privacy & Security → Microphone or Speech Recognition. */
+  openPrivacy(pane: 'microphone' | 'speech'): Promise<void>
 }
 
 let current: Host | null = null

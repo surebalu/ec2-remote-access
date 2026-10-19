@@ -1,7 +1,30 @@
-import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, ShareMenu, shell } from 'electron'
-import type { Host } from './host'
+import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, ShareMenu, shell, systemPreferences } from 'electron'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import type { Host, VoiceHost } from './host'
 import { broadcastToPhones } from './phoneAccess'
 import { cancelDownload, fillPage } from './webviews'
+
+/** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
+const electronVoice: VoiceHost = {
+  helperPath() {
+    if (process.platform !== 'darwin') return null
+    // Packaged: copied into Resources/dictation (electron-builder extraResources); in development, what
+    // scripts/build-dictation.sh built, as tray.ts finds its icon.
+    const p = app.isPackaged ? join(process.resourcesPath, 'dictation', 'ec2ra-dictate') : join(app.getAppPath(), 'build', 'native', 'ec2ra-dictate')
+    return existsSync(p) ? p : null
+  },
+  microphoneStatus() {
+    if (process.platform !== 'darwin') return 'unknown'
+    const s = systemPreferences.getMediaAccessStatus('microphone')
+    return s === 'granted' ? 'authorized' : s === 'not-determined' ? 'notDetermined' : s === 'denied' || s === 'restricted' ? s : 'unknown'
+  },
+  askMicrophone: async () => process.platform === 'darwin' && systemPreferences.askForMediaAccess('microphone'),
+  send(channel, payload) {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
+  },
+  openPrivacy: (pane) => shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?Privacy_${pane === 'microphone' ? 'Microphone' : 'SpeechRecognition'}`)
+}
 
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */
 export const electronHost: Host = {
@@ -56,5 +79,6 @@ export const electronHost: Host = {
     return r.response
   },
   encrypt: (plain) => (safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(plain) : null),
-  decrypt: (cipher) => safeStorage.decryptString(cipher)
+  decrypt: (cipher) => safeStorage.decryptString(cipher),
+  voice: electronVoice
 }

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { activeFormats, clearFormatting, insertBlock, insertLink, setColor, setHeading, TEXT_COLORS, toggleInline, toggleLinePrefix, type InlineMark, type LineKind, type Result, type Sel } from '../notesFormat'
 import Popover from './Popover'
+import MicButton from './MicButton'
+import { CAN_DICTATE } from '../voice'
 
 /** Fonts for the Notes editor and preview; Monaco by default. */
 export const NOTE_FONTS: { id: string; label: string; stack: string }[] = [
@@ -117,6 +119,8 @@ export default function NotesToolbar({ view, subscribe, font, size, live, onFont
 
   return (
     <div className="notes-tools" role="toolbar" aria-label="Formatting">
+      {/* First, so a narrow pane (the toolbar scrolls sideways) never hides it. */}
+      {CAN_DICTATE && <><MicButton className="nt-btn" target={() => view?.contentDOM ?? null} /><span className="nt-sep" /></>}
       <select className="nt-select font" value={font} title="Font (every note)" aria-label="Font" onChange={(e) => { onFont(e.target.value); view?.focus() }}>
         {NOTE_FONTS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
       </select>

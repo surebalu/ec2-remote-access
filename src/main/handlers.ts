@@ -28,6 +28,7 @@ import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
+import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
 
 type Handler<K extends keyof IpcApi> = (...args: Parameters<IpcApi[K]>) => ReturnType<IpcApi[K]>
@@ -206,6 +207,11 @@ export const handlers: Handlers = {
   'phone:configure': (patch) => configurePhoneAccess(patch),
   'phone:terminals': async (allow) => setPhoneTerminals(allow),
   'phone:rotateToken': () => rotatePhoneToken(),
+  'voice:status': (opts) => voiceStatus(opts),
+  'voice:start': (opts) => startVoice(opts),
+  'voice:stop': async (id) => stopVoice(id),
+  'voice:cancel': async (id) => cancelVoice(id),
+  'voice:openPrivacy': (pane) => openPrivacyPane(pane),
   'diag:log': async (opts) => {
     const r = recentLog(opts?.lines, opts?.filter)
     // Main-process memory next to the renderer's, to tell which process is growing when the app slows down.

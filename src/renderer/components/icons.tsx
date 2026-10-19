@@ -318,6 +318,13 @@ export const Icon = {
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
     </svg>
   ),
+  /** Voice dictation (mic buttons, Settings → Voice). */
+  mic: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6" />
+    </svg>
+  ),
   arrowUp: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M12 19V5M6 11l6-6 6 6" />

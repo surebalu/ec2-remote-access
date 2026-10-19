@@ -17,6 +17,7 @@ import { Icon } from './icons'
 import Popover, { MenuItem, MenuSep } from './Popover'
 import NotesToolbar, { DEFAULT_NOTE_FONT, DEFAULT_NOTE_SIZE, FORMAT_KEYS, noteFontStack, runFormat } from './NotesToolbar'
 import { Highlight, highlightTag, livePreview } from '../notesLive'
+import { codeMirrorTarget, registerDictationTarget } from '../voice'
 
 /**
  * The Notes tab: the notes folder (by default the Obsidian vault, see main/notes.ts) as a tree with search, and one
@@ -280,6 +281,8 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
   useEffect(() => {
     const view = new EditorView({ parent: editorHost.current!, state: makeState('') })
     viewRef.current = view
+    // Dictation writes into the note as the words are recognised (src/renderer/voice.ts).
+    registerDictationTarget(view.dom, codeMirrorTarget(() => viewRef.current))
     refreshList()
     return () => {
       void save()

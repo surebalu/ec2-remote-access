@@ -194,6 +194,10 @@ export interface Settings {
   sessionLogging: boolean
   /** Empty = ~/Documents/EC2 Remote Access/Session logs. */
   sessionLogDir: string
+  /** The key held down to dictate (Mac app only); 'off' leaves only the mic buttons. Default Right Option. */
+  dictationKey?: DictationKey
+  /** Dictation language as a BCP 47 tag (en-US); '' follows the macOS language. */
+  dictationLocale?: string
 }
 
 export interface Snippet {
@@ -773,4 +777,40 @@ export interface SftpEvent {
   sessionId: string
   type: 'closed' | 'error'
   message?: string
+}
+
+/* ---------- Voice dictation (src/main/voice.ts, native/dictation, src/renderer/voice.ts) ---------- */
+
+/** KeyboardEvent.code of the hold-to-talk key; 'Fn' is matched on KeyboardEvent.key, which Chromium may not report. */
+export type DictationKey = 'AltRight' | 'MetaRight' | 'Fn' | 'off'
+
+/** A macOS privacy permission as the dictation helper reads it (it never asks while reporting). */
+export type VoicePermission = 'authorized' | 'denied' | 'restricted' | 'notDetermined' | 'unknown'
+
+export interface VoiceStatus {
+  /** Whether dictation can run here at all; false on the gateway, off macOS or without the helper (`message` says why). */
+  available: boolean
+  /** The ec2ra-dictate helper is installed (packaged with the app, or built into build/native for development). */
+  helper: boolean
+  message?: string
+  mic: VoicePermission
+  speech: VoicePermission
+  /** The language is recognized on this Mac, so the audio never leaves it; otherwise Apple's speech service does it. */
+  onDevice: boolean
+  /** The language in use (BCP 47), and whether the recognizer supports it. */
+  locale: string
+  supported: boolean
+  /** Languages the recognizer supports, for Settings. */
+  locales: string[]
+}
+
+/** One line from the helper (see native/dictation/main.swift), as the renderer receives it. */
+export interface VoiceEvent {
+  id: string
+  /** `end` follows every dictation, after its final text or error, once the helper has exited. */
+  kind: 'ready' | 'partial' | 'final' | 'level' | 'error' | 'end'
+  text?: string
+  level?: number
+  message?: string
+  onDevice?: boolean
 }
