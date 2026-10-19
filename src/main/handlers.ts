@@ -154,6 +154,7 @@ export const handlers: Handlers = {
   'browser:save': (state) => saveBrowserState(state),
   'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
   'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
+  'app:emojiPanel': async () => host().showEmojiPanel?.(),
   'browser:openDownload': async (path, how) => {
     const dir = host().downloadsDir()
     if (!dir) return

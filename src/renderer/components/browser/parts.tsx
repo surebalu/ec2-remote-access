@@ -1,7 +1,7 @@
-import type { ReactElement } from 'react'
+import type { CSSProperties, ReactElement } from 'react'
 import { useState } from 'react'
 import type { AccentColor, WebSpace } from '@shared/types'
-import { AWS_SERVICES, consoleHome, hostOf, type AwsService } from '@shared/browser'
+import { AWS_SERVICES, consoleHome, hostOf, isHexColor, type AwsService } from '@shared/browser'
 import { ACCENTS, initials } from '../../colors'
 
 /** A space as the browser shows it: AWS account spaces also carry the account's region and id. */
@@ -35,10 +35,36 @@ export function ServiceBadge({ id, size = 22 }: { id: string; size?: number }): 
   )
 }
 
+/** The named colours' values (styles.css [data-accent]), to start a custom colour from the one chosen. */
+export const ACCENT_HEX: Record<AccentColor, string> = {
+  emerald: '#10b981', amber: '#f59e0b', rose: '#f43f5e', violet: '#8b5cf6', sky: '#0ea5e9', teal: '#14b8a6', orange: '#f97316', slate: '#64748b'
+}
+
+/** Ready-made gradients for a space, as [from, to, name]. */
+export const SPACE_GRADIENTS: [string, string, string][] = [
+  ['#22d3ee', '#a855f7', 'Aurora'], ['#f97316', '#ec4899', 'Sunset'], ['#0ea5e9', '#1e3a8a', 'Ocean'], ['#34d399', '#065f46', 'Forest'],
+  ['#f472b6', '#a78bfa', 'Candy'], ['#00b4a6', '#c26ad6', 'Cyber Wave'], ['#fbbf24', '#dc2626', 'Ember'], ['#94a3b8', '#334155', 'Graphite']
+]
+
+/** Emoji offered at a click for a space's icon; the macOS picker (More…) has the rest. */
+export const SPACE_EMOJI = ['💼', '🏠', '🧪', '🚀', '🛠️', '📊', '💻', '☁️', '🔒', '🎯', '📚', '🎨', '🧠', '⚙️', '🌐', '📝', '🐞', '🔥', '💡', '🏢', '🎮', '🎵', '✈️', '🤖']
+
+/**
+ * CSS variables for a space with a colour of its own, the same ones [data-accent] sets for a named colour, plus --c2
+ * for the gradient's second colour. Undefined for a named colour (or anything that is not #rrggbb).
+ */
+export function spaceVars(space: Pick<WebSpace, 'custom'>): CSSProperties | undefined {
+  const c = space.custom
+  if (!c || !isHexColor(c.from)) return undefined
+  // --c2 only for a gradient: the browser's fade down the sidebar is drawn only when it is set.
+  return { '--c': c.from, ...(isHexColor(c.to) ? { '--c2': c.to } : {}), '--c-soft': `color-mix(in srgb, ${c.from} 15%, transparent)`, '--c-text': `color-mix(in srgb, ${c.from} 80%, var(--text))` } as CSSProperties
+}
+
 export function SpaceAvatar({ space, size = 22 }: { space: WebSpace; size?: number }): ReactElement {
+  const icon = space.icon && space.icon.length <= 16 ? space.icon : ''
   return (
-    <span className="space-avatar" data-accent={space.color} style={{ width: size, height: size, fontSize: size * 0.4 }}>
-      {initials(space.name)}
+    <span className={`space-avatar ${icon ? 'emoji' : ''}`} data-accent={space.color} style={{ ...spaceVars(space), width: size, height: size, fontSize: size * (icon ? 0.6 : 0.4) }}>
+      {icon || initials(space.name)}
     </span>
   )
 }

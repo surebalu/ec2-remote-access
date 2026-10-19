@@ -2,7 +2,7 @@ import type { CSSProperties, DragEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccentColor, BrowserState, WebSpace, WebTab } from '@shared/types'
 import {
-  consoleHome, frequentSites, hostOf, isAwsConsoleUrl, isAwsSignInPage, isFederationUrl, isWebUrl, matchesWords, normalizeInput,
+  consoleHome, frequentSites, hostOf, isAwsConsoleUrl, isAwsSignInPage, isFederationUrl, isWebUrl, lastGrapheme, matchesWords, normalizeInput,
   partitionFor, restorableUrl, searchHistory, signInDestination, spaceIdForProfile
 } from '@shared/browser'
 import { useStore, type Tab } from '../../store'
@@ -15,7 +15,7 @@ import CommandBar, { type Suggestion } from './CommandBar'
 import StartPage from './StartPage'
 import Downloads from './Downloads'
 import OnePassword from './OnePassword'
-import { Favicon, ServiceBadge, SPACE_SERVICES, SpaceAvatar, type Space } from './parts'
+import { ACCENT_HEX, Favicon, ServiceBadge, SPACE_EMOJI, SPACE_GRADIENTS, SPACE_SERVICES, SpaceAvatar, spaceVars, type Space } from './parts'
 
 /**
  * The built-in browser, laid out like Arc: a sidebar tinted with the space's colour (address, pinned favorites, the
@@ -30,6 +30,9 @@ const MAX_LIVE = 12
 const ZOOMS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 const MAX_HISTORY = 1500
 const inElectron = /\bElectron\//.test(navigator.userAgent)
+
+/** What the New space / Edit space form holds: a name, a named colour or one of its own (a gradient with `to`), an emoji. */
+type SpaceDraft = Pick<WebSpace, 'name' | 'color' | 'custom' | 'icon'>
 
 const SIDEBAR_WIDTH = { default: 208, min: 200, max: 380 }
 /** The browser's own chrome follows the page zoom, within limits that keep it usable. */
@@ -133,7 +136,8 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [drop, setDrop] = useState<{ target: string; where: 'before' | 'after' | 'on' } | null>(null)
   const [dragging, setDragging] = useState(false)
-  const [spaceDraft, setSpaceDraft] = useState<{ name: string; color: AccentColor }>({ name: '', color: 'violet' })
+  const [spaceDraft, setSpaceDraft] = useState<SpaceDraft>({ name: '', color: 'violet' })
+  const emojiInput = useRef<HTMLInputElement>(null)
   /** A download finished since the Downloads popover was last opened (a dot on its button). */
   const [unseenDownloads, setUnseenDownloads] = useState(false)
   const [tabDraft, setTabDraft] = useState<{ name: string; url: string; error?: string }>({ name: '', url: '' })
@@ -821,7 +825,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
 
   // ----- rendering -----
 
-  if (!st) return <div className="browser" data-accent={space.color} />
+  if (!st) return <div className="browser" data-accent={space.color} style={spaceVars(space)} />
 
   const hidden = !!st.sidebarHidden
   // Overall progress of running downloads for the ring on the Downloads button (null when none run).
@@ -971,7 +975,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
               {...dragProps(t, 'favorite')}
             >
               {rt[t.id]?.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url || t.homeUrl || ''} size={18} />}
-              {home && home.id !== space.id && <span className="web-fav-dot" data-accent={home.color} />}
+              {home && home.id !== space.id && <span className="web-fav-dot" data-accent={home.color} style={spaceVars(home)} />}
             </button>
           )
         })}
@@ -1023,6 +1027,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
             type="button"
             className={`web-space-dot ${sp.id === space.id ? 'on' : ''} ${dropCls(`space-${sp.id}`)}`}
             data-accent={sp.color}
+            style={spaceVars(sp)}
             title={`${sp.name}${sp.profile ? ' (AWS)' : ''}${keyFor(i)}`}
             aria-label={`Space ${sp.name}`}
             onClick={() => switchSpace(sp.id)}
@@ -1054,7 +1059,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
   const menuSpace = menu?.kind === 'space' ? spaces.find((x) => x.id === menu.id) : undefined
 
   return (
-    <div className={`browser ${hidden ? 'side-hidden' : ''}`} data-accent={space.color} style={{ '--web-zoom': chromeZoom } as CSSProperties}>
+    <div className={`browser ${hidden ? 'side-hidden' : ''}`} data-accent={space.color} style={{ '--web-zoom': chromeZoom, ...spaceVars(space) } as CSSProperties}>
       {sidebar}
       {hidden && !peek && <div className="web-peek-zone" onMouseEnter={() => setPeek(true)} />}
       {/* Pages swallow mouse events, so a drag across them is tracked on a shield over the whole browser. */}
@@ -1225,7 +1230,7 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
           )}
           {!menuSpace.profile && (
             <>
-              <MenuItem onClick={() => { setSpaceDraft({ name: menuSpace.name, color: menuSpace.color }); setMenu({ kind: 'newSpace', anchor: menu.anchor, edit: menuSpace.id }) }}>Rename or recolour…</MenuItem>
+              <MenuItem onClick={() => { setSpaceDraft({ name: menuSpace.name, color: menuSpace.color, custom: menuSpace.custom, icon: menuSpace.icon }); setMenu({ kind: 'newSpace', anchor: menu.anchor, edit: menuSpace.id }) }}>Rename or recolour…</MenuItem>
               {menuSpace.id !== GENERAL.id && (
                 <MenuItem danger onClick={() => {
                   setMenu(null)
@@ -1287,27 +1292,96 @@ function Browser({ active }: { tab: Tab; active: boolean }): ReactElement {
       )}
 
       {menu?.kind === 'newSpace' && (
-        <Popover anchor={menu.anchor} width={250} onClose={() => setMenu(null)}>
+        <Popover anchor={menu.anchor} width={300} onClose={() => setMenu(null)}>
           <form
             className="space-form"
             onSubmit={(e) => {
               e.preventDefault()
               const name = spaceDraft.name.trim()
               if (!name) return
-              if (menu.edit) update((s) => ({ ...s, spaces: s.spaces.map((x) => (x.id === menu.edit ? { ...x, name, color: spaceDraft.color } : x)) }))
+              const look = { color: spaceDraft.color, custom: spaceDraft.custom, icon: spaceDraft.icon || undefined }
+              if (menu.edit) update((s) => ({ ...s, spaces: s.spaces.map((x) => (x.id === menu.edit ? { ...x, name, ...look } : x)) }))
               else {
                 const id = `s-${newId()}`
-                update((s) => ({ ...s, spaces: [...s.spaces, { id, name, color: spaceDraft.color }], activeSpace: id }))
+                update((s) => ({ ...s, spaces: [...s.spaces, { id, name, ...look }], activeSpace: id }))
               }
               setMenu(null)
             }}
           >
             <div className="section-title">{menu.edit ? 'Edit space' : 'New space'}</div>
             <input className="input" autoFocus placeholder="Name (Work, Jira, Personal…)" value={spaceDraft.name} onChange={(e) => setSpaceDraft({ ...spaceDraft, name: e.target.value })} />
+            <div className="space-preview" data-accent={spaceDraft.color} style={spaceVars(spaceDraft)}>
+              <SpaceAvatar space={{ id: 'draft', ...spaceDraft, name: spaceDraft.name || '?' }} size={30} />
+              <span className="truncate">{spaceDraft.name || 'New space'}</span>
+            </div>
             <div className="space-swatches">
               {ACCENTS.map((c) => (
-                <button key={c} type="button" data-accent={c} className={`space-swatch ${spaceDraft.color === c ? 'on' : ''}`} aria-label={c} onClick={() => setSpaceDraft({ ...spaceDraft, color: c })} />
+                <button key={c} type="button" data-accent={c} className={`space-swatch ${!spaceDraft.custom && spaceDraft.color === c ? 'on' : ''}`} aria-label={c} onClick={() => setSpaceDraft({ ...spaceDraft, color: c, custom: undefined })} />
               ))}
+              <button
+                type="button"
+                className={`space-swatch custom ${spaceDraft.custom ? 'on' : ''}`}
+                aria-label="Custom colour or gradient"
+                title="Any colour, or a gradient"
+                style={spaceDraft.custom ? { background: `linear-gradient(135deg, ${spaceDraft.custom.from}, ${spaceDraft.custom.to ?? spaceDraft.custom.from})`, ...spaceVars(spaceDraft) } : undefined}
+                onClick={() => setSpaceDraft({ ...spaceDraft, custom: spaceDraft.custom ?? { from: ACCENT_HEX[spaceDraft.color] } })}
+              />
+            </div>
+            {spaceDraft.custom && (() => {
+              const c = spaceDraft.custom
+              const setC = (patch: Partial<NonNullable<SpaceDraft['custom']>>): void => setSpaceDraft({ ...spaceDraft, custom: { ...c, ...patch } })
+              return (
+                <div className="space-custom">
+                  <div className="space-colors">
+                    <label className="space-color" title="Pick a colour">
+                      <input type="color" aria-label={c.to ? 'First colour' : 'Colour'} value={c.from} onChange={(e) => setC({ from: e.target.value })} />
+                      <span className="mono">{c.from}</span>
+                    </label>
+                    {c.to && (
+                      <>
+                        <button type="button" className="space-swap" title="Swap the two colours" aria-label="Swap colours" onClick={() => setC({ from: c.to!, to: c.from })}>⇄</button>
+                        <label className="space-color" title="Pick the second colour">
+                          <input type="color" aria-label="Second colour" value={c.to} onChange={(e) => setC({ to: e.target.value })} />
+                          <span className="mono">{c.to}</span>
+                        </label>
+                      </>
+                    )}
+                  </div>
+                  <label className="space-gradient">
+                    <input type="checkbox" checked={!!c.to} onChange={(e) => setC({ to: e.target.checked ? SPACE_GRADIENTS.find(([f]) => f !== c.from)?.[1] ?? '#a855f7' : undefined })} /> Gradient
+                  </label>
+                  <div className="space-presets" role="group" aria-label="Ready-made gradients">
+                    {SPACE_GRADIENTS.map(([from, to, label]) => (
+                      <button key={label} type="button" title={label} aria-label={label} className={c.from === from && c.to === to ? 'on' : ''} style={{ background: `linear-gradient(135deg, ${from}, ${to})` }} onClick={() => setSpaceDraft({ ...spaceDraft, custom: { from, to } })} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+            <div className="space-icon">
+              <div className="space-icon-head">
+                <span className="section-title">Icon</span>
+                <span className="flex-1" />
+                {spaceDraft.icon && <button type="button" className="space-link" onClick={() => setSpaceDraft({ ...spaceDraft, icon: undefined })}>Use initials</button>}
+              </div>
+              <div className="space-emojis" role="group" aria-label="Emoji">
+                {SPACE_EMOJI.map((e) => (
+                  <button key={e} type="button" className={`space-emoji ${spaceDraft.icon === e ? 'on' : ''}`} aria-label={`Icon ${e}`} onClick={() => setSpaceDraft({ ...spaceDraft, icon: e })}>{e}</button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  ref={emojiInput}
+                  className="input space-emoji-input"
+                  aria-label="Any emoji"
+                  placeholder="Any emoji"
+                  value={spaceDraft.icon ?? ''}
+                  onChange={(e) => setSpaceDraft({ ...spaceDraft, icon: lastGrapheme(e.target.value) || undefined })}
+                />
+                {inElectron && (
+                  <button type="button" className="btn btn-sm" title="The macOS emoji picker (also ⌃⌘Space)" onClick={() => { emojiInput.current?.focus(); void window.api.invoke('app:emojiPanel') }}>More…</button>
+                )}
+              </div>
             </div>
             <p className="muted text-[10.5px]">A space has its own cookies and logins, so the same site can be signed in differently in each.</p>
             <button type="submit" className="btn btn-primary btn-sm" disabled={!spaceDraft.name.trim()}>{menu.edit ? 'Save' : 'Create space'}</button>

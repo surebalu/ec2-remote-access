@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { AuthState } from '@shared/types'
 import type { FrequentSite } from '@shared/browser'
-import { Favicon, ServiceBadge, SPACE_SERVICES, SpaceAvatar, type Space } from './parts'
+import { Favicon, ServiceBadge, SPACE_SERVICES, SpaceAvatar, spaceVars, type Space } from './parts'
 
 const greeting = (h: number): string => (h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening')
 
@@ -27,7 +27,7 @@ export default function StartPage({ space, auth, frequent, favicons, commandBar,
   const region = space.region ?? 'us-east-1'
 
   return (
-    <div className="start-page" data-accent={space.color}>
+    <div className="start-page" data-accent={space.color} style={spaceVars(space)}>
       <div className="start-inner">
         <div className="start-clock">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
         <div className="start-greet">{greeting(now.getHours())} · {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</div>
