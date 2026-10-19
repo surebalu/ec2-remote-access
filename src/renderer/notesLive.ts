@@ -199,7 +199,7 @@ const liveTheme = EditorView.baseTheme({
   '.cm-live-task': { margin: '0 .5em 0 0', verticalAlign: '-0.1em', cursor: 'pointer', accentColor: 'var(--accent)' },
   '.cm-live-done': { color: 'var(--muted)', textDecoration: 'line-through' },
   '.cm-live-quote': { borderLeft: '3px solid var(--border-strong)', paddingLeft: '12px !important', color: 'var(--text-2)' },
-  '.cm-live-codeblock': { background: 'var(--panel-2)', fontFamily: "'SF Mono', ui-monospace, Menlo, monospace", fontSize: '.92em' },
+  '.cm-live-codeblock': { background: 'var(--panel-2)', fontFamily: 'var(--mono-font)', fontSize: '.92em' },
   '.cm-live-code': { background: 'var(--panel-2)', borderRadius: '4px', padding: '0 .2em' },
   '.cm-live-link, .cm-live-wikilink': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'color-mix(in srgb, var(--accent) 45%, transparent)', textUnderlineOffset: '2px' },
   '.cm-live-hr': { display: 'inline-block', width: '100%', verticalAlign: 'middle', borderTop: '1px solid var(--border-strong)' }

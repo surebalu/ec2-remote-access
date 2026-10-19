@@ -46,6 +46,7 @@ export const defaultSettings: Settings = {
   phoneTerminals: false,
   menuBarIcon: true,
   colorTheme: '',
+  uiFont: 'Monaco',
   notesFont: 'Monaco',
   notesFontSize: 14,
   sshAgentSock: existsSync(onePasswordSock) ? onePasswordSock : (process.env.SSH_AUTH_SOCK ?? ''),

@@ -559,6 +559,14 @@ app.whenReady().then(async () => {
     assert.equal(await js(`getComputedStyle([...document.querySelectorAll('.settings-foot .btn')].find((b) => b.textContent === 'Cancel')).backgroundColor`), await js(`getComputedStyle(document.querySelector('.set-card')).backgroundColor`), 'buttons take the theme panel colour')
     await js(`document.querySelector('[data-color-theme-option="default"]').click()`)
     await until(`!document.documentElement.dataset.colorTheme && document.documentElement.style.getPropertyValue('--bg') === ''`)
+    // The app font: Monaco unless chosen otherwise, for every label (Tailwind's font-sans and font-mono included).
+    assert.match(await js(`getComputedStyle(document.body).fontFamily`), /^Monaco/, 'Monaco by default')
+    assert.match(await js(`getComputedStyle(document.querySelector('.settings-nav-item')).fontFamily`), /^Monaco/)
+    await js(`[...document.querySelectorAll('.font-choice')].find((b) => b.textContent.includes('San Francisco')).click()`)
+    await until(`getComputedStyle(document.body).fontFamily.startsWith('-apple-system')`)
+    assert.equal(settings.uiFont, 'System')
+    await js(`[...document.querySelectorAll('.font-choice')].find((b) => b.textContent.includes('Monaco')).click()`)
+    await until(`getComputedStyle(document.body).fontFamily.startsWith('Monaco')`)
     await js(`document.querySelector('.settings-nav [data-section="phone"]').click()`)
     await until(`document.body.textContent.includes('Let my phone use this app')`)
     await until(`!!document.querySelector('img[alt="QR code for the phone link"]')`)
@@ -1286,22 +1294,17 @@ app.whenReady().then(async () => {
     await tshot('terminal-cyber-wave.png')
     await tjs(`window.api.invoke('settings:set', { terminalTheme: ${JSON.stringify(themeBefore ?? 'auto')} })`)
     assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'hi')
-    // Colour themes from the rail: a terminal on "Match app" takes the theme's scheme, and Cyber Wave fades the chrome too.
-    await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
-    await tuntil(`!!document.querySelector('.settings-nav [data-section="terminal"]')`, 'settings again')
-    await tjs(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
-    await tuntil(`!!document.querySelector('[role="dialog"] select option[value="auto"]')`, 'match app offered')
-    await tjs(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="auto"]').closest('select'); sel.value = 'auto'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
-    await tjs(`document.querySelector('[role="dialog"] [aria-label="Close dialog"]').click()`)
-    await tuntil(`!document.querySelector('[role="dialog"]')`, 'settings closed')
+    // Colour themes from the rail: the terminal follows the main theme even after a scheme of its own was picked
+    // (Cyber Wave, just above), and Cyber Wave fades the chrome too.
     const pickTheme = async (label) => {
       await tjs(`document.querySelector('.app-rail button[aria-label="Theme"]').click()`)
       await tuntil(`!!document.querySelector('.popover .theme-menu-list')`, 'theme menu')
       await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.trim().startsWith(${JSON.stringify(label)})).click()`)
     }
     await pickTheme('Dracula')
-    await tuntil(`document.documentElement.dataset.colorTheme === 'dracula' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundColor === 'rgb(40, 42, 54)'`, 'Match app takes Dracula')
+    await tuntil(`document.documentElement.dataset.colorTheme === 'dracula' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundColor === 'rgb(40, 42, 54)'`, 'the terminal follows to Dracula')
     assert.equal(settings.colorTheme, 'dracula')
+    assert.equal(settings.terminalTheme, 'auto', 'the terminal is back on Match app')
     await pickTheme('Cyber Wave')
     await tuntil(`document.documentElement.dataset.colorTheme === 'cyber-wave' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundImage.includes('linear-gradient') && getComputedStyle(document.querySelector('.app-rail')).backgroundImage.includes('linear-gradient')`, 'Cyber Wave across the app')
     assert.equal(await tjs(`document.querySelector('.app-rail button[aria-label="Theme"] .rail-label').textContent`), 'Theme')
