@@ -20,6 +20,7 @@ pnpm build:gateway           # electron-vite build + vite build -c vite.gateway.
 pnpm gateway -- --host 0.0.0.0 --port 8321   # run the headless gateway (serves out/renderer + WebSocket RPC)
 pnpm dist                    # build + electron-builder DMG/zip for arm64 and x64 -> dist/
 pnpm dist:arm64              # arm64 only (faster local packaging)
+scripts/install-mac.sh       # install the dist/ build into /Applications and restart the app; detaches first, so it is safe from the app's own Terminal (Claude may be running there)
 scripts/release.sh --bump patch [--publish]   # bump, typecheck, build; --publish uploads to S3 (needs UPDATE_URL, S3_URI)
 scripts/deploy-pi.sh user@host   # build + install/update the headless gateway on an arm64 Linux box (systemd, tailscale serve); idempotent; ALLOW_TERMINALS=1|0 (unset keeps the machine's setting)
 ```
