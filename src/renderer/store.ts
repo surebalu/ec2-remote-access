@@ -5,6 +5,7 @@ import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { ssoWaitOutcome } from '@shared/ssoWait'
 import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
+import { applySectionZoom, type ZoomSection } from './sectionZoom'
 
 export interface RdpTabRequest {
   user: string
@@ -174,6 +175,8 @@ interface State {
   setColorTheme: (id: string) => Promise<void>
   /** The interface font (UI_FONTS id). */
   setUiFont: (id: string) => Promise<void>
+  /** Text size of one section of the hosts view (1 = default). */
+  setSectionZoom: (section: ZoomSection, zoom: number) => Promise<void>
   toggleGroup: (key: string) => Promise<void>
   setAllGroups: (keys: string[], collapsed: boolean) => Promise<void>
   isFavorite: (key: string) => boolean
@@ -408,6 +411,7 @@ export const useStore = create<State>((set, get) => ({
     ])
     set({ settings, tunnels })
     applyUiFont(settings.uiFont)
+    applySectionZoom(settings.sectionZoom)
     const shade = applyAppearance(settings.theme, settings.colorTheme)
     if (settings.colorTheme) void window.api.invoke('theme:set', shade)
     if (cached) set({ instances: cached.instances, scanErrors: cached.errors, scannedAt: cached.scannedAt })
@@ -688,6 +692,15 @@ export const useStore = create<State>((set, get) => ({
     // The terminal follows the main theme: picking one puts the terminal scheme back on "Match app".
     await get().saveSettings({ theme, colorTheme: '', terminalTheme: 'auto' })
     await window.api.invoke('theme:set', theme)
+  },
+  setSectionZoom: async (section, zoom) => {
+    const cur = get().settings
+    const sectionZoom = { ...(cur?.sectionZoom ?? {}), [section]: Math.round(zoom * 100) / 100 }
+    // Kept in the store at once, not after the save: holding ⌘+ sends steps faster than a save round trip, and each
+    // step must start from the last one.
+    if (cur) set({ settings: { ...cur, sectionZoom } })
+    applySectionZoom(sectionZoom)
+    await get().saveSettings({ sectionZoom })
   },
   setUiFont: async (id) => {
     applyUiFont(id)

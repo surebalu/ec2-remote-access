@@ -256,6 +256,37 @@ app.whenReady().then(async () => {
     assert.equal(await js(`getComputedStyle(document.querySelector('thead th button')).textTransform`), 'uppercase', 'sortable headers match the others')
     assert.equal(await js(`!!document.querySelector('[data-host-key="${stopped.key}"]')`), false, 'running filter initially hides stopped host')
 
+    // Text size per section: the sidebar matches the table's 12px; pointing at it and pressing ⌘− shrinks only it,
+    // keeping its width on screen; the footer's Aa sizes either section; menus still open at the pointer when zoomed.
+    assert.equal(await js(`getComputedStyle(document.querySelector('.sidebar .nav-row')).fontSize`), '12px')
+    const sideBox = await js(`(() => { const r = document.querySelector('.sidebar').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 300, w: Math.round(r.width) } })()`)
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(sideBox.x), y: Math.round(sideBox.y) })
+    await until(`!!document.querySelector('[data-zoom-section="sidebar"]:hover')`)
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: '-', modifiers: ['meta'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: '-', modifiers: ['meta'] })
+    await until(`document.documentElement.style.getPropertyValue('--zoom-sidebar') === '0.95' && !!document.querySelector('.zoom-badge')`)
+    assert.equal(settings.sectionZoom.sidebar, 0.95)
+    assert.equal(settings.sectionZoom.hosts, undefined, 'the hosts list keeps its size')
+    // The width animates (150 ms), so wait for it to come back to where it was.
+    await until(`Math.abs(Math.round(document.querySelector('.sidebar').getBoundingClientRect().width) - ${sideBox.w}) <= 1`)
+    await js(`document.querySelector('button[aria-label="Text size"]').click()`)
+    await until(`document.querySelectorAll('.popover .zoom-stepper').length === 2`)
+    await js(`document.querySelector('.popover [aria-label="Larger hosts list text"]').click()`)
+    await js(`document.querySelector('.popover [aria-label="Larger hosts list text"]').click()`)
+    await until(`document.documentElement.style.getPropertyValue('--zoom-hosts') === '1.2'`)
+    await screenshot('section-zoom.png')
+    await key('Escape')
+    // The right-click menu lands at the pointer even inside the zoomed hosts list.
+    await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]'); const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 10 })) })()`)
+    await until(`!!document.querySelector('body > .panel.modal.fixed')`)
+    assert.equal(await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]').getBoundingClientRect(); const m = document.querySelector('body > .panel.modal.fixed').getBoundingClientRect(); return Math.abs(m.left - (row.left + 200)) < 3 && Math.abs(m.top - (row.top + 10)) < 3 })()`), true, 'context menu opens at the pointer')
+    await key('Escape')
+    await js(`document.querySelector('button[aria-label="Text size"]').click()`)
+    await until(`document.querySelectorAll('.popover .zoom-stepper').length === 2`)
+    await js(`document.querySelectorAll('.popover .zoom-stepper-value').forEach((b) => b.click())`)
+    await until(`document.documentElement.style.getPropertyValue('--zoom-hosts') === '1' && document.documentElement.style.getPropertyValue('--zoom-sidebar') === '1'`)
+    await key('Escape')
+
     // Open account tree and select a stopped host: filters and collapsed groups must not hide it.
     await js(`document.querySelector('button[title="Show instances"]').click()`)
     await click('worker-stopped')
@@ -584,6 +615,7 @@ app.whenReady().then(async () => {
     win.setSize(1400, 900)
     await js(`document.querySelector('button[aria-label="Notes"]').click()`)
     await until(`!!document.querySelector('.notes-tab') && document.querySelectorAll('.notes-file').length >= 2`)
+    assert.equal(await js(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'Notes has its own list, so the hosts sidebar steps aside')
     await js(`[...document.querySelectorAll('.notes-file')].find((b) => b.textContent.includes('Runbook')).click()`)
     // Live mode: the [[ ]] of a link show only on the line being edited.
     await until(`document.querySelector('.notes-tab .cm-content')?.textContent.includes('see PLM upgrade') && !!document.querySelector('.notes-tab .cm-live-wikilink')`)
@@ -610,7 +642,7 @@ app.whenReady().then(async () => {
     await until(`getSelection().toString() === 'words'`)
     await js(`document.querySelector('.nt-btn[aria-label="Bold (⌘B)"]').click()`)
     await until(`document.querySelector('.notes-tab .cm-content').textContent.includes('key **words**') && document.querySelector('.nt-btn[aria-label="Bold (⌘B)"]').classList.contains('on')`)
-    const sidebarOpen = () => js(`!!document.querySelector('[title="Collapse sidebar (⌘B)"]')`)
+    const sidebarOpen = () => js(`document.documentElement.dataset.sidebar !== 'collapsed'`)
     const sidebarBefore = await sidebarOpen()
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'I', modifiers: ['meta'] })
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'I', modifiers: ['meta'] })

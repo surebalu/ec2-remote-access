@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Instance } from '@shared/types'
 import { allInstances, filteredInstances, routeOf, useStore, visibleInstances } from '../store'
 import { openDefaultFor, openFilesFor, openInConsole, openRdpFor, openSshFor } from '../quickConnect'
@@ -446,7 +447,8 @@ function ContextMenu({
       {label}
     </button>
   )
-  return (
+  // On the page body: the hosts list may be zoomed (its own text size), which would scale a fixed position inside it.
+  return createPortal(
     <div ref={ref} className="panel modal fixed z-50 min-w-56 border py-1 text-xs" style={{ left: pos.x, top: pos.y, borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>
       <div className="section-title px-3 py-1.5">{i.name}</div>
       {item('Host details', () => s.revealHost(i.key))}
@@ -484,6 +486,7 @@ function ContextMenu({
       {!i.manual && <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />}
       {!i.manual && i.state === 'stopped' && item('Start instance', () => void onPower(i, 'start'))}
       {!i.manual && i.state === 'running' && item('Stop instance…', () => void onPower(i, 'stop'))}
-    </div>
+    </div>,
+    document.body
   )
 }

@@ -165,6 +165,8 @@ export interface Settings {
   colorTheme: string
   /** The font of the whole interface (renderer/uiFont.ts); notes and terminals have their own. Default Monaco. */
   uiFont: string
+  /** Text size of sections of the hosts view (renderer/sectionZoom.ts), 1 = default; keyed 'sidebar' | 'hosts'. */
+  sectionZoom: Record<string, number>
   /** Folder of Markdown notes ('' = the vault Obsidian has open, else ~/Documents/EC2 Remote Access/Notes). */
   notesDir: string
   /** Subfolder of the notes folder that holds one note per host. */

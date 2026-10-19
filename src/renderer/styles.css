@@ -321,7 +321,10 @@ tr.row.in-group.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent
 html[data-ui-font-mono] { --sidebar-w: 17.5rem; }
 html[data-sidebar="collapsed"] { --sidebar-w: 0px; }
 html[data-sidebar="collapsed"] .titlebar .brand-name { display: none; }
-.sidebar { width: var(--sidebar-w, 16rem); transition: width .15s ease; }
+/* Each section of the hosts view has its own text size (renderer/sectionZoom.ts). The sidebar keeps its on-screen
+   width while zoomed, so the title bar above stays lined up with it. Its text matches the hosts table's 12px. */
+.sidebar { zoom: var(--zoom-sidebar, 1); width: calc(var(--sidebar-w, 16rem) / var(--zoom-sidebar, 1)); font-size: 12px; transition: width .15s ease; }
+.hosts-workspace { zoom: var(--zoom-hosts, 1); }
 .rail-btn {
   position: relative; display: flex; align-items: center; justify-content: center;
   width: 46px; height: 36px; margin: 0 auto; border-radius: 9px; color: var(--text-2);
@@ -1554,3 +1557,9 @@ html[data-mobile] .trib-chip.square { width: 30px; }
 .font-choice-name { overflow: hidden; color: var(--text-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 @media (max-width: 1180px) { html[data-ui-font-mono] .search-pill { width: auto; } }
+.text-size-btn { font: 600 11.5px/1 var(--ui-font); letter-spacing: -.02em; }
+.zoom-stepper { display: inline-flex; align-items: center; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--panel); }
+.zoom-stepper button { min-width: 24px; height: 24px; padding: 0 6px; color: var(--text-2); font-size: 13px; }
+.zoom-stepper button:hover { background: var(--accent-soft); color: var(--text); }
+.zoom-stepper .zoom-stepper-value { min-width: 48px; border-inline: 1px solid var(--border); font-size: 11px; font-variant-numeric: tabular-nums; }
+.zoom-badge { position: fixed; z-index: 60; padding: 6px 12px; transform: translateX(-50%); border: 1px solid var(--border); border-radius: 999px; background: var(--panel); box-shadow: var(--shadow-lg); color: var(--text); font-size: 12px; font-weight: 600; pointer-events: none; animation: web-pop .14s ease-out; }

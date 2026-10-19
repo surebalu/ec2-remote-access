@@ -11,6 +11,8 @@ import { isDarkMode } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
 import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
 import { DEFAULT_UI_FONT, UI_FONTS } from '../uiFont'
+import { ZOOM_SECTIONS } from '../sectionZoom'
+import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
 type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'voice' | 'phone' | 'requirements' | 'about'
@@ -219,6 +221,13 @@ export default function SettingsDialog(): ReactElement | null {
               <button key={t} className={draft.theme === t && !draft.colorTheme ? 'on' : ''} onClick={() => { setDraft((d) => (d ? { ...d, theme: t, colorTheme: '', terminalTheme: 'auto' } : d)); void s.setTheme(t) }}>
                 {t === 'system' ? 'Auto' : t[0].toUpperCase() + t.slice(1)}
               </button>
+            ))}
+          </div>
+        </Row>
+        <Row label="Text size" hint="The hosts sidebar and the hosts list, each on its own. Point at either and press ⌘+ / ⌘− to change it there.">
+          <div className="flex flex-col items-end gap-1.5">
+            {ZOOM_SECTIONS.map((z) => (
+              <span key={z.id} className="flex items-center gap-2 text-[12px]"><span className="muted">{z.label}</span><ZoomStepper section={z.id} /></span>
             ))}
           </div>
         </Row>
