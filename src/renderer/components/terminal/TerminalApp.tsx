@@ -100,6 +100,8 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
   const currentRef = useRef(current)
   currentRef.current = current
   const inputMode = st?.input ?? 'editor'
+  /** The ribbon's Rich input and ⌃G at a prompt: the input box, or typing straight into the shell (every pane). */
+  const toggleInput = useCallback(() => update((s) => ({ ...s, input: (s.input ?? 'editor') === 'editor' ? 'shell' : 'editor' })), [update])
 
   const onInfo = useCallback((pane: string, patch: PaneInfo) => {
     setInfo((m) => ({ ...m, [pane]: { ...m[pane], ...patch } }))
@@ -311,11 +313,18 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     return folderName(cwdOf(t.activePane), home) || 'Terminal'
   }
   const busy = (t: TermTabState): boolean => paneIds(t.root).some((p) => info[p]?.running)
-  /** The second line of a tab in the side list: what runs, else the folder; and how many panes. */
-  const subtitleOf = (t: TermTabState): string => {
+  const branchOf = (t: TermTabState): string | null => info[t.activePane]?.branch ?? null
+  /**
+   * The second line of a tab in the side list, as in Warp: the Git branch when the folder is a repository, else what
+   * runs or the folder; and how many panes.
+   */
+  const subtitleOf = (t: TermTabState): ReactElement => {
     const running = info[t.activePane]?.running
+    const branch = branchOf(t)
     const panes = paneIds(t.root).length
-    return [running ? `▶ ${running}` : tildify(cwdOf(t.activePane) ?? '', home), panes > 1 ? `${panes} panes` : ''].filter(Boolean).join(' · ')
+    const rest = [branch && running ? `▶ ${running.split(/\s+/)[0]}` : '', panes > 1 ? `${panes} panes` : ''].filter(Boolean).join(' · ')
+    if (branch) return <><Icon.branch className="term-tab-branch-icon" /><span className="term-tab-branch">{branch}</span>{rest && <span className="term-tab-rest"> · {rest}</span>}</>
+    return <>{[running ? `▶ ${running}` : tildify(cwdOf(t.activePane) ?? '', home), panes > 1 ? `${panes} panes` : ''].filter(Boolean).join(' · ')}</>
   }
   const vertical = (st.tabBar ?? 'vertical') === 'vertical' && roomy
   const sideWidth = st.tabBarWidth ?? SIDE_WIDTH.default
@@ -394,7 +403,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
       aria-selected={t.id === current?.id}
       className={`term-tab ${t.id === current?.id ? 'on' : ''} ${drop?.id === t.id ? (drop.after ? 'drop-after' : 'drop-before') : ''}`}
       data-accent={t.color}
-      title={`${titleOf(t)}${t.profile ? ` · AWS ${t.profile}` : ''}${i < 8 ? `  ⌘${i + 1}` : ''}\n${cwdOf(t.activePane) ?? ''}`}
+      title={`${titleOf(t)}${t.profile ? ` · AWS ${t.profile}` : ''}${i < 8 ? `  ⌘${i + 1}` : ''}\n${cwdOf(t.activePane) ?? ''}${branchOf(t) ? `\nBranch: ${branchOf(t)}` : ''}`}
       onClick={() => activateTab(t.id)}
       onDoubleClick={() => setRenaming({ id: t.id, value: t.title ?? titleOf(t) })}
       onAuxClick={(e) => { if (e.button === 1) closeTab(t.id) }}
@@ -422,6 +431,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
         )}
         {vertical && <span className="term-tab-sub">{subtitleOf(t)}</span>}
       </span>
+      {!vertical && branchOf(t) && <span className="term-tab-chip" title={`Branch: ${branchOf(t)}`}><Icon.branch />{branchOf(t)}</span>}
       {t.profile && <span className="term-tab-aws">{t.profile}</span>}
       {vertical && (i < 8 || i === st.tabs.length - 1) && <span className="term-tab-key">⌘{i < 8 ? i + 1 : 9}</span>}
       <button type="button" className="term-tab-x" aria-label={`Close ${titleOf(t)}`} onClick={(e) => { e.stopPropagation(); closeTab(t.id) }}><Icon.x /></button>
@@ -493,6 +503,8 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
                 onInfo={onInfo}
                 onExit={closePane}
                 onReveal={() => { useStore.getState().setActive(useStore.getState().tabs.find((x) => x.kind === 'local')?.id ?? 'hosts'); activateTab(t.id); focusPane(id) }}
+                onNewTab={(dir) => openTab({ cwd: dir })}
+                onToggleInput={toggleInput}
                 registerApi={registerApi}
               />
             </div>

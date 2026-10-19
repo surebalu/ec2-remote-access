@@ -28,6 +28,8 @@ import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
 import { openDefaultFor } from './quickConnect'
 import MobileApp from './components/mobile/MobileApp'
+import VoiceHud from './components/VoiceHud'
+import { installVoice } from './voice'
 
 export default function App(): ReactElement {
   const init = useStore((s) => s.init)
@@ -57,6 +59,9 @@ export default function App(): ReactElement {
   useEffect(() => {
     void init()
   }, [init])
+
+  // Voice dictation: the hold key, mic buttons and the HUD (Mac app only; a no-op elsewhere).
+  useEffect(() => installVoice(), [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -135,6 +140,7 @@ export default function App(): ReactElement {
       {shortcutsOpen && <ShortcutsDialog />}
       {runCommandFor && <RunCommandDialog key={runCommandFor.runId ?? runCommandFor.keys.join('|')} />}
       <Toasts />
+      <VoiceHud />
     </>
   )
   if (isMobile()) return <><MobileApp />{dialogs}</>

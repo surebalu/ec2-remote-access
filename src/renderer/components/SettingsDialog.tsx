@@ -1,16 +1,18 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import type { AppAbout, NotesInfo, Settings } from '@shared/types'
+import type { AppAbout, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
+import { CAN_DICTATE } from '../voice'
 import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
 import type { AccentColor } from '@shared/types'
-import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isDarkMode } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
+import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
 import { Icon } from './icons'
 
-type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'phone' | 'requirements' | 'about'
+type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'voice' | 'phone' | 'requirements' | 'about'
 
 const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: 'general', label: 'General', blurb: 'Appearance, how hosts are found and how connections are routed.', icon: Icon.settings },
@@ -18,6 +20,7 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
   { id: 'ssh', label: 'SSH & RDP', blurb: 'Users, keys and the SSH agent used when a host has no settings of its own.', icon: Icon.key },
   { id: 'terminal', label: 'Terminal', blurb: 'How SSH tabs look, what runs when they connect, and recordings.', icon: Icon.terminal },
   { id: 'notes', label: 'Notes', blurb: 'Where your Markdown notes live.', icon: Icon.note },
+  { id: 'voice', label: 'Voice', blurb: 'Talk instead of typing, wherever you type in the app.', icon: Icon.mic },
   { id: 'phone', label: 'Phone & iPad', blurb: 'Use this Mac’s sessions from your iPhone or iPad.', icon: Icon.phone },
   { id: 'requirements', label: 'Requirements', blurb: 'The command-line tools the app uses, and where they are.', icon: Icon.plug },
   { id: 'about', label: 'About', blurb: 'Version, privacy and where your data is kept.', icon: Icon.info }
@@ -50,12 +53,113 @@ function Row({ label, hint, children, stack = false }: { label: ReactNode; hint?
   )
 }
 
+/** The default look's tokens (styles.css), for the Default card while a colour theme repaints the real ones. */
+const DEFAULT_LOOK = {
+  light: { '--bg': '#f3f4f7', '--bg-elev': '#f9fafb', '--panel': '#ffffff', '--border': '#e5e7ec', '--text': '#0d1424', '--muted': '#6a7389', '--accent': '#5b5fd6' },
+  dark: { '--bg': '#0a0b0f', '--bg-elev': '#0e1015', '--panel': '#12141a', '--border': '#22252e', '--text': '#e8eaf0', '--muted': '#737c90', '--accent': '#7c80f2' }
+}
+
+/** A miniature of the app in a colour theme: rail, sidebar with rows, a terminal with output, and a button. */
+function ThemePreview({ theme, on, onPick, appDark }: { theme: AppTheme | null; on: boolean; onPick: () => void; appDark: boolean }): ReactElement {
+  const k: Record<string, string> = theme?.tokens ?? DEFAULT_LOOK[appDark ? 'dark' : 'light']
+  const scheme = theme ? TERMINAL_THEMES.find((x) => x.id === theme.scheme) : undefined
+  const term = scheme?.theme ?? resolveTerminalTheme('auto', appDark)
+  return (
+    <button type="button" role="radio" aria-checked={on} className={`ctheme ${on ? 'on' : ''}`} data-color-theme-option={theme?.id ?? 'default'} title={theme ? theme.name : 'The standard colours, following Auto / Light / Dark'} onClick={onPick}>
+      <span className="ctheme-preview" style={{ background: k['--bg'], borderColor: k['--border'] }}>
+        <span className="ctheme-rail" style={{ background: k['--bg-elev'], borderColor: k['--border'] }}>
+          <i style={{ background: k['--accent'] }} /><i style={{ background: k['--muted'] }} /><i style={{ background: k['--muted'] }} />
+        </span>
+        <span className="ctheme-side" style={{ background: k['--panel'], borderColor: k['--border'] }}>
+          <i style={{ background: k['--text'], width: '70%' }} /><i style={{ background: k['--muted'], width: '50%' }} /><i style={{ background: k['--muted'], width: '62%' }} />
+        </span>
+        <span className="ctheme-main" style={{ background: scheme?.backdrop ?? term.background }}>
+          <i style={{ background: term.green ?? term.foreground, width: '58%' }} /><i style={{ background: term.foreground, width: '40%' }} /><i style={{ background: term.blue ?? term.foreground, width: '48%' }} />
+          <b style={{ background: k['--accent'] }} />
+        </span>
+      </span>
+      <span className="ctheme-name">{theme ? theme.name : 'Default'}</span>
+    </button>
+  )
+}
+
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }): ReactElement {
   return (
     <label className="switch" title={label}>
       <input type="checkbox" role="switch" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch-track"><span className="switch-thumb" /></span>
     </label>
+  )
+}
+
+const PERMISSION_TEXT: Record<VoicePermission, string> = {
+  authorized: 'Allowed',
+  denied: 'Off',
+  restricted: 'Blocked by a policy',
+  notDetermined: 'macOS asks the first time you dictate',
+  unknown: 'Unknown'
+}
+
+function languageName(tag: string): string {
+  try { return new Intl.DisplayNames([navigator.language || 'en'], { type: 'language' }).of(tag) ?? tag } catch { return tag }
+}
+
+/** Settings → Voice: the hold-to-talk key, the language, and what macOS allows, asked of the helper without prompting. */
+function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof Settings>(k: K, v: Settings[K]) => void }): ReactElement {
+  const [st, setSt] = useState<VoiceStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const locale = draft.dictationLocale ?? ''
+  const refresh = (): void => {
+    setError(null)
+    void window.api.invoke('voice:status', { locale }).then(setSt, (e: Error) => setError(e.message))
+  }
+  useEffect(refresh, [locale]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Back from System Settings with the permission changed: show it without reopening the dialog.
+  useEffect(() => {
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }) // eslint-disable-line react-hooks/exhaustive-deps
+  const key = draft.dictationKey ?? 'AltRight'
+  const permission = (p: VoicePermission | undefined, pane: 'microphone' | 'speech'): ReactElement => (
+    <div className="flex items-center gap-2">
+      <span className={`set-status ${!p ? '' : p === 'authorized' ? 'ok' : p === 'notDetermined' ? '' : 'warn'}`}>
+        <span className="dot" />
+        {p ? PERMISSION_TEXT[p] : 'Checking…'}
+      </span>
+      {(p === 'denied' || p === 'restricted') && (
+        <button className="btn btn-sm" onClick={() => void window.api.invoke('voice:openPrivacy', pane).catch((e: Error) => useStore.getState().toast('error', e.message))}>Open Privacy Settings…</button>
+      )}
+    </div>
+  )
+  const systemLocale = st && !locale ? st.locale : ''
+  return (
+    <>
+      <Group>
+        <Row label="Hold to talk" hint={<>Hold the key by itself, speak, and let go to type what you said where the cursor is. Esc cancels. Combinations with the key keep working.</>}>
+          <select className="input w-56" aria-label="Dictation key" value={key} onChange={(e) => upd('dictationKey', e.target.value as DictationKey)}>
+            <option value="AltRight">Right Option (⌥)</option>
+            <option value="MetaRight">Right Command (⌘)</option>
+            <option value="Fn">Fn / Globe (if the keyboard reports it)</option>
+            <option value="off">Off: mic buttons only</option>
+          </select>
+        </Row>
+        <Row label="Language" hint={st?.onDevice ? 'Recognised on this Mac: the audio never leaves it.' : st ? 'Apple’s speech service recognises this language (macOS has no on-device model for it).' : 'What you speak.'}>
+          <select className="input w-56" aria-label="Dictation language" value={locale} onChange={(e) => upd('dictationLocale', e.target.value)}>
+            <option value="">Same as macOS{systemLocale ? ` (${languageName(systemLocale)})` : ''}</option>
+            {(st?.locales ?? []).map((l) => <option key={l} value={l}>{languageName(l)} · {l}</option>)}
+            {locale && !(st?.locales ?? []).includes(locale) && <option value={locale}>{locale}</option>}
+          </select>
+        </Row>
+        <Row label="Mic buttons" hint="In the Notes toolbar, Run Command, SSH tabs and the Terminal: click to talk, click again (or Done) to insert." />
+      </Group>
+      <Group title="Permissions">
+        {(error || (st && !st.available && st.message)) && (
+          <div className="set-row"><div className="set-text"><div className="set-hint" style={{ color: 'var(--warn)' }}>{error ?? st?.message}</div></div></div>
+        )}
+        <Row label="Microphone" hint="Only on while you dictate.">{permission(st?.mic, 'microphone')}</Row>
+        <Row label="Speech recognition" hint="Turns what you say into text.">{permission(st?.speech, 'speech')}</Row>
+      </Group>
+    </>
   )
 }
 
@@ -66,7 +170,10 @@ export default function SettingsDialog(): ReactElement | null {
   const [notesInfo, setNotesInfo] = useState<NotesInfo | null>(null)
   const [about, setAbout] = useState<AppAbout | null>(null)
   const [section, setSection] = useState<SectionId>(() => {
-    try { return (localStorage.getItem(LAST_SECTION) as SectionId) || 'general' } catch { return 'general' }
+    try {
+      const saved = localStorage.getItem(LAST_SECTION) as SectionId | null
+      return saved && SECTIONS.some((x) => x.id === saved) && (saved !== 'voice' || CAN_DICTATE) ? saved : 'general'
+    } catch { return 'general' }
   })
   useEffect(() => { void window.api.invoke('notes:info').then(setNotesInfo, () => undefined) }, [])
   useEffect(() => { void window.api.invoke('app:paths').then(setPaths) }, [])
@@ -105,10 +212,10 @@ export default function SettingsDialog(): ReactElement | null {
   const general = (
     <>
       <Group>
-        <Row label="Appearance" hint="Follows macOS by default.">
+        <Row label="Appearance" hint={draft.colorTheme ? 'A colour theme picks light or dark itself; choose one here to go back to the default colours.' : 'Follows macOS by default.'}>
           <div className="seg w-64">
             {(['system', 'light', 'dark'] as const).map((t) => (
-              <button key={t} className={draft.theme === t ? 'on' : ''} onClick={() => { upd('theme', t); void s.setTheme(t) }}>
+              <button key={t} className={draft.theme === t && !draft.colorTheme ? 'on' : ''} onClick={() => { setDraft((d) => (d ? { ...d, theme: t, colorTheme: '' } : d)); void s.setTheme(t) }}>
                 {t === 'system' ? 'Auto' : t[0].toUpperCase() + t.slice(1)}
               </button>
             ))}
@@ -126,6 +233,18 @@ export default function SettingsDialog(): ReactElement | null {
             <option>iTerm</option>
           </select>
         </Row>
+      </Group>
+      <Group title="Colour theme">
+        <div className="set-row stack">
+          <div className="set-hint !mt-0">Colours for the whole app, from the terminal schemes. Terminals set to “Match app” take the theme’s scheme too.</div>
+          <div className="ctheme-grid" role="radiogroup" aria-label="Colour theme">
+            {[null, ...APP_THEMES].map((th) => {
+              const on = (draft.colorTheme ?? '') === (th?.id ?? '')
+              const pick = (): void => { upd('colorTheme', th?.id ?? ''); void s.setColorTheme(th?.id ?? '') }
+              return <ThemePreview key={th?.id ?? 'default'} theme={th} on={on} onPick={pick} appDark={draft.theme === 'dark' || (draft.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)} />
+            })}
+          </div>
+        </div>
       </Group>
       <Group title="Finding hosts">
         <Row label="Scan every enabled region" hint="Slower. Each account’s own region is always scanned.">
@@ -226,12 +345,13 @@ export default function SettingsDialog(): ReactElement | null {
     </>
   )
 
-  const t = resolveTerminalTheme(draft.terminalTheme, isDarkMode())
+  const scheme = effectiveScheme(draft.terminalTheme, draft.colorTheme)
+  const t = resolveTerminalTheme(scheme, isDarkMode())
   const ansi = [t.black, t.red, t.green, t.yellow, t.blue, t.magenta, t.cyan, t.white].filter(Boolean) as string[]
   const terminal = (
     <>
       <Group title="Appearance">
-        <div className="set-preview" style={{ background: t.background, color: t.foreground, fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE }}>
+        <div className="set-preview" style={{ background: terminalBackdrop(scheme, isDarkMode()), color: t.foreground, fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE }}>
           <div><span style={{ color: t.green ?? t.foreground }}>ec2-user@ip-10-0-2-149</span>:<span style={{ color: t.blue ?? t.foreground }}>~</span>$ ls -la</div>
           <div className="flex gap-1 pt-1.5">{ansi.map((c, i) => <span key={i} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />)}</div>
         </div>
@@ -307,6 +427,9 @@ export default function SettingsDialog(): ReactElement | null {
     </Group>
   )
 
+  const voiceSection = <VoiceSettings draft={draft} upd={upd} />
+
+
   const requirements = (
     <>
       <Group>
@@ -347,6 +470,7 @@ export default function SettingsDialog(): ReactElement | null {
             <li><Icon.check /><span>AWS credentials stay in <span className="mono">~/.aws</span>, exactly where the AWS CLI keeps them.</span></li>
             <li><Icon.check /><span>Saved desktop passwords are encrypted (with the Keychain on a Mac).</span></li>
             <li><Icon.check /><span>A paired phone or tablet sees the screen and sends keystrokes; credentials never leave the computer running the app.</span></li>
+            <li><Icon.check /><span>Dictation listens only while you hold its key or a mic button is on. It is recognised on this Mac when macOS has an on-device model for your language (Settings → Voice says which); otherwise Apple’s speech service processes the audio, as macOS Dictation does. A paired phone can never turn on this Mac’s microphone.</span></li>
           </ul>
         </div>
       </Group>
@@ -361,14 +485,14 @@ export default function SettingsDialog(): ReactElement | null {
     </>
   )
 
-  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, phone, requirements, about: aboutSection }
+  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, voice: voiceSection, phone, requirements, about: aboutSection }
 
   return (
     <Modal title="Settings" onClose={close} width="max-w-[880px]" bare>
       <div className="settings">
         <nav className="settings-nav" aria-label="Settings sections">
           <div className="settings-nav-title">Settings</div>
-          {SECTIONS.map((x) => (
+          {SECTIONS.filter((x) => x.id !== 'voice' || CAN_DICTATE).map((x) => (
             <button key={x.id} type="button" data-section={x.id} className={`settings-nav-item ${section === x.id ? 'on' : ''}`} aria-current={section === x.id ? 'page' : undefined} onClick={() => setSection(x.id)}>
               <x.icon />
               {x.label}

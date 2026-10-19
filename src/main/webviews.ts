@@ -8,7 +8,10 @@ import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, Menu, shell, webContents, type DownloadItem, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
 import { isWebUrl, loginMatches } from '@shared/browser'
+import { isDictationKey } from '@shared/dictation'
 import type { WebDownload } from '@shared/types'
+import { getSettings } from './store'
+import { isDictating } from './voice'
 
 /** Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them). */
 const FORWARDED = new Set(['t', 'w', 'l', 'r', '[', ']', '{', '}', 'f', 'k', 's', 'd', '=', '+', '-', '0', 'n', 'b', 'c'])
@@ -135,6 +138,22 @@ app.on('web-contents-created', (_e, contents) => {
 
   contents.on('before-mouse-event', (_e, mouse) => {
     if (mouse.type === 'mouseDown') host()?.send('web:pointer', { webContentsId: contents.id })
+  })
+  // Hold-to-talk dictation (src/renderer/voice.ts) while a page has the keyboard, which the app's document never sees:
+  // the dictation key going down and up, other keys while it is held (an ⌥ combination, not a hold), and Escape to
+  // cancel a dictation in progress. Sent to the app window only.
+  let dictationHeld = false
+  contents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown' && input.type !== 'keyUp') return
+    const down = input.type === 'keyDown'
+    if (isDictationKey(input, getSettings().dictationKey)) {
+      if (down && (input.isAutoRepeat || dictationHeld)) return
+      dictationHeld = down
+      host()?.send('voice:key', { key: 'dictation', down })
+    } else if (down && input.key === 'Escape' && isDictating()) {
+      e.preventDefault()
+      host()?.send('voice:key', { key: 'escape', down: true })
+    } else if (down && dictationHeld) host()?.send('voice:key', { key: 'other', down: true })
   })
   contents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return

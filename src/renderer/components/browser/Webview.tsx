@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useEffect, useRef } from 'react'
+import { registerDictationTarget } from '../../voice'
 
 /** The parts of Electron's <webview> element the browser uses. */
 export interface WebviewEl extends HTMLElement {
@@ -15,6 +16,8 @@ export interface WebviewEl extends HTMLElement {
   findInPage(text: string, options?: { forward?: boolean; findNext?: boolean }): number
   stopFindInPage(action: 'clearSelection' | 'keepSelection' | 'activateSelection'): void
   setZoomFactor(factor: number): void
+  /** Types text into the page's focused field, as an input method would. */
+  insertText(text: string): Promise<void>
 }
 
 export interface WebviewEvents {
@@ -65,6 +68,8 @@ export default function Webview({ tabId, partition, src, visible, events, regist
     on('did-attach', () => ev.current.onReady(tabId, el))
     on('dom-ready', () => ev.current.onReady(tabId, el))
     host.current!.appendChild(el)
+    // Dictation into whatever field of the page has the keyboard; insertText throws while the page is not ready.
+    registerDictationTarget(el, { label: 'Web page', insert: (text) => { try { void el.insertText(text).catch(() => undefined) } catch { /* not attached yet */ } } })
     register(tabId, el)
     return () => {
       register(tabId, null)

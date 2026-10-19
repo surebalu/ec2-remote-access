@@ -233,6 +233,9 @@ tr.row:hover .row-actions .btn, tr.row.selected .row-actions .btn, tr.row:focus-
 
 .xterm { padding: 8px; height: 100%; }
 .xterm .xterm-viewport { background-color: transparent !important; }
+/* xterm 6 also paints the theme colour on its scroll container; the terminal's own container paints it instead, so a
+   scheme with a gradient (terminalBackdrop) shows through. */
+.xterm .xterm-scrollable-element { background-color: transparent !important; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); border: 2px solid transparent; background-clip: padding-box; }
@@ -1038,7 +1041,7 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .tl-icon.main, .tl-icon.grid { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
 .tl-icon.main > span:first-child { grid-row: span 2; }
 
-.tpane { position: absolute; inset: 0; overflow: hidden; background: var(--term-bg); color: var(--term-fg); }
+.tpane { position: absolute; inset: 0; overflow: hidden; background: var(--term-backdrop, var(--term-bg)); color: var(--term-fg); }
 .tpane.dim::after { content: ''; position: absolute; z-index: 8; inset: 0; background: color-mix(in srgb, var(--term-bg) 38%, transparent); pointer-events: none; }
 .tpane.focused::before { content: ''; position: absolute; z-index: 8; inset: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); pointer-events: none; }
 .tpane-term { position: absolute; inset: 0; }
@@ -1077,15 +1080,6 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .tdock-hint { opacity: .5; font: 10.5px/1.3 -apple-system, system-ui, sans-serif; white-space: nowrap; }
 .tdock-btn { flex-shrink: 0; padding: 4px 9px; border-radius: 6px; background: rgba(248, 81, 73, .18); color: #ff7b72; font: 600 11px/1 -apple-system, system-ui, sans-serif; }
 .tdock-btn:hover { background: rgba(248, 81, 73, .3); }
-.tdock-chips { display: flex; align-items: center; gap: 6px; height: 20px; font: 11px/1 -apple-system, system-ui, sans-serif; }
-.tchip { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; height: 20px; padding: 0 7px; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--term-fg) 9%, transparent); color: color-mix(in srgb, var(--term-fg) 82%, transparent); text-overflow: ellipsis; white-space: nowrap; }
-.tchip svg { width: 11px; height: 11px; flex-shrink: 0; }
-button.tchip:hover { background: color-mix(in srgb, var(--term-fg) 15%, transparent); }
-.tchip.git { color: #d2a8ff; }
-.tchip.aws { color: #f0883e; }
-.tdock-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; border-radius: 5px; color: var(--term-fg); opacity: .6; }
-.tdock-icon:hover { background: color-mix(in srgb, var(--term-fg) 12%, transparent); opacity: 1; }
-.tdock-icon svg { width: 12px; height: 12px; }
 .tdock-edit { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; line-height: 1.5; }
 .tdock-caret { color: #7ee787; font-weight: 700; }
 .tdock-field { position: relative; flex: 1; min-width: 0; min-height: 1.5em; }
@@ -1101,11 +1095,7 @@ button.tchip:hover { background: color-mix(in srgb, var(--term-fg) 15%, transpar
 .tdock-pop-list { overflow-y: auto; padding: 4px; }
 .tdock-pop-item { display: block; width: 100%; padding: 5px 9px; overflow: hidden; border-radius: 6px; color: var(--term-fg); font: 12.5px/1.45 'SF Mono', ui-monospace, Menlo, monospace; text-align: left; text-overflow: ellipsis; white-space: pre; }
 .tdock-pop-item:hover, .tdock-pop-item.on { background: color-mix(in srgb, var(--accent) 26%, transparent); }
-.tdock-pop-item.flow { display: flex; flex-direction: column; }
-.tdock-flow-name { font: 600 12px/1.4 -apple-system, system-ui, sans-serif; }
-.tdock-flow-cmd { opacity: .7; overflow: hidden; text-overflow: ellipsis; }
 .tdock-pop-empty { padding: 10px; opacity: .6; font: 12px/1.4 -apple-system, system-ui, sans-serif; }
-.tdock-link { color: var(--accent); font-size: 11.5px; font-weight: 600; }
 
 /* Whiteboard (components/board) */
 .board { --board-ink: var(--text); --board-paper: var(--bg-elev); --board-dot: color-mix(in srgb, var(--text) 17%, transparent); --board-line: color-mix(in srgb, var(--text) 7%, transparent); --board-glass: color-mix(in srgb, var(--panel) 86%, transparent); position: relative; display: flex; height: 100%; min-height: 0; background: var(--board-paper); }
@@ -1378,3 +1368,174 @@ tr.group-row .group-head:hover .group-run, tr.group-row .group-run:focus-visible
   .rc-foot { flex-wrap: wrap; padding: 10px 14px; }
   .rc-foot > .muted { display: none; }
 }
+
+/* Terminal tabs show the Git branch, as Warp does: under the name in the side list, as a chip in the top bar. */
+.term-tab-sub { display: flex; align-items: center; gap: 4px; }
+.term-tab-branch-icon { flex-shrink: 0; width: 11px; height: 11px; color: var(--accent); }
+.term-tab-branch { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.term-tab-rest { flex-shrink: 0; color: var(--muted); }
+.term-tab-chip { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; max-width: 130px; padding: 1px 6px; overflow: hidden; border-radius: 5px; background: var(--accent-soft); color: var(--text-2); font: 500 10.5px/16px 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.term-tab-chip svg { flex-shrink: 0; width: 10px; height: 10px; color: var(--accent); }
+
+/* Terminal ribbon (components/terminal/Ribbon.tsx): Warp's slim bar along the bottom of each pane, under the input
+   box. The pane is a size container so the foot can repaint the scheme's backdrop (a gradient for Cyber Wave) exactly
+   where it sits, opaque over terminal text when a multi-line command grows the input box. */
+.tpane { --trib-h: 28px; --trib-line: color-mix(in srgb, var(--term-fg) 14%, transparent); --trib-dim: color-mix(in srgb, var(--term-fg) 62%, transparent); container: tpane / size; }
+.tpane-foot { position: absolute; z-index: 4; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; background: var(--term-backdrop, var(--term-bg)); background-position: center bottom; background-repeat: no-repeat; background-size: 100% 100cqh; color: var(--term-fg); }
+.tpane-foot > .tdock, .tpane-foot > .tpane-keys { position: relative; right: auto; bottom: auto; left: auto; }
+.tpane-foot > .tdock { justify-content: center; min-height: 46px; padding: 12px 14px 10px; background: color-mix(in srgb, var(--term-fg) 5%, transparent); }
+.tpane-foot .tdock-caret { color: color-mix(in srgb, #3fb950 80%, var(--term-fg)); }
+/* Phones type at 16px (so iOS does not zoom); the box's height follows. */
+html[data-mobile] .tpane-foot .tdock-edit { font-size: 16px; }
+.tpane-term.with-dock { bottom: 46px; }
+.tpane-term.with-ribbon { bottom: var(--trib-h); }
+.tpane-term.with-dock.with-ribbon, .tpane-term.with-keys.with-ribbon { bottom: calc(46px + var(--trib-h)); }
+
+.tribbon { container: tribbon / inline-size; display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: var(--trib-h); padding: 0 7px 1px; overflow: hidden; background: color-mix(in srgb, var(--term-fg) 5%, transparent); font: 500 11px/1 -apple-system, system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+.tpane-foot > .tribbon:first-child { border-top: 1px solid color-mix(in srgb, var(--term-fg) 11%, transparent); }
+.trib-side { display: flex; flex-shrink: 0; align-items: center; gap: 4px; min-width: 0; }
+.trib-side.right { flex-shrink: 1; justify-content: flex-end; overflow: hidden; }
+.trib-gap { flex: 1 1 0; min-width: 2px; }
+.trib-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--trib-line); border-radius: 6px; color: var(--trib-dim); white-space: nowrap; transition: color .12s var(--ease), background-color .12s var(--ease), border-color .12s var(--ease); }
+.trib-chip svg { width: 12px; height: 12px; flex-shrink: 0; }
+button.trib-chip { cursor: default; }
+button.trib-chip:hover { border-color: color-mix(in srgb, var(--term-fg) 26%, transparent); background: color-mix(in srgb, var(--term-fg) 8%, transparent); color: var(--term-fg); }
+button.trib-chip:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+.trib-chip.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--term-fg); }
+button.trib-chip.on:hover { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.trib-chip.square { justify-content: center; width: 22px; padding: 0; }
+.trib-chip.square svg { width: 13px; height: 13px; }
+.trib-chip.mic.rec { border-color: color-mix(in srgb, #ff453a 60%, transparent); background: color-mix(in srgb, #ff453a 22%, transparent); color: color-mix(in srgb, #ff453a 70%, var(--term-fg)); animation: trib-rec 1.6s var(--ease) infinite; }
+@keyframes trib-rec { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, #ff453a 45%, transparent) } 60% { box-shadow: 0 0 0 4px transparent } }
+.trib-kbd { padding: 2px 3px; border: 0; border-radius: 3px; background: color-mix(in srgb, var(--term-fg) 10%, transparent); color: inherit; font: 600 9.5px/1 -apple-system, system-ui, sans-serif; opacity: .8; }
+.trib-chip.git { gap: 4px; font-variant-numeric: tabular-nums; }
+.trib-pm { font-size: 12px; font-weight: 600; }
+.trib-lines { margin-left: 2px; font: 10.5px/1 'SF Mono', ui-monospace, Menlo, monospace; }
+.trib-add { color: color-mix(in srgb, #3fb950 78%, var(--term-fg)); }
+.trib-del { color: color-mix(in srgb, #f85149 78%, var(--term-fg)); }
+.trib-side.right .trib-chip { flex-shrink: 1; min-width: 0; }
+.trib-chip.folder { flex-shrink: 3; }
+.trib-text { min-width: 0; overflow: hidden; font: 11px/1.2 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; }
+.trib-path-short { display: none; }
+.trib-ab { flex-shrink: 0; font: 10px/1 'SF Mono', ui-monospace, Menlo, monospace; opacity: .8; }
+.trib-chip.aws { color: color-mix(in srgb, #f0883e 75%, var(--term-fg)); }
+/* A narrow pane (a split, the grid, a phone): icons only on the left, the folder's last part on the right. */
+@container tribbon (max-width: 700px) {
+  .trib-label, .trib-kbd, .trib-lines { display: none; }
+  .trib-side:first-child .trib-chip:not(.git) { justify-content: center; width: 22px; padding: 0; }
+}
+@container tribbon (max-width: 430px) {
+  .trib-path-long { display: none; }
+  .trib-path-short { display: inline; }
+  .trib-side.right .trib-chip.aws { flex-shrink: 4; }
+}
+
+/* The ribbon's menus (app colours: they are popovers like every other menu). */
+.trib-pop-head { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px 1px; }
+.trib-pop-title { color: var(--text); font-size: 12.5px; font-weight: 650; }
+.trib-pop-lines { font: 11px/1 'SF Mono', ui-monospace, Menlo, monospace; }
+.trib-pop-lines .add { color: var(--ok); }
+.trib-pop-lines .del { color: var(--err); }
+.trib-pop-sub { padding: 0 12px 4px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.trib-files { max-height: 300px; overflow-y: auto; }
+.trib-file { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.trib-st { flex-shrink: 0; width: 12px; font: 700 11px/1 'SF Mono', ui-monospace, Menlo, monospace; text-align: center; }
+.trib-st.st-m, .trib-st.st-t { color: var(--warn); }
+.trib-st.st-a, .trib-st.st-new { color: var(--ok); }
+.trib-st.st-d, .trib-st.st-u { color: var(--err); }
+.trib-st.st-r, .trib-st.st-c { color: var(--info); }
+.trib-st.staged { text-decoration: underline; text-underline-offset: 2px; }
+.trib-file-path { min-width: 0; overflow: hidden; font: 11.5px/1.3 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item:hover .trib-st { color: inherit; }
+.trib-flow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.trib-flow-name { font-weight: 600; }
+.trib-flow-cmd { overflow: hidden; opacity: .7; font: 11px/1.3 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+/* Fingers on a phone or iPad need bigger chips. */
+html[data-mobile] .tpane { --trib-h: 38px; }
+html[data-mobile] .trib-chip { height: 28px; border-radius: 8px; }
+html[data-mobile] .trib-chip.square { width: 30px; }
+@container tribbon (max-width: 700px) {
+  html[data-mobile] .trib-side:first-child .trib-chip:not(.git) { width: 30px; }
+}
+
+/* ---------- Voice dictation (components/VoiceHud.tsx, MicButton.tsx) ---------- */
+/* A pill above everything at the bottom centre; only its buttons take clicks, so the field being dictated into stays usable. */
+.voice-hud-wrap { position: fixed; z-index: 70; right: 16px; bottom: 26px; left: 16px; display: flex; justify-content: center; pointer-events: none; }
+.voice-hud {
+  --lvl: 0;
+  display: flex; align-items: center; gap: 12px; width: min(720px, 100%); min-height: 62px; padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border); border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 90%, transparent); color: var(--text);
+  box-shadow: var(--shadow-lg), 0 0 0 4px color-mix(in srgb, var(--accent) calc(var(--lvl) * 14%), transparent);
+  backdrop-filter: blur(18px) saturate(1.6); -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  animation: voice-in .22s var(--ease);
+  transition: box-shadow .12s linear;
+}
+.voice-orb {
+  position: relative; display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #22d3ee)); color: var(--on-accent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.voice-orb svg { position: relative; z-index: 1; width: 18px; height: 18px; }
+/* A ring that swells with the voice. */
+.voice-orb::before { content: ''; position: absolute; inset: -5px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 24%, transparent); transform: scale(calc(.8 + var(--lvl) * .45)); transition: transform .1s linear; }
+.voice-hud.starting .voice-orb::before, .voice-hud.finishing .voice-orb::before { animation: voice-breathe 1.1s ease-in-out infinite; }
+.voice-hud.error .voice-orb { background: var(--err); box-shadow: 0 2px 10px color-mix(in srgb, var(--err) 40%, transparent); }
+.voice-hud.error .voice-orb::before { display: none; }
+.voice-wave { display: flex; flex-shrink: 0; align-items: center; gap: 2px; height: 30px; }
+.voice-wave > span { width: 3px; height: 100%; border-radius: 2px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 70%, #22d3ee), var(--accent)); opacity: .9; transform-origin: center; transition: transform .09s linear; }
+.voice-hud.finishing .voice-wave > span { opacity: .4; }
+.voice-main { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+/* At most two lines, showing the newest words (older ones scroll off the top). */
+.voice-text { display: flex; flex-direction: column; justify-content: flex-end; max-height: 2.7em; overflow: hidden; font-size: 14px; font-weight: 520; line-height: 1.35; letter-spacing: -.005em; overflow-wrap: anywhere; }
+.voice-text.placeholder { color: var(--muted); font-weight: 450; }
+.voice-text.error { flex-direction: row; align-items: flex-start; justify-content: flex-start; gap: 6px; max-height: none; color: var(--err); font-size: 13px; font-weight: 500; }
+.voice-text.error svg { margin-top: 2px; }
+/* One line: the chip, where the words go (shortened first when space runs out), then how to finish. */
+.voice-meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.3; white-space: nowrap; }
+.voice-hint { flex-shrink: 0; }
+.voice-hint::before { content: '·'; margin-right: 8px; opacity: .6; }
+.voice-chip { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--info-soft); color: var(--info); font-weight: 600; }
+.voice-chip.local { background: var(--ok-soft); color: var(--ok); }
+.voice-chip svg { width: 11px; height: 11px; }
+.voice-into { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.voice-into b { color: var(--text-2); font-weight: 600; }
+.voice-btn { pointer-events: auto; display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; height: 30px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); color: var(--text-2); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .12s var(--ease), color .12s var(--ease); }
+.voice-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--text); }
+.voice-btn.close { width: 30px; padding: 0; }
+.voice-btn.done { padding: 0 14px; border-color: transparent; background: var(--accent); color: var(--on-accent); box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 35%, transparent); }
+.voice-btn.done:hover:not(:disabled) { background: var(--accent-2); color: var(--on-accent); }
+.voice-btn:disabled { opacity: .55; cursor: default; }
+@keyframes voice-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes voice-breathe { 0%, 100% { transform: scale(.85); opacity: .7; } 50% { transform: scale(1.12); opacity: 1; } }
+@media (max-width: 560px) { .voice-wave { display: none; } }
+/* A mic button while it is listening. */
+.mic-btn.on { position: relative; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.mic-btn.on::after { content: ''; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--err); animation: voice-breathe 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .voice-hud, .voice-orb::before, .voice-wave > span, .mic-btn.on::after { animation: none !important; transition: none !important; } }
+
+/* ---------- Colour themes (renderer/appThemes.ts paints the tokens on <html>) ---------- */
+.btn-primary, .bt-btn.on, .welcome-action.primary { color: var(--on-accent, #fff); }
+.app-rail { background: var(--rail-backdrop, var(--bg-elev)); }
+.sidebar, .term-side, .board-side { background: var(--panel-backdrop, var(--panel)); }
+.rail-swatch { position: absolute; right: 4px; bottom: 2px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg-elev); }
+.theme-menu-list { max-height: min(340px, 50vh); overflow-y: auto; }
+.theme-menu-item { display: inline-flex; align-items: center; gap: 9px; }
+.theme-dot { display: inline-block; flex-shrink: 0; width: 14px; height: 14px; border: 1px solid; border-radius: 50%; }
+.ctheme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 10px; }
+.ctheme { display: flex; flex-direction: column; gap: 6px; padding: 5px 5px 7px; border: 1px solid transparent; border-radius: 11px; text-align: left; transition: border-color .12s, background .12s; }
+.ctheme:hover { background: var(--panel-2); }
+.ctheme.on { border-color: var(--accent); background: var(--accent-soft); }
+.ctheme-preview { display: flex; height: 64px; overflow: hidden; border: 1px solid; border-radius: 8px; box-shadow: var(--shadow); }
+.ctheme-rail { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 13px; padding-top: 7px; border-right: 1px solid; }
+.ctheme-rail i { display: block; width: 6px; height: 6px; border-radius: 2px; }
+.ctheme-side { display: flex; flex-direction: column; gap: 5px; width: 34px; padding: 8px 5px; border-right: 1px solid; }
+.ctheme-side i, .ctheme-main i { display: block; height: 3px; border-radius: 2px; }
+.ctheme-side i:not(:first-child) { opacity: .7; }
+.ctheme-main { position: relative; display: flex; flex: 1; flex-direction: column; gap: 5px; padding: 9px 7px; }
+.ctheme-main b { position: absolute; right: 6px; bottom: 6px; width: 18px; height: 8px; border-radius: 3px; }
+.ctheme-name { padding: 0 3px; overflow: hidden; font-size: 11.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.m-themes { display: flex; gap: 8px; margin-top: 10px; padding-bottom: 2px; overflow-x: auto; scrollbar-width: none; }
+.m-themes::-webkit-scrollbar { display: none; }
+.m-themes button { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; height: 34px; padding: 0 12px 0 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text-2); font-size: 13px; }
+.m-themes button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); font-weight: 600; }

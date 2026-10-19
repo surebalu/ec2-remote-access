@@ -114,3 +114,15 @@ export function suggestFromHistory(history: string[], typed: string): string | n
   }
   return null
 }
+
+/**
+ * A folder for a narrow chip, as Warp's bottom bar shows it: tildified, and past `keep` parts only the last ones
+ * after "…/" ("…/codebase/Mainspring/remote-access-tool").
+ */
+export function shortPath(path: string, home: string | undefined, keep = 3): string {
+  const t = tildify(path, home)
+  const parts = t.split('/').filter(Boolean)
+  const lead = t.startsWith('~') ? 1 : 0
+  if (parts.length - lead <= keep) return t
+  return `…/${parts.slice(-keep).join('/')}`
+}

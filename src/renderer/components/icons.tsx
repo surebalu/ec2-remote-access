@@ -264,6 +264,13 @@ export const Icon = {
       <path d="M14 3v5h5M9 12h7M9 16h5" />
     </svg>
   ),
+  /** Painter's palette: colour themes. */
+  palette: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.7 1.8-1.7H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z" />
+      <circle cx="7.5" cy="11" r="1" fill="currentColor" /><circle cx="10" cy="7.3" r="1" fill="currentColor" /><circle cx="14.5" cy="7.3" r="1" fill="currentColor" /><circle cx="17" cy="11" r="1" fill="currentColor" />
+    </svg>
+  ),
   /** Phone with a tablet behind it: paired devices. */
   phone: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
@@ -318,6 +325,13 @@ export const Icon = {
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
     </svg>
   ),
+  /** Voice dictation (mic buttons, Settings → Voice). */
+  mic: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6" />
+    </svg>
+  ),
   arrowUp: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M12 19V5M6 11l6-6 6 6" />
@@ -349,6 +363,26 @@ export const Icon = {
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="M15 5v14" />
       {p.filled && <rect x="15" y="5" width="6" height="14" rx="1" fill="currentColor" stroke="none" />}
+    </svg>
+  ),
+  /** Finder's face: show a folder in Finder. */
+  finder: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="16" rx="3.5" />
+      <path d="M12.6 4c-1.3 3-1.8 6-1.5 9h1.6c-.2 2.4 0 4.7.5 7M8 9v1.5M16 9v1.5M7.5 15.3c2.9 1.6 6.1 1.6 9 0" />
+    </svg>
+  ),
+  /** A text box with a cursor: the terminal's input box (rich input). */
+  textInput: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="6" width="18" height="12" rx="2.5" />
+      <path d="M7.5 9.5v5M11 12h6" />
+    </svg>
+  ),
+  /** A clock turning back: command history. */
+  history: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4h4M12 8v4.2l2.8 1.8" />
     </svg>
   )
 }

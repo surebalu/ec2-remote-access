@@ -12,6 +12,7 @@ import KeyBar from './mobile/KeyBar'
 import type { StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
 import { PasteSheet } from './mobile/ClipboardSheets'
+import { registerDictationTarget } from '../voice'
 
 type IronElement = HTMLElement & { module?: unknown }
 
@@ -227,6 +228,9 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
    * scale changes only when the user flips Retina.
    */
   const sessionScale = useRef<number | null>(null)
+
+  // Dictation types the finished words on the desktop as Unicode keys, the way the phone's paste does.
+  useEffect(() => registerDictationTarget(hostRef.current!, { label: 'Remote desktop', insert: (text) => input.current.text(text) }), [])
 
   const tiledRef = useRef(tiled)
   tiledRef.current = tiled

@@ -45,6 +45,7 @@ export const defaultSettings: Settings = {
   phoneAccessBind: 'tailscale',
   phoneTerminals: false,
   menuBarIcon: true,
+  colorTheme: '',
   notesFont: 'Monaco',
   notesFontSize: 14,
   sshAgentSock: existsSync(onePasswordSock) ? onePasswordSock : (process.env.SSH_AUTH_SOCK ?? ''),
@@ -60,7 +61,9 @@ export const defaultSettings: Settings = {
   portForwards: [],
   workspaces: [],
   sessionLogging: false,
-  sessionLogDir: ''
+  sessionLogDir: '',
+  dictationKey: 'AltRight',
+  dictationLocale: ''
 }
 
 interface Schema {

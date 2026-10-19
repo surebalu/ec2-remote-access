@@ -2,7 +2,8 @@ import { useState, type ReactElement, type ReactNode } from 'react'
 import { isSession, useStore, type Tab } from '../store'
 import { hasBrowser } from '../quickConnect'
 import { Icon } from './icons'
-import Popover, { MenuItem } from './Popover'
+import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
+import { APP_THEMES, findAppTheme } from '../appThemes'
 
 type ToolKind = 'local' | 'browser' | 'notes' | 'board'
 
@@ -19,6 +20,8 @@ export default function AppRail(): ReactElement {
   const gridView = useStore((s) => s.gridView)
   const gridHost = useStore((s) => s.gridHost)
   const theme = useStore((s) => s.settings?.theme ?? 'system')
+  const colorTheme = useStore((s) => s.settings?.colorTheme ?? '')
+  const [themeMenu, setThemeMenu] = useState<HTMLElement | null>(null)
   const [menu, setMenu] = useState<{ kind: ToolKind; anchor: HTMLElement } | null>(null)
   const st = useStore.getState
 
@@ -67,11 +70,9 @@ export default function AppRail(): ReactElement {
     })
   }
 
-  const themeIcon = theme === 'light' ? <Icon.sun /> : theme === 'dark' ? <Icon.moon /> : <Icon.auto />
-  const nextTheme = (): void => {
-    const order = ['system', 'light', 'dark'] as const
-    void st().setTheme(order[(order.indexOf(theme) + 1) % order.length])
-  }
+  const colored = findAppTheme(colorTheme)
+  const themeIcon = colored ? <Icon.palette /> : theme === 'light' ? <Icon.sun /> : theme === 'dark' ? <Icon.moon /> : <Icon.auto />
+  const themeLabel = colored ? 'Theme' : theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark'
 
   return (
     <nav className="app-rail" aria-label="App sections">
@@ -93,8 +94,46 @@ export default function AppRail(): ReactElement {
       {tool('board', <Icon.board />, 'Whiteboard: a scratch pad for brainstorming')}
       <span className="rail-spacer" />
       {item({ label: 'Shortcuts', icon: <Icon.keyboard />, on: false, title: 'Keyboard shortcuts (⌘/)', onClick: () => st().set({ shortcutsOpen: true }) })}
-      {item({ label: theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark', icon: themeIcon, on: false, aria: 'Theme', title: `Appearance: ${theme === 'system' ? 'follows macOS' : theme} (click to switch)`, onClick: nextTheme })}
+      <button
+        type="button"
+        className="rail-item no-drag"
+        title={colored ? `Colour theme: ${colored.name}` : `Appearance: ${theme === 'system' ? 'follows macOS' : theme}`}
+        aria-label="Theme"
+        aria-haspopup="menu"
+        aria-expanded={!!themeMenu}
+        onClick={(e) => setThemeMenu(themeMenu ? null : e.currentTarget)}
+      >
+        <span className="rail-icon">
+          {themeIcon}
+          {colored && <span className="rail-swatch" style={{ background: colored.accent }} aria-hidden="true" />}
+        </span>
+        <span className="rail-label">{themeLabel}</span>
+      </button>
       {item({ label: 'Settings', icon: <Icon.settings />, on: false, title: 'Settings (⌘,)', onClick: () => st().set({ settingsOpen: true }) })}
+      {themeMenu && (
+        <Popover anchor={themeMenu} width={236} onClose={() => setThemeMenu(null)}>
+          <MenuLabel>Appearance</MenuLabel>
+          {(['system', 'light', 'dark'] as const).map((t) => (
+            <MenuItem key={t} on={!colored && theme === t} onClick={() => { setThemeMenu(null); void st().setTheme(t) }}>
+              {t === 'system' ? 'Auto (follows macOS)' : t === 'light' ? 'Light' : 'Dark'}
+            </MenuItem>
+          ))}
+          <MenuSep />
+          <MenuLabel>Colour themes</MenuLabel>
+          <div className="theme-menu-list">
+            {APP_THEMES.map((t) => (
+              <MenuItem key={t.id} on={colorTheme === t.id} onClick={() => { setThemeMenu(null); void st().setColorTheme(t.id) }}>
+                <span className="theme-menu-item">
+                  <span className="theme-dot" style={{ background: `linear-gradient(135deg, ${t.tokens['--bg-elev']} 0 52%, ${t.accent} 52% 100%)`, borderColor: t.tokens['--border'] }} />
+                  {t.name}
+                </span>
+              </MenuItem>
+            ))}
+          </div>
+          <MenuSep />
+          <MenuItem onClick={() => { setThemeMenu(null); try { localStorage.setItem('ui.settingsSection', 'general') } catch { /* storage off */ } st().set({ settingsOpen: true }) }}>Preview themes in Settings…</MenuItem>
+        </Popover>
+      )}
       {menu && (
         <Popover anchor={menu.anchor} width={190} onClose={() => setMenu(null)}>
           <MenuItem onClick={() => { setMenu(null); open(menu.kind) }}>Show {TOOL_NAMES[menu.kind]}</MenuItem>

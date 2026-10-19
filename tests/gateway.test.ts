@@ -149,7 +149,27 @@ test('gateway host seals and opens credentials with its key file, rejecting fore
   assert.throws(() => host.decrypt(Buffer.from('v10not-electron-safeStorage')), /Not a gateway-encrypted/)
   assert.equal(await host.pickPaths({ title: 't', kind: 'file' }), null)
   assert.equal(await host.askQuestion({ title: 't', message: 'm', buttons: ['Keep both', 'Replace'], defaultId: 0 }), 0)
+  assert.equal(host.voice, null, 'no microphone or speech recognizer on the gateway')
   await rm(dir, { recursive: true, force: true })
+})
+
+test('a paired page can neither dictate with the computer’s microphone nor receive its transcripts', async () => {
+  let started = false
+  const { gw, port } = await start({ 'voice:start': async () => { started = true; return { id: 'v1' } }, 'voice:status': async () => ({ available: true }) })
+  const c = await client(port, 'secret')
+  assert.equal((await c.next()).t, 'hello')
+  for (const channel of ['voice:status', 'voice:start', 'voice:stop', 'voice:cancel', 'voice:openPrivacy']) {
+    const r = await c.call(channel, 'v1')
+    assert.equal(r.t, 'error', channel)
+    assert.match(r.message ?? '', /Dictation runs in the Mac app; on iPhone or iPad use the keyboard’s microphone key/)
+  }
+  assert.equal(started, false)
+  gw.broadcast('voice:event', { id: 'v1', kind: 'final', text: 'words said at the Mac' })
+  gw.broadcast('voice:key', { key: 'dictation', down: true })
+  gw.broadcast('tunnels:changed', [])
+  assert.equal((await c.next()).channel, 'tunnels:changed', 'only the public event arrives')
+  c.ws.close()
+  await gw.close()
 })
 
 test('a page that reconnects within the grace period keeps its sessions', async () => {
@@ -194,7 +214,7 @@ test('a paired page can neither open a shell on this computer nor see one, nor f
   const { gw, port } = await start({ 'term:open': async () => { opened = true; return {} }, 'browser:fill': async () => ['password'] })
   const c = await client(port, 'secret')
   assert.equal((await c.next()).t, 'hello')
-  for (const channel of ['term:open', 'term:write', 'browser:fill', 'browser:logins', 'browser:openDownload']) {
+  for (const channel of ['term:open', 'term:write', 'term:git', 'browser:fill', 'browser:logins', 'browser:openDownload']) {
     const r = await c.call(channel, { id: 'x', cols: 80, rows: 24 })
     assert.equal(r.t, 'error', channel)
     assert.match(r.message ?? '', /only available in the Mac app|Terminals from paired devices are off/)

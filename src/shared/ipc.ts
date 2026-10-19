@@ -4,7 +4,8 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState } from './types'
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
+import type { GitStatus } from './gitStatus'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -124,6 +125,8 @@ export interface IpcApi {
   'term:history': () => Promise<string[]>
   'term:loadState': () => Promise<TerminalState | null>
   'term:saveState': (state: TerminalState) => Promise<void>
+  /** Git status of a terminal's folder for its ribbon (branch, changed files, lines); null outside a repository. */
+  'term:git': (cwd: string) => Promise<GitStatus | null>
   /** Opens a downloaded file, shows it in Finder, or opens the Downloads folder (no path). Only inside Downloads. */
   'browser:openDownload': (path: string | null, how: 'open' | 'reveal') => Promise<void>
   'browser:cancelDownload': (id: string) => Promise<void>
@@ -155,6 +158,19 @@ export interface IpcApi {
   'phone:terminals': (allow: boolean) => Promise<PhoneAccessStatus>
   'phone:configure': (patch: Partial<Pick<Settings, 'phoneAccessEnabled' | 'phoneAccessPort' | 'phoneAccessBind'>>) => Promise<PhoneAccessStatus>
   'phone:rotateToken': () => Promise<PhoneAccessStatus>
+  /** Voice dictation (Mac app only; the gateway refuses voice:*). What can run and what macOS allows, without asking. */
+  'voice:status': (opts?: { locale?: string }) => Promise<VoiceStatus>
+  /**
+   * Starts listening (asking for the microphone first, on this real user action). Transcripts arrive as voice:event
+   * for the returned id; the renderer may choose the id so it knows it before the first event. One at a time.
+   */
+  'voice:start': (opts?: { id?: string; locale?: string }) => Promise<{ id: string }>
+  /** Stops listening; the final text follows as a voice:event. */
+  'voice:stop': (id: string) => Promise<void>
+  /** Stops without a final text. */
+  'voice:cancel': (id: string) => Promise<void>
+  /** Opens System Settings at Privacy & Security → Microphone or Speech Recognition. */
+  'voice:openPrivacy': (pane: 'microphone' | 'speech') => Promise<void>
   /** Tail of main.log for "Copy diagnostics"; `filter` is a case-insensitive regular expression. */
   'diag:log': (opts?: { lines?: number; filter?: string }) => Promise<{ path: string | null; text: string }>
 }
@@ -182,6 +198,13 @@ export interface IpcEvents {
   'term:event': LocalTermEvent
   /** A download started, progressed or finished (main/webviews.ts). */
   'web:download': WebDownload
+  /** Dictation transcripts and levels; sent to this computer's own windows only, never to paired devices. */
+  'voice:event': VoiceEvent
+  /**
+   * The dictation key while a browser page has the keyboard (pages swallow keys before the app sees them): the key
+   * itself going down or up, another key pressed while it is held, or Escape during a dictation.
+   */
+  'voice:key': { key: 'dictation' | 'other' | 'escape'; down: boolean }
 }
 
 export type IpcChannel = keyof IpcApi

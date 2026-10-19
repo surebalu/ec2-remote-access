@@ -6,7 +6,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import type { DetachedShell, HostShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
-import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { effectiveScheme } from '../appThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
 import HostActions, { openHostNote } from './HostActions'
 import TerminalAppearancePane from './TerminalAppearancePane'
@@ -18,6 +19,8 @@ import { applyStickyMods, keySequence, type StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
 import { CopySheet, PasteSheet } from './mobile/ClipboardSheets'
 import { DetachedShells, NameBar, ShellList } from './Shells'
+import { registerDictationTarget, xtermTarget } from '../voice'
+import MicButton from './MicButton'
 
 /** Sends keystrokes to this session, or to every connected SSH pane of the split while broadcasting. */
 function writeInput(fromId: string, data: string): void {
@@ -104,7 +107,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const [shellSheet, setShellSheet] = useState(false)
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
-  const themeId = useStore((s) => s.settings?.terminalTheme)
+  // "Match app" follows the app's colour theme when one is chosen.
+  const themeId = useStore((s) => effectiveScheme(s.settings?.terminalTheme, s.settings?.colorTheme))
   const font = useStore((s) => s.settings?.terminalFont)
   const mobile = isMobile()
   const keyboardOpen = useKeyboardOpen()
@@ -131,7 +135,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const terminalsInSplit = useStore((s) => s.splitGroup.filter((id) => s.tabs.some((t) => t.id === id && t.kind === 'ssh')).length)
   const canBroadcast = inSplit && terminalsInSplit > 1
   const theme = resolveTerminalTheme(themeId, isDarkMode())
-  const background = theme.background ?? (isDarkMode() ? '#0f1115' : '#ffffff')
+  const background = terminalBackdrop(themeId, isDarkMode())
   const snippets = snippetsFor(tab.instanceKey, allSnippets)
 
   useEffect(() => {
@@ -150,6 +154,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     term.loadAddon(search)
     term.loadAddon(new WebLinksAddon())
     term.open(el)
+    registerDictationTarget(el, xtermTarget(term))
     // App shortcuts (⌘K, ⌘W, ⌘1…) belong to the UI, not the remote shell.
     term.attachCustomKeyEventHandler((e) => !isAppShortcut(e))
     fit.fit()
@@ -555,6 +560,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           <Icon.noteAdd />
         </button>
         <span className="tool-sep" />
+        {!disconnected && <MicButton target={() => ref.current} />}
         <button className={`btn btn-ghost btn-sm btn-icon ${findOpen ? 'on' : ''}`} title="Find in terminal (⌘F)" onClick={() => (findOpen ? closeFind() : onFindShortcut())}>
           <Icon.search />
         </button>

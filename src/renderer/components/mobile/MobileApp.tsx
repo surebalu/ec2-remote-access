@@ -6,6 +6,7 @@ import { metaFor, initials } from '../../colors'
 import { SessionPanes } from '../TerminalTabs'
 import AuthBanner from '../AuthBanner'
 import { Icon } from '../icons'
+import { APP_THEMES } from '../../appThemes'
 import MobileHosts from './MobileHosts'
 import Sheet, { SheetItem } from './Sheet'
 
@@ -253,8 +254,16 @@ function MobileMore(): ReactElement {
       <h3 className="m-group-title">Appearance</h3>
       <div className="m-segment" role="radiogroup" aria-label="Theme">
         {(['system', 'light', 'dark'] as const).map((t) => (
-          <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => void s.setTheme(t)}>
+          <button key={t} role="radio" aria-checked={theme === t && !s.settings?.colorTheme} className={theme === t && !s.settings?.colorTheme ? 'on' : ''} onClick={() => void s.setTheme(t)}>
             {t === 'system' ? 'Auto' : t === 'light' ? 'Light' : 'Dark'}
+          </button>
+        ))}
+      </div>
+      <div className="m-themes" role="radiogroup" aria-label="Colour theme">
+        {APP_THEMES.map((t) => (
+          <button key={t.id} role="radio" aria-checked={s.settings?.colorTheme === t.id} className={s.settings?.colorTheme === t.id ? 'on' : ''} onClick={() => void s.setColorTheme(t.id)}>
+            <span className="theme-dot" style={{ background: `linear-gradient(135deg, ${t.tokens['--bg-elev']} 0 52%, ${t.accent} 52% 100%)`, borderColor: t.tokens['--border'] }} />
+            {t.name}
           </button>
         ))}
       </div>

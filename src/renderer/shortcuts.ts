@@ -93,6 +93,15 @@ export const WHITEBOARD_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘+ / ⌘− / ⌘0', label: 'Zoom in / out / fit everything (or pinch and scroll)' }
 ]
 
+/** Voice dictation (voice.ts), anywhere you type; `keyLabel` is the hold key from Settings → Voice ('' when it is off). */
+export function dictationShortcuts(keyLabel: string): ShortcutInfo[] {
+  return [
+    ...(keyLabel ? [{ keys: `Hold ${keyLabel}`, label: 'Dictate: speak, then let go to type it where the cursor is' }] : []),
+    { keys: 'Esc', label: 'Cancel the dictation; nothing is typed' },
+    { keys: 'Mic button', label: 'Talk without holding a key: click again, or Done, to insert (Notes, Run Command, SSH and Terminal toolbars)' }
+  ]
+}
+
 export interface TabKey {
   /** Lower-cased KeyboardEvent.key ('t', '[', 'arrowdown', 'tab'). */
   key: string

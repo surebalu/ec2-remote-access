@@ -78,6 +78,10 @@ const runState = (r) => {
     : { ...t, status: 'failed', exitCode: 1, stderr: 'df: /data: No such file or directory\n', startedAt: r.startedAt, endedAt: r.startedAt + 900 }))
   return { ...r, targets, finishedAt: done ? r.startedAt + 900 : undefined }
 }
+// Dictations the fixture "helper" is running; events go to the window that started them, as main sends them.
+const voiceRuns = []
+let voiceRefusal = null
+const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !run.sender.isDestroyed()) run.sender.send('voice:event', { id: run.id, ...ev }) }
 // Whiteboards main has saved (boards:*), and the images added to notes.
 const boardsSaved = {}
 const noteImages = []
@@ -169,6 +173,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'term:saveState': termSaved = args[0]; return
     case 'term:resize': return
     case 'term:close': shells.delete(args[0]); return
+    case 'term:git': return {
+      branch: 'main', detached: false, upstream: 'origin/main', ahead: 1, behind: 0, changed: 6, insertions: 31, deletions: 8,
+      files: [{ path: 'src/app.ts', status: 'M', staged: false }, { path: 'notes/todo.md', status: '?', staged: false }]
+    }
     case 'term:open': {
       const sh = { id: args[0].id, cwd: args[0].cwd || '/Users/fixture/proj', env: args[0].env, sender: _e.sender, line: '' }
       shells.set(sh.id, sh)
@@ -192,6 +200,30 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'ssh:switchShell': return { name: args[1] ?? 'ec2ra-new', label: args[2]?.label ?? (args[1] === 'ec2ra-old1' ? 'debug' : '') }
     case 'ssh:renameShell': return String(args[2]).trim()
     case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
+    // Dictation: a scripted "helper" that hears "connect to web prod one" (no microphone, no permission prompts).
+    case 'voice:status': return { available: true, helper: true, mic: 'authorized', speech: 'notDetermined', onDevice: true, locale: 'en-US', supported: true, locales: ['en-GB', 'en-US', 'fr-FR'] }
+    case 'voice:start': {
+      if (voiceRefusal) throw new Error(voiceRefusal)
+      const run ={ id: args[0]?.id ?? `v${voiceRuns.length + 1}`, sender: _e.sender, stopped: false, cancelled: false, timers: [] }
+      voiceRuns.push(run)
+      const at = (ms, ev) => run.timers.push(setTimeout(() => voiceSend(run, ev), ms))
+      at(20, { kind: 'ready', onDevice: true })
+      ;[0.18, 0.42, 0.75, 0.58, 0.9, 0.66, 0.35, 0.8, 0.52, 0.28, 0.7, 0.95, 0.6, 0.4, 0.22, 0.55, 0.85, 0.47, 0.3, 0.68, 0.5, 0.78, 0.36, 0.6].forEach((level, i) => at(30 + i * 12, { kind: 'level', level }))
+      at(120, { kind: 'partial', text: 'connect to web' })
+      at(260, { kind: 'partial', text: 'connect to web prod' })
+      return { id: run.id }
+    }
+    case 'voice:stop': {
+      const run = voiceRuns.find((r) => r.id === args[0])
+      if (run && !run.stopped) { run.stopped = true; setTimeout(() => { voiceSend(run, { kind: 'final', text: 'connect to web prod one' }); voiceSend(run, { kind: 'end' }) }, 40) }
+      return
+    }
+    case 'voice:cancel': {
+      const run = voiceRuns.find((r) => r.id === args[0])
+      if (run) { run.timers.forEach(clearTimeout); setTimeout(() => voiceSend(run, { kind: 'end' }), 10); run.cancelled = true }
+      return
+    }
+    case 'voice:openPrivacy': return
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
 })
@@ -518,6 +550,15 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.settings-nav [data-section="general"]').click()`)
     await until(`!!document.querySelector('.settings-body [role="switch"]')`)
     await screenshot('settings-general.png')
+    // A colour theme from its card repaints the app at once; Default takes the stylesheet's colours back.
+    await js(`document.querySelector('[data-color-theme-option="tokyo-night"]').click()`)
+    await until(`document.documentElement.dataset.colorTheme === 'tokyo-night' && document.documentElement.style.getPropertyValue('--bg') !== '' && document.querySelector('[data-color-theme-option="tokyo-night"]').getAttribute('aria-checked') === 'true'`)
+    assert.equal(settings.colorTheme, 'tokyo-night')
+    await new Promise((r) => setTimeout(r, 600)) // let the colour transitions finish
+    await screenshot('settings-theme-tokyo-night.png')
+    assert.equal(await js(`getComputedStyle([...document.querySelectorAll('.settings-foot .btn')].find((b) => b.textContent === 'Cancel')).backgroundColor`), await js(`getComputedStyle(document.querySelector('.set-card')).backgroundColor`), 'buttons take the theme panel colour')
+    await js(`document.querySelector('[data-color-theme-option="default"]').click()`)
+    await until(`!document.documentElement.dataset.colorTheme && document.documentElement.style.getPropertyValue('--bg') === ''`)
     await js(`document.querySelector('.settings-nav [data-section="phone"]').click()`)
     await until(`document.body.textContent.includes('Let my phone use this app')`)
     await until(`!!document.querySelector('img[alt="QR code for the phone link"]')`)
@@ -1139,7 +1180,83 @@ app.whenReady().then(async () => {
     await tkey('`', { ctrlKey: true, code: 'Backquote' })
     await tuntil(`document.querySelectorAll('.term-tab').length === 1 && !!document.querySelector('.tdock textarea')`, '⌃` opens the Terminal with the input box')
     assert.equal(await tjs(`!!document.querySelector('.term-side .term-tab')`), true, 'tabs are down the side by default')
-    await tuntil(`document.querySelector('.tdock-chips')?.textContent.includes('~/proj') && document.querySelector('.tchip.git')?.textContent === 'main'`, 'folder and branch chips')
+    await tuntil(`document.querySelector('.term-side .term-tab.on .term-tab-branch')?.textContent === 'main'`, 'the side list shows the tab\'s Git branch, as in Warp')
+    // The ribbon along the bottom of the pane, as in Warp: Git changes, workflows, Finder, the input-box switch, the
+    // folder and the branch. With the whole width it has its labels and does not overflow.
+    const ribbon = `document.querySelector('.term-slot:not([style*="none"]) .tribbon')`
+    await tuntil(`${ribbon}?.querySelector('.trib-chip.folder')?.textContent.includes('~/proj') && ${ribbon}.querySelector('.trib-chip.branch .trib-text')?.textContent === 'main'`, 'ribbon: folder and branch chips')
+    await tuntil(`${ribbon}.querySelector('.trib-count')?.textContent === '6'`, 'ribbon: the Git changes')
+    assert.equal(await tjs(`${ribbon}.querySelector('.trib-pm').textContent + ' ' + ${ribbon}.querySelector('.trib-count').textContent + ' ' + ${ribbon}.querySelector('.trib-add').textContent + ' ' + ${ribbon}.querySelector('.trib-del').textContent`), '± 6 +31 −8')
+    assert.ok(calls.some((c) => c.channel === 'term:git' && c.args[0] === '/Users/fixture/proj'), 'Git status of the pane\'s folder')
+    assert.equal(await tjs(`(() => { const r = ${ribbon}; return r.scrollWidth <= r.clientWidth && getComputedStyle(r.querySelector('.trib-label')).display !== 'none' && r.getBoundingClientRect().bottom === r.closest('.tpane').getBoundingClientRect().bottom })()`), true, 'a wide ribbon: labels, no overflow, at the very bottom')
+    assert.equal(await tjs(`${ribbon}.querySelector('.trib-chip.rich').getAttribute('aria-pressed')`), 'true', 'Rich input shows on')
+    await tshot('terminal-ribbon.png')
+    // The Git chip lists the changed files with their status letters.
+    await tjs(`${ribbon}.querySelector('.trib-chip.git').click()`)
+    await tuntil(`document.querySelectorAll('.popover .trib-file').length === 2`, 'ribbon: changed files listed')
+    assert.deepEqual(await tjs(`[...document.querySelectorAll('.popover .trib-file')].map((f) => f.querySelector('.trib-st').textContent + ' ' + f.querySelector('.trib-file-path').textContent)`), ['M src/app.ts', '? notes/todo.md'])
+    assert.match(await tjs(`document.querySelector('.popover .trib-pop-head').textContent`), /6 changed files.*\+31.*−8/)
+    await tshot('terminal-ribbon-git.png')
+    await tkey('Escape')
+    await tuntil(`!document.querySelector('.popover')`)
+    // ⌃G at the prompt: from the input box to typing straight into the shell, and back from the shell (never sent to it).
+    const writesBeforeG = termWrites().length
+    await pressIn('g', { ctrlKey: true })
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock') && ${ribbon}.querySelector('.trib-chip.rich').getAttribute('aria-pressed') === 'false'`, '⌃G: straight into the shell')
+    await tshot('terminal-ribbon-shell.png')
+    await tjs(`document.querySelector('.term-slot:not([style*="none"]) .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', ctrlKey: true, bubbles: true, cancelable: true }))`)
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea') && ${ribbon}.querySelector('.trib-chip.rich').getAttribute('aria-pressed') === 'true'`, '⌃G in the shell brings the input box back')
+    assert.ok(!termWrites().slice(writesBeforeG).some((d) => d.includes('\x07')), '⌃G at the prompt is not sent to the shell')
+    // The Rich input chip does the same.
+    await tjs(`${ribbon}.querySelector('.trib-chip.rich').click()`)
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock')`, 'Rich input off')
+    await tjs(`${ribbon}.querySelector('.trib-chip.rich').click()`)
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'Rich input on')
+    // History: the ribbon opens the input box's history search.
+    await tjs(`[...${ribbon}.querySelectorAll('.trib-chip')].find((b) => b.getAttribute('aria-label') === 'History').click()`)
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock-pop input[aria-label="Search command history"]')`, 'ribbon: history search')
+    await tjs(`document.querySelector('.term-slot:not([style*="none"]) .tdock-pop input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock-pop')`)
+    // The mic hands this pane to dictation (voice.ts): pressed while it listens, the words appear live in the input
+    // box, and a second click finishes. (The fixture's "helper" hears "connect to web prod one".)
+    const dock = `document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`
+    await tjs(`window.__dictate = []; window.addEventListener('ec2ra:dictate', (e) => window.__dictate.push(e.detail)); 0`)
+    await tjs(`${ribbon}.querySelector('.trib-chip.mic').click()`)
+    assert.deepEqual(await tjs(`window.__dictate.map((d) => [d.action, !!d.target?.classList.contains('tpane')])`), [['toggle', true]])
+    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'true' && !!document.querySelector('.voice-hud')`, 'mic pressed while dictating')
+    await tuntil(`${dock}?.value.includes('onnect to web prod')`, 'live words in the input box')
+    assert.equal(await tjs(`document.querySelector('.voice-hud').getBoundingClientRect().bottom <= ${dock}.getBoundingClientRect().top`), true, 'the dictation pill sits above the input box, not over it')
+    await tshot('terminal-ribbon-mic.png')
+    await tjs(`${ribbon}.querySelector('.trib-chip.mic').click()`)
+    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'false' && !document.querySelector('.voice-hud')`, 'mic released when dictation ends')
+    assert.match(await tjs(`${dock}.value`), /onnect to web prod one$/, 'the final words replace the live ones')
+    assert.equal(termWrites().filter((d) => d.includes('web prod')).length, 0, 'nothing reached the shell: the words wait in the input box')
+    await tjs(`(() => { const a = ${dock}; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, ''); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    // On a light scheme the ribbon follows the terminal's colours.
+    const termTheme = async (id) => {
+      await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+      await tuntil(`!!document.querySelector('.settings-nav [data-section="terminal"]')`, 'settings')
+      await tjs(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
+      await tuntil(`!!document.querySelector('[role="dialog"] select option[value="${id}"]')`, `${id} offered`)
+      await tjs(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="${id}"]').closest('select'); sel.value = '${id}'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+      await tjs(`document.querySelector('[role="dialog"] [aria-label="Close dialog"]').click()`)
+      await tuntil(`!document.querySelector('[role="dialog"]')`)
+    }
+    const themeBeforeRibbon = settings.terminalTheme ?? 'auto'
+    await termTheme('github-light')
+    await tuntil(`getComputedStyle(${ribbon}).backgroundColor !== '' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).getPropertyValue('--term-bg').trim() === '#ffffff'`, 'light scheme')
+    await tshot('terminal-ribbon-light.png')
+    await termTheme(themeBeforeRibbon)
+    // The folder chip's menu copies the path; the branch chip copies the branch name.
+    await tjs(`${ribbon}.querySelector('.trib-chip.folder').click()`)
+    await tuntil(`!!document.querySelector('.popover .menu-item')`)
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent === 'Copy path').click()`)
+    await tuntil(`!document.querySelector('.popover')`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== '/Users/fixture/proj'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], '/Users/fixture/proj')
+    await tjs(`${ribbon}.querySelector('.trib-chip.branch').click()`)
+    for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== 'main'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'main')
     // A command typed in the input box runs in the shell and becomes a block.
     await typeCmd('echo hi')
     await pressIn('Enter')
@@ -1155,7 +1272,43 @@ app.whenReady().then(async () => {
     await tshot('terminal-blocks.png')
     await tjs(`document.querySelector('.tblock-bar button[title="Copy the output"]').click()`)
     for (let n = 0; n < 50 && calls.filter((c) => c.channel === 'clipboard:write').at(-1)?.args[0] !== 'hi'; n++) await new Promise((r) => setTimeout(r, 30))
+    // Cyber Wave (Warp's theme): a teal-to-black gradient behind the text, with xterm's own background out of the way.
+    const themeBefore = settings.terminalTheme
+    await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await tuntil(`!!document.querySelector('.settings-nav [data-section="terminal"]')`, 'settings')
+    await tjs(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
+    await tuntil(`!!document.querySelector('[role="dialog"] select option[value="cyber-wave"]')`, 'cyber wave offered')
+    await tjs(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="cyber-wave"]').closest('select'); sel.value = 'cyber-wave'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await tuntil(`getComputedStyle(document.querySelector('.set-preview')).backgroundImage.includes('gradient')`, 'settings preview shows the gradient')
+    await tjs(`document.querySelector('[role="dialog"] [aria-label="Close dialog"]').click()`)
+    await tuntil(`!document.querySelector('[role="dialog"]') && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundImage.includes('linear-gradient')`, 'terminal pane has the gradient')
+    assert.equal(await tjs(`getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .xterm-scrollable-element')).backgroundColor`), 'rgba(0, 0, 0, 0)', 'xterm paints no background of its own')
+    await tshot('terminal-cyber-wave.png')
+    await tjs(`window.api.invoke('settings:set', { terminalTheme: ${JSON.stringify(themeBefore ?? 'auto')} })`)
     assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'hi')
+    // Colour themes from the rail: a terminal on "Match app" takes the theme's scheme, and Cyber Wave fades the chrome too.
+    await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await tuntil(`!!document.querySelector('.settings-nav [data-section="terminal"]')`, 'settings again')
+    await tjs(`document.querySelector('.settings-nav [data-section="terminal"]').click()`)
+    await tuntil(`!!document.querySelector('[role="dialog"] select option[value="auto"]')`, 'match app offered')
+    await tjs(`(() => { const sel = document.querySelector('[role="dialog"] select option[value="auto"]').closest('select'); sel.value = 'auto'; sel.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await tjs(`document.querySelector('[role="dialog"] [aria-label="Close dialog"]').click()`)
+    await tuntil(`!document.querySelector('[role="dialog"]')`, 'settings closed')
+    const pickTheme = async (label) => {
+      await tjs(`document.querySelector('.app-rail button[aria-label="Theme"]').click()`)
+      await tuntil(`!!document.querySelector('.popover .theme-menu-list')`, 'theme menu')
+      await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.trim().startsWith(${JSON.stringify(label)})).click()`)
+    }
+    await pickTheme('Dracula')
+    await tuntil(`document.documentElement.dataset.colorTheme === 'dracula' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundColor === 'rgb(40, 42, 54)'`, 'Match app takes Dracula')
+    assert.equal(settings.colorTheme, 'dracula')
+    await pickTheme('Cyber Wave')
+    await tuntil(`document.documentElement.dataset.colorTheme === 'cyber-wave' && getComputedStyle(document.querySelector('.term-slot:not([style*="none"]) .tpane')).backgroundImage.includes('linear-gradient') && getComputedStyle(document.querySelector('.app-rail')).backgroundImage.includes('linear-gradient')`, 'Cyber Wave across the app')
+    assert.equal(await tjs(`document.querySelector('.app-rail button[aria-label="Theme"] .rail-label').textContent`), 'Theme')
+    await tshot('app-theme-cyber-wave.png')
+    await pickTheme('Dark')
+    await tuntil(`!document.documentElement.dataset.colorTheme && document.documentElement.style.getPropertyValue('--bg') === ''`, 'back to the default colours')
+    assert.equal(settings.colorTheme, '')
     // History on ↑, and a suggestion from history.
     await typeCmd('')
     await pressIn('ArrowUp')
@@ -1180,6 +1333,13 @@ app.whenReady().then(async () => {
     twin.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
     twin.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
     await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'input box back at the next prompt')
+    // Workflows (saved commands) from the ribbon: one marked to run is run.
+    await tjs(`[...document.querySelector('.term-slot:not([style*="none"]) .tribbon').querySelectorAll('.trib-chip')].find((b) => b.getAttribute('aria-label') === 'Workflows').click()`)
+    await tuntil(`[...document.querySelectorAll('.popover .menu-item')].some((b) => b.textContent.includes('Disk usage'))`, 'ribbon: workflows listed')
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes('Disk usage')).click()`)
+    for (let n = 0; n < 50 && !termWrites().some((d) => d.includes('df -h')); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(termWrites().some((d) => d.includes('df -h') && d.endsWith('\r')), 'the workflow runs')
+    await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`, 'back at the prompt after the workflow')
     // Splits: ⌘D opens a pane in the same folder, ⌥⌘← moves focus, ⌘W closes the focused pane.
     const opens = () => calls.filter((c) => c.channel === 'term:open').map((c) => c.args[0])
     const opensAtSplit = opens().length
@@ -1188,6 +1348,8 @@ app.whenReady().then(async () => {
     assert.equal(opens().length, opensAtSplit + 1)
     assert.equal(opens().at(-1).cwd, '/Users/fixture/proj', 'the new pane starts in the same folder')
     await tuntil(`document.querySelectorAll('.term-slot:not([style*="none"]) .tdock textarea').length === 2`)
+    // Half the width: the ribbon folds its labels away to icons and still fits.
+    await tuntil(`[...document.querySelectorAll('.term-slot:not([style*="none"]) .tribbon')].every((r) => r.clientWidth > 0 && r.clientWidth < 700 && r.scrollWidth <= r.clientWidth && [...r.querySelectorAll('.trib-label')].every((l) => getComputedStyle(l).display === 'none') && !!r.querySelector('.trib-chip.branch') && r.querySelector('.trib-count')?.textContent === '6')`, 'narrow panes: icon-only ribbon without overflow')
     await tshot('terminal-split.png')
     await tkey('ArrowLeft', { metaKey: true, altKey: true })
     await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tpane.focused') === document.querySelectorAll('.term-slot:not([style*="none"]) .tpane')[0]`, 'focus moves left')
@@ -1225,8 +1387,9 @@ app.whenReady().then(async () => {
     await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.includes('Production')).click()`)
     await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelector('.term-tab.on .term-tab-aws')?.textContent === 'production'`, 'AWS profile tab')
     assert.deepEqual(opens().at(-1).env, { AWS_PROFILE: 'production' })
-    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tchip.aws')?.textContent === 'production'`, 'AWS chip')
-    await tuntil(`document.querySelectorAll('.term-side .term-tab-sub')[0]?.textContent === '~/proj'`, 'side list shows the folder')
+    await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tribbon .trib-chip.aws')?.textContent === 'production'`, 'AWS chip')
+    // Each tab: the folder as its name, and underneath, as in Warp, the Git branch (the fixture's shell reports "main").
+    await tuntil(`document.querySelectorAll('.term-side .term-tab-sub')[0]?.textContent.startsWith('main') && !!document.querySelectorAll('.term-side .term-tab-sub')[0].querySelector('.term-tab-branch-icon')`, 'side list shows the branch')
     await tshot('terminal-vertical-tabs.png')
     // Tabs across the top instead, and back down the side.
     const termSetting = async (label) => {
@@ -1361,6 +1524,117 @@ app.whenReady().then(async () => {
     await tuntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('On the whiteboard')`, 'shortcuts dialog lists the whiteboard keys')
     await tkey('Escape')
     twin.destroy()
+
+    // Voice dictation against the scripted helper: live words in a text field, the HUD, Done, the hold key, Escape,
+    // a held key that was an ⌥ combination, the Notes editor (live, one undo step) and a terminal (one paste at the end).
+    const vwin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    vwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const vjs = (code) => vwin.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
+    const vuntil = async (code, what = code) => { for (let n = 0; n < 150; n++) { if (await vjs(code)) return; await new Promise((r) => setTimeout(r, 30)) } throw new Error(`Timed out (dictation): ${what}`) }
+    const vshot = async (name) => { await vjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 250)); writeFileSync(join(output, name), (await vwin.webContents.capturePage()).toPNG()) }
+    const dictate = (action, target) => vjs(`window.dispatchEvent(new CustomEvent('ec2ra:dictate', { detail: { action: ${JSON.stringify(action)}${target ? `, target: document.querySelector(${JSON.stringify(target)})` : ''} } }))`)
+    const hud = `document.querySelector('.voice-hud')`
+    const voiceCalls = (ch) => calls.filter((c) => c.channel === ch)
+    const altRight = (type) => vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('${type}', { key: 'Alt', code: 'AltRight', altKey: ${type === 'keydown'}, bubbles: true, cancelable: true }))`)
+    await vwin.loadFile(resolve('out/renderer/index.html'))
+    await vuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await vjs(`window.__dictation = []; window.addEventListener('ec2ra:dictation', (e) => window.__dictation.push(e.detail.active)); 0`)
+    // A mic-button style start into the focused search field: the words appear in the field as they are heard.
+    await vjs(`document.querySelector('[aria-label="Search hosts"]').focus()`)
+    await dictate('start')
+    await vuntil(`${hud}?.textContent.includes('connect to web prod') && document.querySelector('[aria-label="Search hosts"]').value === 'Connect to web prod'`, 'live words in the search field')
+    await vuntil(`${hud}.querySelectorAll('.voice-wave > span').length === 20 && ${hud}.textContent.includes('On this Mac') && ${hud}.textContent.includes('into Search hosts')`, 'waveform, on-device note and target')
+    await vshot('voice-hud-dark.png')
+    await vjs(`document.documentElement.setAttribute('data-theme', 'light')`)
+    await vshot('voice-hud-light.png')
+    await vjs(`document.documentElement.setAttribute('data-theme', 'dark')`)
+    await vjs(`document.querySelector('.voice-btn.done').click()`)
+    await vuntil(`!${hud} && document.querySelector('[aria-label="Search hosts"]').value === 'Connect to web prod one'`, 'Done inserts the final words and closes the HUD')
+    assert.deepEqual(await vjs(`window.__dictation`), [true, false], 'ec2ra:dictation reports start and end')
+    await vuntil(`document.querySelectorAll('[data-host-key]').length === 0`, 'the field’s own handlers saw the words (the host list filtered)')
+    assert.match(voiceCalls('voice:start').at(-1).args[0].id, /^v[a-z0-9]+$/, 'the renderer names the dictation')
+    await vjs(`(() => { const i = document.querySelector('[aria-label="Search hosts"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await vuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    // Holding Right Option: talk while held, let go to insert (here into the quick switcher).
+    await vjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true }))`)
+    await vuntil(`document.activeElement?.getAttribute('role') === 'combobox'`, 'quick switcher')
+    const startsBeforeHold = voiceCalls('voice:start').length
+    await altRight('keydown')
+    await vuntil(`${hud}?.textContent.includes('Release Right ⌥ to insert') && document.activeElement.value === 'Connect to web prod'`, 'holding the key dictates')
+    assert.equal(await vjs(`!!${hud}.querySelector('.voice-btn.done')`), false, 'no Done button while holding the key')
+    assert.equal(await vjs(`(() => { const m = ${hud}.querySelector('.voice-meta'); return m.scrollWidth <= m.clientWidth + 1 })()`), true, 'the HUD’s hints fit on one line')
+    await vshot('voice-hud-hold.png')
+    await altRight('keyup')
+    await vuntil(`!${hud} && document.activeElement.value === 'Connect to web prod one'`, 'releasing the key inserts')
+    assert.equal(voiceCalls('voice:start').length, startsBeforeHold + 1)
+    assert.equal(voiceCalls('voice:stop').at(-1).args[0], voiceCalls('voice:start').at(-1).args[0].id)
+    // Escape cancels: the field is left as it was and the dialog under the HUD stays open.
+    await vjs(`(() => { const i = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'web'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await dictate('toggle')
+    await vuntil(`document.activeElement.value === 'web connect to web prod'`, 'mid-sentence words are spaced and lower-cased')
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await vuntil(`!${hud} && document.activeElement.value === 'web' && !!document.querySelector('[role="combobox"]')`, 'Escape restores the field and keeps the dialog')
+    assert.equal(voiceCalls('voice:cancel').at(-1).args[0], voiceCalls('voice:start').at(-1).args[0].id)
+    // An ⌥ combination is not a hold: no dictation starts.
+    const startsBeforeCombo = voiceCalls('voice:start').length
+    await altRight('keydown')
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ƒ', code: 'KeyF', altKey: true, bubbles: true, cancelable: true }))`)
+    await new Promise((r) => setTimeout(r, 350))
+    await altRight('keyup')
+    assert.equal(voiceCalls('voice:start').length, startsBeforeCombo, '⌥F never starts dictation')
+    assert.equal(await vjs(`!!${hud}`), false)
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await vuntil(`!document.querySelector('[role="dialog"]')`)
+    // A refusal (microphone access off) shows in the HUD with what to do; Escape dismisses it.
+    voiceRefusal = 'Microphone access is off for EC2 Remote Access. Turn it on in System Settings → Privacy & Security → Microphone.'
+    await vjs(`document.querySelector('[aria-label="Search hosts"]').focus()`)
+    await dictate('toggle')
+    await vuntil(`${hud}?.classList.contains('error') && ${hud}.textContent.includes('Privacy & Security') && ${hud}.textContent.includes('Open Privacy Settings')`, 'the HUD explains a refusal and offers the setting')
+    assert.equal(await vjs(`${hud}.textContent.includes('Error invoking remote method')`), false, 'only the message itself')
+    await vshot('voice-hud-error.png')
+    voiceRefusal = null
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await vuntil(`!${hud} && document.querySelector('[aria-label="Search hosts"]').value === ''`)
+    // The Notes editor: its mic button, words written live, the final text kept and saved.
+    notes['Dictation.md'] = { text: '# Dictation\n\n', mtime: Date.now() }
+    await vjs(`document.querySelector('button[aria-label="Notes"]').click()`)
+    await vuntil(`[...document.querySelectorAll('.notes-file')].some((b) => b.textContent.includes('Dictation'))`)
+    await vjs(`[...document.querySelectorAll('.notes-file')].find((b) => b.textContent.includes('Dictation')).click()`)
+    await vuntil(`document.querySelector('.notes-title')?.textContent === 'Dictation' && !!document.querySelector('.notes-tools .mic-btn')`)
+    const lastNoteLine = await vjs(`(() => { const r = [...document.querySelectorAll('.notes-tab .cm-line')].at(-1).getBoundingClientRect(); return { x: Math.round(r.left + 20), y: Math.round(r.top + r.height / 2) } })()`)
+    vwin.webContents.focus()
+    vwin.webContents.sendInputEvent({ type: 'mouseDown', x: lastNoteLine.x, y: lastNoteLine.y, button: 'left', clickCount: 1 })
+    vwin.webContents.sendInputEvent({ type: 'mouseUp', x: lastNoteLine.x, y: lastNoteLine.y, button: 'left', clickCount: 1 })
+    await vuntil(`document.activeElement?.classList.contains('cm-content')`)
+    await vjs(`document.querySelector('.notes-tools .mic-btn').click()`)
+    await vuntil(`document.querySelector('.notes-tools .mic-btn').getAttribute('aria-pressed') === 'true' && document.querySelector('.notes-tab .cm-content').textContent.includes('Connect to web prod') && ${hud}?.textContent.includes('into Note')`, 'words appear in the note as they are heard')
+    await vshot('voice-notes.png')
+    await vjs(`document.querySelector('.notes-tools .mic-btn').click()`)
+    await vuntil(`!${hud} && document.querySelector('.notes-tools .mic-btn').getAttribute('aria-pressed') === 'false' && document.querySelector('.notes-tab .cm-content').textContent.includes('Connect to web prod one')`, 'the mic button again inserts')
+    for (let n = 0; n < 100 && !notes['Dictation.md'].text.includes('Connect to web prod one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(notes['Dictation.md'].text, '# Dictation\n\nConnect to web prod one', 'the note is saved with the words, once')
+    // A terminal takes the finished words as one paste, with no Enter.
+    await vjs(`document.querySelector('button[aria-label="Hosts"]').click()`)
+    await vuntil(`!!document.querySelector('[data-host-key="${running.key}"] .btn-ssh')`)
+    await vjs(`document.querySelector('[data-host-key="${running.key}"] .btn-ssh').click()`)
+    await vuntil(`!!document.querySelector('.term-toolbar .mic-btn') && document.body.textContent.includes('ubuntu@web-prod-01 via ssm')`)
+    const sshSession = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].sessionId
+    await vjs(`document.querySelector('.term-toolbar .mic-btn').click()`)
+    await vuntil(`${hud}?.textContent.includes('into Terminal') && ${hud}.textContent.includes('connect to web prod')`, 'the HUD shows the words for a terminal')
+    assert.equal(calls.some((c) => c.channel === 'ssh:write' && c.args[0] === sshSession && /connect/i.test(c.args[1])), false, 'nothing reaches the shell before the end')
+    await vjs(`document.querySelector('.voice-btn.done').click()`)
+    await vuntil(`!${hud}`)
+    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'ssh:write' && c.args[0] === sshSession && /connect/i.test(c.args[1])); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:write' && c.args[0] === sshSession && /connect/i.test(c.args[1])).map((c) => c.args[1]), ['Connect to web prod one'], 'one paste, no Enter')
+    // Settings → Voice: the hold key, the language and what macOS allows.
+    await vjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await vuntil(`!!document.querySelector('.settings-nav [data-section="voice"]')`)
+    await vjs(`document.querySelector('.settings-nav [data-section="voice"]').click()`)
+    await vuntil(`document.querySelector('.settings-body')?.textContent.includes('Allowed') && !!document.querySelector('select[aria-label="Dictation language"] option[value="fr-FR"]')`, 'voice settings show the permissions and languages')
+    await vshot('settings-voice.png')
+    await vjs(`document.querySelector('.settings-nav [data-section="about"]').click()`)
+    await vuntil(`document.querySelector('.settings-body').textContent.includes('Dictation listens only while')`)
+    vwin.destroy()
 
     // First run: the welcome screen, in both appearances, and its main action opens Add account.
     emptyScenario = true

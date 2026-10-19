@@ -6,11 +6,16 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { parseMark, parseOsc7, type ShellMark } from '@shared/termIntegration'
 import { isDarkMode, useStore } from '../../store'
-import { resolveTerminalTheme, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../../terminalThemes'
+import { resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../../terminalThemes'
+import { effectiveScheme } from '../../appThemes'
 import { Icon } from '../icons'
-import InputDock, { type Chips } from './InputDock'
+import type { Snippet } from '@shared/types'
+import InputDock, { type DockRequest } from './InputDock'
+import Ribbon from './Ribbon'
+import { useGitStatus } from './useGitStatus'
 import KeyBar from '../mobile/KeyBar'
 import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../../mobile'
+import { registerDictationTarget, xtermTarget } from '../../voice'
 import { applyStickyMods, keySequence, type StickyMods } from '../../terminalKeys'
 import { addHistory, loadHistory } from './history'
 
@@ -21,6 +26,15 @@ export interface PaneInfo {
   running?: string | null
   /** The title the shell or program set (OSC 0/2). */
   title?: string
+  /** The Git branch of the shell's folder (from the zsh integration's prompt marks); null outside a repository. */
+  branch?: string | null
+}
+
+/** What the shell's prompt reported (folder, Git branch, AWS_PROFILE), for the pane's ribbon. */
+interface Chips {
+  cwd?: string
+  git?: string
+  aws?: string
 }
 
 /** What the Terminal tab can ask of a pane (shortcuts act on the focused one). */
@@ -52,7 +66,7 @@ const duration = (ms: number): string => (ms < 1000 ? `${ms} ms` : ms < 60_000 ?
 
 let blockSeq = 0
 
-export default function Pane({ id, cwd, env, visible, focused, multi, inputMode, notify, home, onFocus, onInfo, onExit, onReveal, registerApi }: {
+export default function Pane({ id, cwd, env, visible, focused, multi, inputMode, notify, home, onFocus, onInfo, onExit, onReveal, onNewTab, onToggleInput, registerApi }: {
   id: string
   cwd?: string
   env?: Record<string, string>
@@ -67,6 +81,10 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   onExit: (id: string) => void
   /** Brings this pane to the front (a notification was clicked). */
   onReveal: () => void
+  /** A new Terminal tab, in this pane's folder (the ribbon's +). */
+  onNewTab: (cwd?: string) => void
+  /** Input box or straight into the shell, for every pane (the ribbon's Rich input, ⌃G at the prompt). */
+  onToggleInput: () => void
   registerApi: (id: string, api: PaneApi | null) => void
 }): ReactElement {
   const settings = useStore((s) => s.settings)
@@ -90,6 +108,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   const [hover, setHover] = useState<number | null>(null)
   const [findText, setFindText] = useState<string | null>(null)
   const [focusKey, setFocusKey] = useState(0)
+  const [dockRequest, setDockRequest] = useState<DockRequest | null>(null)
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   // On a phone: the key bar (Esc, Ctrl, arrows…) for typing into a running program; Ctrl/Alt shape the next key.
   const mobile = isMobile()
@@ -98,13 +117,21 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   const modsRef = useRef<StickyMods>(NO_MODS)
   const setMods = (m: StickyMods): void => { modsRef.current = m; setModsState(m) }
 
-  const props = useRef({ visible, notify, onInfo, onExit, onReveal, inputMode })
-  props.current = { visible, notify, onInfo, onExit, onReveal, inputMode }
+  const props = useRef({ visible, notify, onInfo, onExit, onReveal, inputMode, onToggleInput })
+  props.current = { visible, notify, onInfo, onExit, onReveal, inputMode, onToggleInput }
+  // On a phone the ribbon steps aside while the keyboard is up, so the key bar sits right on top of it.
+  const ribbon = !(mobile && keyboardOpen)
 
   const editorActive = inputMode === 'editor' && integration === true && phase === 'idle' && !alt && !handoff
   const dockMode: 'editor' | 'running' | null = alt ? null : editorActive ? 'editor' : integration && phase === 'running' && showRunning && !handoff ? 'running' : null
+  // ⌃G switches between the input box and the shell only while the shell waits at its prompt; otherwise it is the
+  // program's key (BEL, or an editor's command).
+  const atPrompt = integration === true && phase === 'idle' && !alt
+  const git = useGitStatus(chips.cwd, chips.git, visible, phase === 'idle')
 
-  const theme = resolveTerminalTheme(settings?.terminalTheme, isDarkMode())
+  // "Match app" follows the app's colour theme when one is chosen.
+  const scheme = effectiveScheme(settings?.terminalTheme, settings?.colorTheme)
+  const theme = resolveTerminalTheme(scheme, isDarkMode())
   const fontFamily = terminalFontFamily(settings?.terminalFont)
 
   // ----- the terminal and its shell -----
@@ -125,6 +152,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     // Links open in the app's own browser.
     term.loadAddon(new WebLinksAddon((_e, uri) => useStore.getState().openBrowser({ url: uri })))
     term.open(el)
+    registerDictationTarget(el, xtermTarget(term))
     // ⌘ combinations are the app's (tabs, panes, blocks), as is ⌃Tab; none of them are for the shell.
     term.attachCustomKeyEventHandler((e) => !(e.metaKey || (e.ctrlKey && (e.key === 'Tab' || e.code === 'Backquote'))))
     termRef.current = term
@@ -173,7 +201,10 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
           n.onclick = () => { window.focus(); props.current.onReveal() }
         }
       } else if (m.kind === 'prop') {
-        if (m.key === 'Git') setChips((c) => ({ ...c, git: m.value || undefined }))
+        if (m.key === 'Git') {
+          setChips((c) => ({ ...c, git: m.value || undefined }))
+          props.current.onInfo(id, { branch: m.value || null })
+        }
         else if (m.key === 'Aws') setChips((c) => ({ ...c, aws: m.value || undefined }))
       }
       redraw()
@@ -264,7 +295,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     term.options.fontFamily = fontFamily
     term.options.fontSize = settings?.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE
     try { fitRef.current?.fit() } catch { /* hidden */ }
-  }, [settings?.terminalTheme, settings?.terminalFont, settings?.terminalFontSize, isDarkMode()]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scheme, settings?.terminalFont, settings?.terminalFontSize, isDarkMode()]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The input box owns typing at the prompt; while a command runs (or without the box) the terminal does.
   useEffect(() => {
@@ -344,6 +375,19 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     const data = term.modes.bracketedPasteMode ? `\x1b[200~${value}\x1b[201~\r` : `${value.replace(/\n/g, '\r')}\r`
     void window.api.invoke('term:write', id, data)
   }
+  const applyWorkflow = (s: Snippet): void => {
+    if (editorActive) {
+      if (s.run) runCommand(s.command)
+      else setDockRequest({ n: Date.now(), kind: 'insert', text: s.command })
+      return
+    }
+    const term = termRef.current
+    if (!term) return
+    // paste() brackets it when the shell or program asked for that, so a multi-line command stays one edit.
+    term.paste(s.command)
+    if (s.run) void window.api.invoke('term:write', id, '\r')
+    term.focus()
+  }
   const handoffToShell = (value: string): void => {
     setHandoff(true)
     void window.api.invoke('term:write', id, `${value}\t`)
@@ -399,12 +443,19 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   return (
     <div
       className={`tpane ${focused && multi ? 'focused' : ''} ${multi && !focused ? 'dim' : ''}`}
-      style={{ '--term-bg': theme.background ?? '#0d1117', '--term-fg': theme.foreground ?? '#e6edf3' } as CSSProperties}
+      style={{ '--term-bg': theme.background ?? '#0d1117', '--term-backdrop': terminalBackdrop(scheme, isDarkMode()), '--term-fg': theme.foreground ?? '#e6edf3' } as CSSProperties}
       onMouseDown={onFocus}
     >
       <div
         ref={area}
-        className={`tpane-term ${dockMode ? 'with-dock' : mobile ? 'with-keys' : ''}`}
+        className={`tpane-term ${dockMode ? 'with-dock' : mobile ? 'with-keys' : ''} ${ribbon ? 'with-ribbon' : ''}`}
+        onKeyDownCapture={(e) => {
+          if (atPrompt && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') {
+            e.preventDefault()
+            e.stopPropagation()
+            props.current.onToggleInput()
+          }
+        }}
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
         onMouseUp={() => {
@@ -463,38 +514,56 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
           </div>
         )}
       </div>
-      {mobile && !dockMode && (
-        <div className="tpane-keys">
-          <KeyBar
-            mods={mods}
-            onMods={(m) => { setMods(m); termRef.current?.focus() }}
-            onKey={(k) => {
-              const t = termRef.current
-              if (!t) return
-              const m = modsRef.current
-              setMods(NO_MODS)
-              void window.api.invoke('term:write', id, applyStickyMods(keySequence(k, t.modes.applicationCursorKeysMode), m))
-            }}
-            keyboardOpen={keyboardOpen}
-            onKeyboard={() => { if (keyboardOpen) termRef.current?.blur(); else termRef.current?.focus() }}
-            onPaste={() => pasteFromClipboard((text) => termRef.current?.paste(text), (text) => { if (text) termRef.current?.paste(text) })}
+      <div className="tpane-foot">
+        {mobile && !dockMode && (
+          <div className="tpane-keys">
+            <KeyBar
+              mods={mods}
+              onMods={(m) => { setMods(m); termRef.current?.focus() }}
+              onKey={(k) => {
+                const t = termRef.current
+                if (!t) return
+                const m = modsRef.current
+                setMods(NO_MODS)
+                void window.api.invoke('term:write', id, applyStickyMods(keySequence(k, t.modes.applicationCursorKeysMode), m))
+              }}
+              keyboardOpen={keyboardOpen}
+              onKeyboard={() => { if (keyboardOpen) termRef.current?.blur(); else termRef.current?.focus() }}
+              onPaste={() => pasteFromClipboard((text) => termRef.current?.paste(text), (text) => { if (text) termRef.current?.paste(text) })}
+            />
+          </div>
+        )}
+        {dockMode && (
+          <InputDock
+            mode={dockMode}
+            running={running}
+            fontFamily={fontFamily}
+            focusKey={focusKey}
+            request={dockRequest}
+            onRequestDone={() => setDockRequest(null)}
+            onRun={runCommand}
+            onHandoff={handoffToShell}
+            onKey={(d) => void window.api.invoke('term:write', id, d)}
+            onToggleInput={onToggleInput}
           />
-        </div>
-      )}
-      {dockMode && (
-        <InputDock
-          mode={dockMode}
-          chips={chips}
-          home={home}
-          running={running}
-          fontFamily={fontFamily}
-          focusKey={focusKey}
-          onRun={runCommand}
-          onHandoff={handoffToShell}
-          onKey={(d) => void window.api.invoke('term:write', id, d)}
-          onReveal={(p) => void window.api.invoke('local:reveal', p).catch(() => undefined)}
-        />
-      )}
+        )}
+        {ribbon && (
+          <Ribbon
+            cwd={chips.cwd}
+            home={home}
+            branch={chips.git}
+            aws={chips.aws}
+            git={git}
+            inputMode={inputMode}
+            editorShowing={dockMode === 'editor'}
+            onNewTab={onNewTab}
+            onToggleInput={onToggleInput}
+            onHistory={() => setDockRequest({ n: Date.now(), kind: 'search' })}
+            onWorkflow={applyWorkflow}
+            onRun={runCommand}
+          />
+        )}
+      </div>
     </div>
   )
 }
