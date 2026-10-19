@@ -303,10 +303,14 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
       el = node
       noteMount()
       node.toggleAttribute('data-contain', mobile || tiledRef.current)
+      // A constructed stylesheet, never a <style> element: the component sends a key only while
+      // `document.activeElement.shadowRoot.firstElementChild` is its own wrapper, and it renders that wrapper a tick
+      // after being added, so an element appended now would come first and every keystroke would be dropped (the
+      // mouse does not check). That is how the keyboard stopped reaching Windows while the mouse kept working.
       if (node.shadowRoot) {
-        const style = document.createElement('style')
-        style.textContent = CONTAIN_CSS
-        node.shadowRoot.appendChild(style)
+        const sheet = new CSSStyleSheet()
+        sheet.replaceSync(CONTAIN_CSS)
+        node.shadowRoot.adoptedStyleSheets = [...node.shadowRoot.adoptedStyleSheets, sheet]
       }
       const u = await ready
       if (dead()) return u

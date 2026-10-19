@@ -161,6 +161,11 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'run:status': { const r = runsSent.find((x) => x.id === args[0]); return r ? runState(r) : null }
     case 'run:list': return runsSent.map(runState).reverse()
     case 'run:cancel': return
+    case 'creds:get': return null
+    case 'creds:set': return
+    // A remote desktop that stays "connecting": the viewer is on the page, which is all the keyboard check needs.
+    case 'rdp:prepare': return new Promise(() => undefined)
+    case 'rdp:release': return
     case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
     case 'boards:load': return boardsSaved[args[0]] ? structuredClone(boardsSaved[args[0]]) : null
     case 'boards:save': boardsSaved[args[0].id] = structuredClone(args[0]); return
@@ -287,6 +292,24 @@ app.whenReady().then(async () => {
     await js(`document.querySelectorAll('.popover .zoom-stepper-value').forEach((b) => b.click())`)
     await until(`document.documentElement.style.getPropertyValue('--zoom-hosts') === '1' && document.documentElement.style.getPropertyValue('--zoom-sidebar') === '1'`)
     await key('Escape')
+
+    // Remote desktop keyboard: the viewer sends a key only while its own wrapper is the first element of its shadow
+    // root. The app's styles once went in as a <style> element ahead of it, and no key reached Windows (the mouse did).
+    await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]'); const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 10 })) })()`)
+    await until(`!!document.querySelector('body > .panel.modal.fixed')`)
+    await js(`[...document.querySelectorAll('body > .panel.modal.fixed button')].find((b) => b.textContent === 'RDP with options…').click()`)
+    await until(`!!document.querySelector('[role="dialog"] input[type="password"]')`)
+    await js(`(() => { const pw = document.querySelector('[role="dialog"] input[type="password"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(pw, 'fixture-pw'); pw.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await js(`document.querySelector('[role="dialog"] .btn-primary').click()`)
+    await until(`!!document.querySelector('iron-remote-desktop')?.shadowRoot?.querySelector('canvas')`)
+    assert.equal(await js(`(() => {
+      const n = document.querySelector('iron-remote-desktop')
+      n.shadowRoot.querySelectorAll('.hidden').forEach((x) => x.classList.remove('hidden')) // as once connected
+      n.shadowRoot.querySelector('canvas').focus()
+      return document.activeElement === n && n.shadowRoot.firstElementChild === n.shadowRoot.querySelector('div') && n.shadowRoot.adoptedStyleSheets.length > 0
+    })()`), true, 'a clicked remote desktop takes the keyboard, with the app styles applied')
+    await key('w', { metaKey: true })
+    await until(`!document.querySelector('iron-remote-desktop')`)
 
     // Open account tree and select a stopped host: filters and collapsed groups must not hide it.
     await js(`document.querySelector('button[title="Show instances"]').click()`)
