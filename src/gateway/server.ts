@@ -71,11 +71,12 @@ const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) =
 
 /**
  * What stays with the person at the computer, never with whoever holds the pairing link: the desktop browser's
- * 1Password fill, downloads and pages, and the phone-access settings themselves (so a paired page cannot widen its
- * own access). Shells on this machine (term:*) are refused too unless `allowTerminals` says otherwise.
+ * 1Password fill, downloads and pages, the phone-access settings themselves (so a paired page cannot widen its own
+ * access), and dictation (voice:*), which would otherwise switch on the computer's microphone from afar and relay what
+ * is said there. Shells on this machine (term:*) are refused too unless `allowTerminals` says otherwise.
  */
 export function desktopOnly(channel: string): boolean {
-  return channel.startsWith('web:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal'].includes(channel)
+  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal'].includes(channel)
 }
 
 export function createGatewayServer(opts: GatewayOptions): Gateway {
@@ -186,7 +187,10 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       const { id, channel } = msg
       const reply = (result: unknown): void => { ws.send(JSON.stringify({ t: 'result', id, result: result ?? null })) }
       if (desktopOnly(channel) || (channel.startsWith('term:') && channel !== 'term:available' && !terminalsAllowed())) {
-        ws.send(JSON.stringify({ t: 'error', id, message: channel.startsWith('term:') ? 'Terminals from paired devices are off. Turn them on on the computer running the app.' : 'That is only available in the Mac app.' }))
+        const message = channel.startsWith('term:') ? 'Terminals from paired devices are off. Turn them on on the computer running the app.'
+          : channel.startsWith('voice:') ? 'Dictation runs in the Mac app; on iPhone or iPad use the keyboard’s microphone key.'
+            : 'That is only available in the Mac app.'
+        ws.send(JSON.stringify({ t: 'error', id, message }))
         return
       }
       if (channel === 'term:available') return reply(terminalsAllowed())

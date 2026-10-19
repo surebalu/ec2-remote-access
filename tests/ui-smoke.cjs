@@ -78,6 +78,10 @@ const runState = (r) => {
     : { ...t, status: 'failed', exitCode: 1, stderr: 'df: /data: No such file or directory\n', startedAt: r.startedAt, endedAt: r.startedAt + 900 }))
   return { ...r, targets, finishedAt: done ? r.startedAt + 900 : undefined }
 }
+// Dictations the fixture "helper" is running; events go to the window that started them, as main sends them.
+const voiceRuns = []
+let voiceRefusal = null
+const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !run.sender.isDestroyed()) run.sender.send('voice:event', { id: run.id, ...ev }) }
 // Whiteboards main has saved (boards:*), and the images added to notes.
 const boardsSaved = {}
 const noteImages = []
@@ -196,6 +200,30 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'ssh:switchShell': return { name: args[1] ?? 'ec2ra-new', label: args[2]?.label ?? (args[1] === 'ec2ra-old1' ? 'debug' : '') }
     case 'ssh:renameShell': return String(args[2]).trim()
     case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
+    // Dictation: a scripted "helper" that hears "connect to web prod one" (no microphone, no permission prompts).
+    case 'voice:status': return { available: true, helper: true, mic: 'authorized', speech: 'notDetermined', onDevice: true, locale: 'en-US', supported: true, locales: ['en-GB', 'en-US', 'fr-FR'] }
+    case 'voice:start': {
+      if (voiceRefusal) throw new Error(voiceRefusal)
+      const run ={ id: args[0]?.id ?? `v${voiceRuns.length + 1}`, sender: _e.sender, stopped: false, cancelled: false, timers: [] }
+      voiceRuns.push(run)
+      const at = (ms, ev) => run.timers.push(setTimeout(() => voiceSend(run, ev), ms))
+      at(20, { kind: 'ready', onDevice: true })
+      ;[0.18, 0.42, 0.75, 0.58, 0.9, 0.66, 0.35, 0.8, 0.52, 0.28, 0.7, 0.95, 0.6, 0.4, 0.22, 0.55, 0.85, 0.47, 0.3, 0.68, 0.5, 0.78, 0.36, 0.6].forEach((level, i) => at(30 + i * 12, { kind: 'level', level }))
+      at(120, { kind: 'partial', text: 'connect to web' })
+      at(260, { kind: 'partial', text: 'connect to web prod' })
+      return { id: run.id }
+    }
+    case 'voice:stop': {
+      const run = voiceRuns.find((r) => r.id === args[0])
+      if (run && !run.stopped) { run.stopped = true; setTimeout(() => { voiceSend(run, { kind: 'final', text: 'connect to web prod one' }); voiceSend(run, { kind: 'end' }) }, 40) }
+      return
+    }
+    case 'voice:cancel': {
+      const run = voiceRuns.find((r) => r.id === args[0])
+      if (run) { run.timers.forEach(clearTimeout); setTimeout(() => voiceSend(run, { kind: 'end' }), 10); run.cancelled = true }
+      return
+    }
+    case 'voice:openPrivacy': return
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
 })
@@ -1180,15 +1208,21 @@ app.whenReady().then(async () => {
     await tuntil(`!!document.querySelector('.term-slot:not([style*="none"]) .tdock-pop input[aria-label="Search command history"]')`, 'ribbon: history search')
     await tjs(`document.querySelector('.term-slot:not([style*="none"]) .tdock-pop input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
     await tuntil(`!document.querySelector('.term-slot:not([style*="none"]) .tdock-pop')`)
-    // The mic asks dictation (voice.ts) to start or stop for this pane, and shows pressed while it listens.
+    // The mic hands this pane to dictation (voice.ts): pressed while it listens, the words appear live in the input
+    // box, and a second click finishes. (The fixture's "helper" hears "connect to web prod one".)
+    const dock = `document.querySelector('.term-slot:not([style*="none"]) .tdock textarea')`
     await tjs(`window.__dictate = []; window.addEventListener('ec2ra:dictate', (e) => window.__dictate.push(e.detail)); 0`)
     await tjs(`${ribbon}.querySelector('.trib-chip.mic').click()`)
     assert.deepEqual(await tjs(`window.__dictate.map((d) => [d.action, !!d.target?.classList.contains('tpane')])`), [['toggle', true]])
-    await tjs(`window.dispatchEvent(new CustomEvent('ec2ra:dictation', { detail: { active: true } }))`)
-    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'true'`, 'mic pressed while dictating')
+    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'true' && !!document.querySelector('.voice-hud')`, 'mic pressed while dictating')
+    await tuntil(`${dock}?.value.includes('onnect to web prod')`, 'live words in the input box')
+    assert.equal(await tjs(`document.querySelector('.voice-hud').getBoundingClientRect().bottom <= ${dock}.getBoundingClientRect().top`), true, 'the dictation pill sits above the input box, not over it')
     await tshot('terminal-ribbon-mic.png')
-    await tjs(`window.dispatchEvent(new CustomEvent('ec2ra:dictation', { detail: { active: false } }))`)
-    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'false'`, 'mic released')
+    await tjs(`${ribbon}.querySelector('.trib-chip.mic').click()`)
+    await tuntil(`${ribbon}.querySelector('.trib-chip.mic').getAttribute('aria-pressed') === 'false' && !document.querySelector('.voice-hud')`, 'mic released when dictation ends')
+    assert.match(await tjs(`${dock}.value`), /onnect to web prod one$/, 'the final words replace the live ones')
+    assert.equal(termWrites().filter((d) => d.includes('web prod')).length, 0, 'nothing reached the shell: the words wait in the input box')
+    await tjs(`(() => { const a = ${dock}; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(a, ''); a.dispatchEvent(new Event('input', { bubbles: true })) })()`)
     // On a light scheme the ribbon follows the terminal's colours.
     const termTheme = async (id) => {
       await tjs(`document.querySelector('button[aria-label="Settings"]').click()`)
@@ -1458,6 +1492,117 @@ app.whenReady().then(async () => {
     await tuntil(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('On the whiteboard')`, 'shortcuts dialog lists the whiteboard keys')
     await tkey('Escape')
     twin.destroy()
+
+    // Voice dictation against the scripted helper: live words in a text field, the HUD, Done, the hold key, Escape,
+    // a held key that was an ⌥ combination, the Notes editor (live, one undo step) and a terminal (one paste at the end).
+    const vwin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    vwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const vjs = (code) => vwin.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
+    const vuntil = async (code, what = code) => { for (let n = 0; n < 150; n++) { if (await vjs(code)) return; await new Promise((r) => setTimeout(r, 30)) } throw new Error(`Timed out (dictation): ${what}`) }
+    const vshot = async (name) => { await vjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 250)); writeFileSync(join(output, name), (await vwin.webContents.capturePage()).toPNG()) }
+    const dictate = (action, target) => vjs(`window.dispatchEvent(new CustomEvent('ec2ra:dictate', { detail: { action: ${JSON.stringify(action)}${target ? `, target: document.querySelector(${JSON.stringify(target)})` : ''} } }))`)
+    const hud = `document.querySelector('.voice-hud')`
+    const voiceCalls = (ch) => calls.filter((c) => c.channel === ch)
+    const altRight = (type) => vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('${type}', { key: 'Alt', code: 'AltRight', altKey: ${type === 'keydown'}, bubbles: true, cancelable: true }))`)
+    await vwin.loadFile(resolve('out/renderer/index.html'))
+    await vuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    await vjs(`window.__dictation = []; window.addEventListener('ec2ra:dictation', (e) => window.__dictation.push(e.detail.active)); 0`)
+    // A mic-button style start into the focused search field: the words appear in the field as they are heard.
+    await vjs(`document.querySelector('[aria-label="Search hosts"]').focus()`)
+    await dictate('start')
+    await vuntil(`${hud}?.textContent.includes('connect to web prod') && document.querySelector('[aria-label="Search hosts"]').value === 'Connect to web prod'`, 'live words in the search field')
+    await vuntil(`${hud}.querySelectorAll('.voice-wave > span').length === 20 && ${hud}.textContent.includes('On this Mac') && ${hud}.textContent.includes('into Search hosts')`, 'waveform, on-device note and target')
+    await vshot('voice-hud-dark.png')
+    await vjs(`document.documentElement.setAttribute('data-theme', 'light')`)
+    await vshot('voice-hud-light.png')
+    await vjs(`document.documentElement.setAttribute('data-theme', 'dark')`)
+    await vjs(`document.querySelector('.voice-btn.done').click()`)
+    await vuntil(`!${hud} && document.querySelector('[aria-label="Search hosts"]').value === 'Connect to web prod one'`, 'Done inserts the final words and closes the HUD')
+    assert.deepEqual(await vjs(`window.__dictation`), [true, false], 'ec2ra:dictation reports start and end')
+    await vuntil(`document.querySelectorAll('[data-host-key]').length === 0`, 'the field’s own handlers saw the words (the host list filtered)')
+    assert.match(voiceCalls('voice:start').at(-1).args[0].id, /^v[a-z0-9]+$/, 'the renderer names the dictation')
+    await vjs(`(() => { const i = document.querySelector('[aria-label="Search hosts"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await vuntil(`document.querySelectorAll('[data-host-key]').length > 0`)
+    // Holding Right Option: talk while held, let go to insert (here into the quick switcher).
+    await vjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true }))`)
+    await vuntil(`document.activeElement?.getAttribute('role') === 'combobox'`, 'quick switcher')
+    const startsBeforeHold = voiceCalls('voice:start').length
+    await altRight('keydown')
+    await vuntil(`${hud}?.textContent.includes('Release Right ⌥ to insert') && document.activeElement.value === 'Connect to web prod'`, 'holding the key dictates')
+    assert.equal(await vjs(`!!${hud}.querySelector('.voice-btn.done')`), false, 'no Done button while holding the key')
+    assert.equal(await vjs(`(() => { const m = ${hud}.querySelector('.voice-meta'); return m.scrollWidth <= m.clientWidth + 1 })()`), true, 'the HUD’s hints fit on one line')
+    await vshot('voice-hud-hold.png')
+    await altRight('keyup')
+    await vuntil(`!${hud} && document.activeElement.value === 'Connect to web prod one'`, 'releasing the key inserts')
+    assert.equal(voiceCalls('voice:start').length, startsBeforeHold + 1)
+    assert.equal(voiceCalls('voice:stop').at(-1).args[0], voiceCalls('voice:start').at(-1).args[0].id)
+    // Escape cancels: the field is left as it was and the dialog under the HUD stays open.
+    await vjs(`(() => { const i = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'web'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await dictate('toggle')
+    await vuntil(`document.activeElement.value === 'web connect to web prod'`, 'mid-sentence words are spaced and lower-cased')
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await vuntil(`!${hud} && document.activeElement.value === 'web' && !!document.querySelector('[role="combobox"]')`, 'Escape restores the field and keeps the dialog')
+    assert.equal(voiceCalls('voice:cancel').at(-1).args[0], voiceCalls('voice:start').at(-1).args[0].id)
+    // An ⌥ combination is not a hold: no dictation starts.
+    const startsBeforeCombo = voiceCalls('voice:start').length
+    await altRight('keydown')
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ƒ', code: 'KeyF', altKey: true, bubbles: true, cancelable: true }))`)
+    await new Promise((r) => setTimeout(r, 350))
+    await altRight('keyup')
+    assert.equal(voiceCalls('voice:start').length, startsBeforeCombo, '⌥F never starts dictation')
+    assert.equal(await vjs(`!!${hud}`), false)
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await vuntil(`!document.querySelector('[role="dialog"]')`)
+    // A refusal (microphone access off) shows in the HUD with what to do; Escape dismisses it.
+    voiceRefusal = 'Microphone access is off for EC2 Remote Access. Turn it on in System Settings → Privacy & Security → Microphone.'
+    await vjs(`document.querySelector('[aria-label="Search hosts"]').focus()`)
+    await dictate('toggle')
+    await vuntil(`${hud}?.classList.contains('error') && ${hud}.textContent.includes('Privacy & Security') && ${hud}.textContent.includes('Open Privacy Settings')`, 'the HUD explains a refusal and offers the setting')
+    assert.equal(await vjs(`${hud}.textContent.includes('Error invoking remote method')`), false, 'only the message itself')
+    await vshot('voice-hud-error.png')
+    voiceRefusal = null
+    await vjs(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await vuntil(`!${hud} && document.querySelector('[aria-label="Search hosts"]').value === ''`)
+    // The Notes editor: its mic button, words written live, the final text kept and saved.
+    notes['Dictation.md'] = { text: '# Dictation\n\n', mtime: Date.now() }
+    await vjs(`document.querySelector('button[aria-label="Notes"]').click()`)
+    await vuntil(`[...document.querySelectorAll('.notes-file')].some((b) => b.textContent.includes('Dictation'))`)
+    await vjs(`[...document.querySelectorAll('.notes-file')].find((b) => b.textContent.includes('Dictation')).click()`)
+    await vuntil(`document.querySelector('.notes-title')?.textContent === 'Dictation' && !!document.querySelector('.notes-tools .mic-btn')`)
+    const lastNoteLine = await vjs(`(() => { const r = [...document.querySelectorAll('.notes-tab .cm-line')].at(-1).getBoundingClientRect(); return { x: Math.round(r.left + 20), y: Math.round(r.top + r.height / 2) } })()`)
+    vwin.webContents.focus()
+    vwin.webContents.sendInputEvent({ type: 'mouseDown', x: lastNoteLine.x, y: lastNoteLine.y, button: 'left', clickCount: 1 })
+    vwin.webContents.sendInputEvent({ type: 'mouseUp', x: lastNoteLine.x, y: lastNoteLine.y, button: 'left', clickCount: 1 })
+    await vuntil(`document.activeElement?.classList.contains('cm-content')`)
+    await vjs(`document.querySelector('.notes-tools .mic-btn').click()`)
+    await vuntil(`document.querySelector('.notes-tools .mic-btn').getAttribute('aria-pressed') === 'true' && document.querySelector('.notes-tab .cm-content').textContent.includes('Connect to web prod') && ${hud}?.textContent.includes('into Note')`, 'words appear in the note as they are heard')
+    await vshot('voice-notes.png')
+    await vjs(`document.querySelector('.notes-tools .mic-btn').click()`)
+    await vuntil(`!${hud} && document.querySelector('.notes-tools .mic-btn').getAttribute('aria-pressed') === 'false' && document.querySelector('.notes-tab .cm-content').textContent.includes('Connect to web prod one')`, 'the mic button again inserts')
+    for (let n = 0; n < 100 && !notes['Dictation.md'].text.includes('Connect to web prod one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(notes['Dictation.md'].text, '# Dictation\n\nConnect to web prod one', 'the note is saved with the words, once')
+    // A terminal takes the finished words as one paste, with no Enter.
+    await vjs(`document.querySelector('button[aria-label="Hosts"]').click()`)
+    await vuntil(`!!document.querySelector('[data-host-key="${running.key}"] .btn-ssh')`)
+    await vjs(`document.querySelector('[data-host-key="${running.key}"] .btn-ssh').click()`)
+    await vuntil(`!!document.querySelector('.term-toolbar .mic-btn') && document.body.textContent.includes('ubuntu@web-prod-01 via ssm')`)
+    const sshSession = calls.filter((c) => c.channel === 'ssh:open').at(-1).args[0].sessionId
+    await vjs(`document.querySelector('.term-toolbar .mic-btn').click()`)
+    await vuntil(`${hud}?.textContent.includes('into Terminal') && ${hud}.textContent.includes('connect to web prod')`, 'the HUD shows the words for a terminal')
+    assert.equal(calls.some((c) => c.channel === 'ssh:write' && c.args[0] === sshSession && /connect/i.test(c.args[1])), false, 'nothing reaches the shell before the end')
+    await vjs(`document.querySelector('.voice-btn.done').click()`)
+    await vuntil(`!${hud}`)
+    for (let n = 0; n < 50 && !calls.some((c) => c.channel === 'ssh:write' && c.args[0] === sshSession && /connect/i.test(c.args[1])); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'ssh:write' && c.args[0] === sshSession && /connect/i.test(c.args[1])).map((c) => c.args[1]), ['Connect to web prod one'], 'one paste, no Enter')
+    // Settings → Voice: the hold key, the language and what macOS allows.
+    await vjs(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await vuntil(`!!document.querySelector('.settings-nav [data-section="voice"]')`)
+    await vjs(`document.querySelector('.settings-nav [data-section="voice"]').click()`)
+    await vuntil(`document.querySelector('.settings-body')?.textContent.includes('Allowed') && !!document.querySelector('select[aria-label="Dictation language"] option[value="fr-FR"]')`, 'voice settings show the permissions and languages')
+    await vshot('settings-voice.png')
+    await vjs(`document.querySelector('.settings-nav [data-section="about"]').click()`)
+    await vuntil(`document.querySelector('.settings-body').textContent.includes('Dictation listens only while')`)
+    vwin.destroy()
 
     // First run: the welcome screen, in both appearances, and its main action opens Add account.
     emptyScenario = true

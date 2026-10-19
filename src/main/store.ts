@@ -60,7 +60,9 @@ export const defaultSettings: Settings = {
   portForwards: [],
   workspaces: [],
   sessionLogging: false,
-  sessionLogDir: ''
+  sessionLogDir: '',
+  dictationKey: 'AltRight',
+  dictationLocale: ''
 }
 
 interface Schema {

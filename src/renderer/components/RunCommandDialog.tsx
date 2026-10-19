@@ -7,6 +7,7 @@ import { openDefaultFor } from '../quickConnect'
 import Modal from './Modal'
 import Popover, { MenuItem, MenuLabel } from './Popover'
 import { Icon } from './icons'
+import MicButton from './MicButton'
 
 const LAST_COMMAND = 'ui.runCommand.last'
 const TIMEOUTS: [number, string][] = [[60, '1 minute'], [300, '5 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, '1 hour']]
@@ -292,6 +293,7 @@ export default function RunCommandDialog(): ReactElement | null {
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button className="btn btn-sm" disabled={!snippets.length} title={snippets.length ? 'Insert a saved snippet' : 'No snippets saved yet (Settings → Terminal)'} onClick={(e) => setMenu({ kind: 'snippets', anchor: e.currentTarget })}><Icon.snippet /> Snippets</button>
+            <MicButton className="btn btn-sm" label="Dictate" target={() => area.current} />
             <label className="muted flex items-center gap-1.5 whitespace-nowrap text-[12px]">
               Stop after
               <select className="input !h-7 w-32" value={timeoutSec} onChange={(e) => setTimeoutSec(Number(e.target.value))}>

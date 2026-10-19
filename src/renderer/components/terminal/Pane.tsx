@@ -14,6 +14,7 @@ import Ribbon from './Ribbon'
 import { useGitStatus } from './useGitStatus'
 import KeyBar from '../mobile/KeyBar'
 import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../../mobile'
+import { registerDictationTarget, xtermTarget } from '../../voice'
 import { applyStickyMods, keySequence, type StickyMods } from '../../terminalKeys'
 import { addHistory, loadHistory } from './history'
 
@@ -148,6 +149,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     // Links open in the app's own browser.
     term.loadAddon(new WebLinksAddon((_e, uri) => useStore.getState().openBrowser({ url: uri })))
     term.open(el)
+    registerDictationTarget(el, xtermTarget(term))
     // ⌘ combinations are the app's (tabs, panes, blocks), as is ⌃Tab; none of them are for the shell.
     term.attachCustomKeyEventHandler((e) => !(e.metaKey || (e.ctrlKey && (e.key === 'Tab' || e.code === 'Backquote'))))
     termRef.current = term
