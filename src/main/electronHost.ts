@@ -46,6 +46,7 @@ export const electronHost: Host = {
   },
   cancelDownload,
   fillWebPage: fillPage,
+  showEmojiPanel: () => app.showEmojiPanel(),
   shareUrl(url) {
     if (process.platform !== 'darwin') return false
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

@@ -194,3 +194,15 @@ export function loginMatches(urls: string[], pageUrl: string): boolean {
     return !!h && siteOf(h) === siteOf(page)
   })
 }
+
+/** A space's own colour must be #rrggbb: it is written into a style attribute. */
+export const isHexColor = (c: unknown): c is string => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)
+
+/**
+ * The last character in a text box, counting an emoji made of several code points (👩‍💻, 🏳️‍🌈, a flag) as one, or ''.
+ * The icon field keeps only what was typed or picked last, so picking another emoji replaces the one there.
+ */
+export function lastGrapheme(text: string): string {
+  const parts = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text.trim())]
+  return parts.at(-1)?.segment ?? ''
+}

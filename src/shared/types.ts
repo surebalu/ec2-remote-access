@@ -325,6 +325,10 @@ export interface WebSpace {
   name: string
   color: AccentColor
   profile?: string
+  /** A colour of its own (#rrggbb) instead of `color`; with `to`, a gradient from one to the other. */
+  custom?: { from: string; to?: string }
+  /** An emoji shown in place of the initials. */
+  icon?: string
 }
 
 export interface WebTab {

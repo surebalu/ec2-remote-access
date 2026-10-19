@@ -77,3 +77,15 @@ test('saved logins match pages of the same site, never another one', () => {
   assert.equal(loginMatches([], 'https://example.com/'), false)
   assert.equal(loginMatches(['https://example.com'], 'about:blank'), false)
 })
+
+test('a space keeps only a #rrggbb colour of its own, and one emoji as its icon', async () => {
+  const { isHexColor, lastGrapheme } = await import('../src/shared/browser.ts')
+  assert.equal(isHexColor('#00b4a6'), true)
+  assert.equal(isHexColor('#00B4A6'), true)
+  for (const bad of ['00b4a6', '#0b4', '#00b4a6;background:url(x)', 'red', 7, undefined]) assert.equal(isHexColor(bad), false, String(bad))
+  assert.equal(lastGrapheme('💼'), '💼')
+  assert.equal(lastGrapheme('💼🚀'), '🚀', 'picking another emoji replaces the first')
+  assert.equal(lastGrapheme('👩‍💻'), '👩‍💻', 'a joined emoji is one character')
+  assert.equal(lastGrapheme('🇺🇸'), '🇺🇸')
+  assert.equal(lastGrapheme('  '), '')
+})

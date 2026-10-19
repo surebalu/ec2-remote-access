@@ -139,6 +139,8 @@ export interface IpcApi {
   'browser:fill': (webContentsId: number, account: string, itemId: string, anySite?: boolean) => Promise<string[]>
   /** The system Share menu for a page; false when the host has none (gateway). */
   'browser:share': (url: string) => Promise<boolean>
+  /** The macOS emoji picker, for the text field that has the keyboard (the Mac app only). */
+  'app:emojiPanel': () => Promise<void>
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
