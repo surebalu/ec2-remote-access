@@ -1,3 +1,4 @@
+import type { FinderPlaces, RecentFile } from './finder'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -62,6 +63,13 @@ export interface IpcApi {
   'local:rename': (from: string, to: string) => Promise<void>
   'local:trash': (paths: string[]) => Promise<void>
   'local:reveal': (path: string) => Promise<void>
+  /** Opens a file or folder with its default app on the computer running the app. */
+  'local:open': (path: string) => Promise<void>
+  'local:quickLook': (path: string) => Promise<void>
+  /** The Finder tab's sidebar: the macOS Finder favorites plus the app's own, and the locations. */
+  'finder:places': () => Promise<FinderPlaces>
+  'finder:recents': () => Promise<RecentFile[]>
+  'finder:search': (query: string, dir: string) => Promise<RecentFile[]>
   'sftp:cancel': (transferId: string) => Promise<void>
   'sftp:transfers': (sessionId: string) => Promise<SftpTransfer[]>
   'sftp:clearTransfers': (sessionId: string) => Promise<void>

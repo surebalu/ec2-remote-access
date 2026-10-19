@@ -64,6 +64,8 @@ export const defaultSettings: Settings = {
   workspaces: [],
   sessionLogging: false,
   sessionLogDir: '',
+  finderExtra: [],
+  finderHidden: [],
   dictationKey: 'AltRight',
   dictationLocale: ''
 }

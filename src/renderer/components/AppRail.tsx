@@ -5,9 +5,9 @@ import { Icon } from './icons'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 import { APP_THEMES, findAppTheme } from '../appThemes'
 
-type ToolKind = 'local' | 'browser' | 'notes' | 'board'
+type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder'
 
-const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard' }
+const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder' }
 
 /**
  * The app's sections down the left edge: hosts, all sessions, and the built-in tools, with help, theme and settings at
@@ -33,6 +33,7 @@ export default function AppRail(): ReactElement {
     if (kind === 'local') s.openTerminal()
     else if (kind === 'browser') s.openBrowser()
     else if (kind === 'notes') s.openNotes()
+    else if (kind === 'finder') s.openFinder()
     else s.openBoard()
   }
 
@@ -89,6 +90,7 @@ export default function AppRail(): ReactElement {
       })}
       <span className="rail-divider" />
       {hasBrowser() && tool('local', <Icon.console />, 'Terminal: shells on this Mac (⌃`)')}
+      {hasBrowser() && tool('finder', <Icon.finder />, 'Finder: the files on this Mac, with your Finder favorites')}
       {tool('browser', <Icon.globe />, 'Browser: AWS console spaces and web tabs')}
       {tool('notes', <Icon.note />, 'Notes in your Obsidian vault (⌘⇧N)')}
       {tool('board', <Icon.board />, 'Whiteboard: a scratch pad for brainstorming')}

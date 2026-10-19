@@ -47,6 +47,8 @@ export interface Host {
   shareUrl(url: string): boolean
   /** Opens the system emoji picker for the focused text field (macOS). Absent where there is none. */
   showEmojiPanel?(): void
+  /** Quick Look for a file (macOS). Absent where there is none. */
+  quickLook?(path: string): void
   /** Copy text to the clipboard. Returns false when the host has no clipboard (the UI then copies client-side). */
   clipboardWrite(text: string): boolean
   /** Apply the app-wide light/dark preference to native chrome; no-op without native windows. */
