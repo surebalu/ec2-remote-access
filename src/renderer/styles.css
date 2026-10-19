@@ -1381,3 +1381,11 @@ tr.group-row .group-head:hover .group-run, tr.group-row .group-run:focus-visible
   .rc-foot { flex-wrap: wrap; padding: 10px 14px; }
   .rc-foot > .muted { display: none; }
 }
+
+/* Terminal tabs show the Git branch, as Warp does: under the name in the side list, as a chip in the top bar. */
+.term-tab-sub { display: flex; align-items: center; gap: 4px; }
+.term-tab-branch-icon { flex-shrink: 0; width: 11px; height: 11px; color: var(--accent); }
+.term-tab-branch { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.term-tab-rest { flex-shrink: 0; color: var(--muted); }
+.term-tab-chip { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; max-width: 130px; padding: 1px 6px; overflow: hidden; border-radius: 5px; background: var(--accent-soft); color: var(--text-2); font: 500 10.5px/16px 'SF Mono', ui-monospace, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.term-tab-chip svg { flex-shrink: 0; width: 10px; height: 10px; color: var(--accent); }

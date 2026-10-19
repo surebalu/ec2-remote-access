@@ -1140,6 +1140,7 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelectorAll('.term-tab').length === 1 && !!document.querySelector('.tdock textarea')`, '⌃` opens the Terminal with the input box')
     assert.equal(await tjs(`!!document.querySelector('.term-side .term-tab')`), true, 'tabs are down the side by default')
     await tuntil(`document.querySelector('.tdock-chips')?.textContent.includes('~/proj') && document.querySelector('.tchip.git')?.textContent === 'main'`, 'folder and branch chips')
+    await tuntil(`document.querySelector('.term-side .term-tab.on .term-tab-branch')?.textContent === 'main'`, 'the side list shows the tab\'s Git branch, as in Warp')
     // A command typed in the input box runs in the shell and becomes a block.
     await typeCmd('echo hi')
     await pressIn('Enter')
@@ -1239,7 +1240,8 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelectorAll('.term-tab').length === 3 && document.querySelector('.term-tab.on .term-tab-aws')?.textContent === 'production'`, 'AWS profile tab')
     assert.deepEqual(opens().at(-1).env, { AWS_PROFILE: 'production' })
     await tuntil(`document.querySelector('.term-slot:not([style*="none"]) .tchip.aws')?.textContent === 'production'`, 'AWS chip')
-    await tuntil(`document.querySelectorAll('.term-side .term-tab-sub')[0]?.textContent === '~/proj'`, 'side list shows the folder')
+    // Each tab: the folder as its name, and underneath, as in Warp, the Git branch (the fixture's shell reports "main").
+    await tuntil(`document.querySelectorAll('.term-side .term-tab-sub')[0]?.textContent.startsWith('main') && !!document.querySelectorAll('.term-side .term-tab-sub')[0].querySelector('.term-tab-branch-icon')`, 'side list shows the branch')
     await tshot('terminal-vertical-tabs.png')
     // Tabs across the top instead, and back down the side.
     const termSetting = async (label) => {

@@ -21,6 +21,8 @@ export interface PaneInfo {
   running?: string | null
   /** The title the shell or program set (OSC 0/2). */
   title?: string
+  /** The Git branch of the shell's folder (from the zsh integration's prompt marks); null outside a repository. */
+  branch?: string | null
 }
 
 /** What the Terminal tab can ask of a pane (shortcuts act on the focused one). */
@@ -173,7 +175,10 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
           n.onclick = () => { window.focus(); props.current.onReveal() }
         }
       } else if (m.kind === 'prop') {
-        if (m.key === 'Git') setChips((c) => ({ ...c, git: m.value || undefined }))
+        if (m.key === 'Git') {
+          setChips((c) => ({ ...c, git: m.value || undefined }))
+          props.current.onInfo(id, { branch: m.value || null })
+        }
         else if (m.key === 'Aws') setChips((c) => ({ ...c, aws: m.value || undefined }))
       }
       redraw()
