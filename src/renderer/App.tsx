@@ -165,7 +165,8 @@ export default function App(): ReactElement {
       <header className="titlebar drag">
         <div className="brand">
           <span className="brand-mark">&gt;_</span>
-          <span className="brand-name">EC2 Remote Access</span>
+          {/* The name shown in the title bar; the app's internal name (bundle, data folder, Keychain) stays EC2 Remote Access. */}
+          <span className="brand-name">Remote Access Tool</span>
           <span className="flex-1" />
           {!browserInFront && (
             <button className="titlebar-btn no-drag" title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Collapse sidebar (⌘B)'} aria-label={sidebarCollapsed ? 'Show sidebar' : 'Collapse sidebar'} aria-pressed={!sidebarCollapsed} onClick={() => useStore.getState().toggleSidebar()}>

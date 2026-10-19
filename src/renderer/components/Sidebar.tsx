@@ -388,8 +388,9 @@ export default function Sidebar(): ReactElement | null {
         {s.scanning && <div className="side-progress" role="progressbar" aria-valuemin={0} aria-valuemax={scanned.length} aria-valuenow={done}><span style={{ width: `${scanned.length ? Math.max(6, Math.round((done / scanned.length) * 100)) : 6}%` }} /></div>}
         <div className="flex items-center gap-1">
           <span className="dot" style={{ background: s.scanning || s.scanErrors.length ? 'var(--warn)' : s.scannedAt ? 'var(--ok)' : 'var(--muted)', animation: s.scanning ? 'pulse 1.2s infinite' : undefined }} />
-          <span className="side-scan-text">
-            {s.scanning ? `Scanning ${done}/${scanned.length} regions` : s.scannedAt ? `Updated ${new Date(s.scannedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Not scanned yet'}
+          {/* Just the time: the footer also holds Aa, Rescan and Sign in, and a monospaced font leaves no room for more. */}
+          <span className="side-scan-text" title={s.scannedAt ? `Inventory last updated ${new Date(s.scannedAt).toLocaleString()}` : undefined}>
+            {s.scanning ? `Scanning ${done}/${scanned.length}` : s.scannedAt ? new Date(s.scannedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Not scanned'}
           </span>
           <span className="flex-1" />
           <button className="btn btn-ghost btn-sm btn-icon text-size-btn" title="Text size of the sidebar and the hosts list" aria-label="Text size" aria-haspopup="dialog" onClick={(e) => setSizeMenu(sizeMenu ? null : e.currentTarget)}>Aa</button>

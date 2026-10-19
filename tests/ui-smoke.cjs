@@ -253,6 +253,7 @@ app.whenReady().then(async () => {
     await win.loadFile(resolve('out/renderer/index.html'))
     await until(`document.querySelectorAll('[data-host-key]').length === 3`)
     await screenshot('hosts-dark.png')
+    assert.equal(await js(`document.querySelector('.titlebar .brand-name').textContent`), 'Remote Access Tool')
     assert.equal(await js(`getComputedStyle(document.querySelector('thead th button')).textTransform`), 'uppercase', 'sortable headers match the others')
     assert.equal(await js(`!!document.querySelector('[data-host-key="${stopped.key}"]')`), false, 'running filter initially hides stopped host')
 
