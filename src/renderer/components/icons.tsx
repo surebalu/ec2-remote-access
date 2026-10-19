@@ -264,6 +264,13 @@ export const Icon = {
       <path d="M14 3v5h5M9 12h7M9 16h5" />
     </svg>
   ),
+  /** Painter's palette: colour themes. */
+  palette: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.7 1.8-1.7H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z" />
+      <circle cx="7.5" cy="11" r="1" fill="currentColor" /><circle cx="10" cy="7.3" r="1" fill="currentColor" /><circle cx="14.5" cy="7.3" r="1" fill="currentColor" /><circle cx="17" cy="11" r="1" fill="currentColor" />
+    </svg>
+  ),
   /** Phone with a tablet behind it: paired devices. */
   phone: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

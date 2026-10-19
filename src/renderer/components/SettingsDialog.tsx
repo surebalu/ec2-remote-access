@@ -9,6 +9,7 @@ import type { AccentColor } from '@shared/types'
 import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isDarkMode } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
+import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
 import { Icon } from './icons'
 
 type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'voice' | 'phone' | 'requirements' | 'about'
@@ -49,6 +50,36 @@ function Row({ label, hint, children, stack = false }: { label: ReactNode; hint?
       </div>
       {children !== undefined && <div className="set-control">{children}</div>}
     </div>
+  )
+}
+
+/** The default look's tokens (styles.css), for the Default card while a colour theme repaints the real ones. */
+const DEFAULT_LOOK = {
+  light: { '--bg': '#f3f4f7', '--bg-elev': '#f9fafb', '--panel': '#ffffff', '--border': '#e5e7ec', '--text': '#0d1424', '--muted': '#6a7389', '--accent': '#5b5fd6' },
+  dark: { '--bg': '#0a0b0f', '--bg-elev': '#0e1015', '--panel': '#12141a', '--border': '#22252e', '--text': '#e8eaf0', '--muted': '#737c90', '--accent': '#7c80f2' }
+}
+
+/** A miniature of the app in a colour theme: rail, sidebar with rows, a terminal with output, and a button. */
+function ThemePreview({ theme, on, onPick, appDark }: { theme: AppTheme | null; on: boolean; onPick: () => void; appDark: boolean }): ReactElement {
+  const k: Record<string, string> = theme?.tokens ?? DEFAULT_LOOK[appDark ? 'dark' : 'light']
+  const scheme = theme ? TERMINAL_THEMES.find((x) => x.id === theme.scheme) : undefined
+  const term = scheme?.theme ?? resolveTerminalTheme('auto', appDark)
+  return (
+    <button type="button" role="radio" aria-checked={on} className={`ctheme ${on ? 'on' : ''}`} data-color-theme-option={theme?.id ?? 'default'} title={theme ? theme.name : 'The standard colours, following Auto / Light / Dark'} onClick={onPick}>
+      <span className="ctheme-preview" style={{ background: k['--bg'], borderColor: k['--border'] }}>
+        <span className="ctheme-rail" style={{ background: k['--bg-elev'], borderColor: k['--border'] }}>
+          <i style={{ background: k['--accent'] }} /><i style={{ background: k['--muted'] }} /><i style={{ background: k['--muted'] }} />
+        </span>
+        <span className="ctheme-side" style={{ background: k['--panel'], borderColor: k['--border'] }}>
+          <i style={{ background: k['--text'], width: '70%' }} /><i style={{ background: k['--muted'], width: '50%' }} /><i style={{ background: k['--muted'], width: '62%' }} />
+        </span>
+        <span className="ctheme-main" style={{ background: scheme?.backdrop ?? term.background }}>
+          <i style={{ background: term.green ?? term.foreground, width: '58%' }} /><i style={{ background: term.foreground, width: '40%' }} /><i style={{ background: term.blue ?? term.foreground, width: '48%' }} />
+          <b style={{ background: k['--accent'] }} />
+        </span>
+      </span>
+      <span className="ctheme-name">{theme ? theme.name : 'Default'}</span>
+    </button>
   )
 }
 
@@ -181,10 +212,10 @@ export default function SettingsDialog(): ReactElement | null {
   const general = (
     <>
       <Group>
-        <Row label="Appearance" hint="Follows macOS by default.">
+        <Row label="Appearance" hint={draft.colorTheme ? 'A colour theme picks light or dark itself; choose one here to go back to the default colours.' : 'Follows macOS by default.'}>
           <div className="seg w-64">
             {(['system', 'light', 'dark'] as const).map((t) => (
-              <button key={t} className={draft.theme === t ? 'on' : ''} onClick={() => { upd('theme', t); void s.setTheme(t) }}>
+              <button key={t} className={draft.theme === t && !draft.colorTheme ? 'on' : ''} onClick={() => { setDraft((d) => (d ? { ...d, theme: t, colorTheme: '' } : d)); void s.setTheme(t) }}>
                 {t === 'system' ? 'Auto' : t[0].toUpperCase() + t.slice(1)}
               </button>
             ))}
@@ -202,6 +233,18 @@ export default function SettingsDialog(): ReactElement | null {
             <option>iTerm</option>
           </select>
         </Row>
+      </Group>
+      <Group title="Colour theme">
+        <div className="set-row stack">
+          <div className="set-hint !mt-0">Colours for the whole app, from the terminal schemes. Terminals set to “Match app” take the theme’s scheme too.</div>
+          <div className="ctheme-grid" role="radiogroup" aria-label="Colour theme">
+            {[null, ...APP_THEMES].map((th) => {
+              const on = (draft.colorTheme ?? '') === (th?.id ?? '')
+              const pick = (): void => { upd('colorTheme', th?.id ?? ''); void s.setColorTheme(th?.id ?? '') }
+              return <ThemePreview key={th?.id ?? 'default'} theme={th} on={on} onPick={pick} appDark={draft.theme === 'dark' || (draft.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)} />
+            })}
+          </div>
+        </div>
       </Group>
       <Group title="Finding hosts">
         <Row label="Scan every enabled region" hint="Slower. Each account’s own region is always scanned.">
@@ -302,12 +345,13 @@ export default function SettingsDialog(): ReactElement | null {
     </>
   )
 
-  const t = resolveTerminalTheme(draft.terminalTheme, isDarkMode())
+  const scheme = effectiveScheme(draft.terminalTheme, draft.colorTheme)
+  const t = resolveTerminalTheme(scheme, isDarkMode())
   const ansi = [t.black, t.red, t.green, t.yellow, t.blue, t.magenta, t.cyan, t.white].filter(Boolean) as string[]
   const terminal = (
     <>
       <Group title="Appearance">
-        <div className="set-preview" style={{ background: terminalBackdrop(draft.terminalTheme, isDarkMode()), color: t.foreground, fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE }}>
+        <div className="set-preview" style={{ background: terminalBackdrop(scheme, isDarkMode()), color: t.foreground, fontFamily: terminalFontFamily(draft.terminalFont), fontSize: draft.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE }}>
           <div><span style={{ color: t.green ?? t.foreground }}>ec2-user@ip-10-0-2-149</span>:<span style={{ color: t.blue ?? t.foreground }}>~</span>$ ls -la</div>
           <div className="flex gap-1 pt-1.5">{ansi.map((c, i) => <span key={i} className="h-2.5 w-5 rounded-sm" style={{ background: c }} />)}</div>
         </div>

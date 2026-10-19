@@ -3,17 +3,21 @@ import { useState } from 'react'
 import { isDarkMode, useStore } from '../store'
 import { TERMINAL_THEMES, TERMINAL_FONTS, DEFAULT_TERMINAL_FONT, DEFAULT_TERMINAL_FONT_SIZE, resolveTerminalTheme, terminalFontFamily, type TerminalTheme } from '../terminalThemes'
 import { Icon } from './icons'
+import { effectiveScheme } from '../appThemes'
 
 /** Miniature terminal window in the scheme's colours: three "lines" of output, like Termius' theme cards. */
 function ThemeCard({ t }: { t: TerminalTheme }): ReactElement {
-  const th = t.id === 'auto' ? resolveTerminalTheme('auto', isDarkMode()) : t.theme
+  // "Match app" shows what it currently resolves to: the colour theme's scheme, or the plain light / dark palette.
+  const matched = t.id === 'auto' ? TERMINAL_THEMES.find((x) => x.id === effectiveScheme('auto', useStore.getState().settings?.colorTheme) && x.id !== 'auto') : undefined
+  const th = t.id === 'auto' ? matched?.theme ?? resolveTerminalTheme('auto', isDarkMode()) : t.theme
+  const backdrop = t.id === 'auto' ? matched?.backdrop : t.backdrop
   const bars = [
     [th.green ?? th.foreground, 46], [th.foreground, 30],
     [th.blue ?? th.foreground, 24], [th.foreground, 40],
     [th.magenta ?? th.foreground, 18], [th.yellow ?? th.foreground, 36]
   ] as [string | undefined, number][]
   return (
-    <span className="theme-card" style={{ background: t.backdrop ?? th.background, borderColor: 'color-mix(in srgb, var(--border) 60%, transparent)' }}>
+    <span className="theme-card" style={{ background: backdrop ?? th.background, borderColor: 'color-mix(in srgb, var(--border) 60%, transparent)' }}>
       <span className="theme-card-bar" style={{ background: th.brightBlack ?? th.foreground, opacity: 0.35 }} />
       {[0, 2, 4].map((i) => (
         <span key={i} className="flex gap-[3px]">

@@ -7,6 +7,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import type { DetachedShell, HostShell, Snippet } from '@shared/types'
 import { isDarkMode, useStore, type Tab } from '../store'
 import { resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
+import { effectiveScheme } from '../appThemes'
 import { isAppShortcut, onTerminalAction } from '../shortcuts'
 import HostActions, { openHostNote } from './HostActions'
 import TerminalAppearancePane from './TerminalAppearancePane'
@@ -106,7 +107,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const [shellSheet, setShellSheet] = useState(false)
   const updateTab = useStore((s) => s.updateTab)
   const toast = useStore((s) => s.toast)
-  const themeId = useStore((s) => s.settings?.terminalTheme)
+  // "Match app" follows the app's colour theme when one is chosen.
+  const themeId = useStore((s) => effectiveScheme(s.settings?.terminalTheme, s.settings?.colorTheme))
   const font = useStore((s) => s.settings?.terminalFont)
   const mobile = isMobile()
   const keyboardOpen = useKeyboardOpen()

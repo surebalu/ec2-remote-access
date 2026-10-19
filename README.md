@@ -5,6 +5,7 @@ A macOS (Apple Silicon) desktop app that scans all of your AWS accounts for EC2 
 ## Features
 
 - **Layout**: a rail down the left holds the app's sections (**Hosts**, **Overview** of all open sessions, and the built-in **Terminal**, **Browser**, **Notes** and **Whiteboard**, each with a dot while open), with Shortcuts, Light / Dark / Auto and **Settings** (`⌘,`) at the bottom. The title bar holds only your remote session tabs, a sidebar toggle (`⌘B` hides the hosts sidebar) and a search field for `⌘K`.
+- **Colour themes** (Settings → General → Colour theme, the Theme button at the bottom of the rail, or `⌘K` → Theme): repaint the whole app in Cyber Wave, Dracula, Tokyo Night, Catppuccin Mocha, Nord, One Dark, Gruvbox, Monokai, Solarized, GitHub or One Light, or keep the default colours with Auto / Light / Dark. A theme sets light or dark by itself, terminals on *Match app* take its colour scheme, and Cyber Wave's teal-to-black fade runs down the rail and side panels too. Every theme keeps body text at 7.5:1 contrast or better.
 - Reads every profile from `~/.aws/config` / `~/.aws/credentials` (SSO and static). One-click `aws sso login` when a token has expired.
 - Scans each profile's region (optionally extra regions or all enabled regions) in parallel; inventory is cached so the app opens instantly.
 - Shows name, account, OS, state, IPs, type and a **route badge**: `SSM`, `Direct`, or `Unreachable` (private IP and no online SSM agent).

@@ -6,6 +6,7 @@ import { filteredInstances, routeOf, useStore, visibleInstances } from '../store
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
+import { APP_THEMES } from '../appThemes'
 import { terminalAction } from '../shortcuts'
 import Modal from './Modal'
 import { Icon } from './icons'
@@ -44,6 +45,7 @@ function commands(): Command[] {
     { id: 'theme-light', title: 'Theme: light', keywords: 'appearance', icon: Icon.sun, run: () => void s.setTheme('light') },
     { id: 'theme-dark', title: 'Theme: dark', keywords: 'appearance', icon: Icon.moon, run: () => void s.setTheme('dark') },
     { id: 'theme-system', title: 'Theme: follow macOS', keywords: 'appearance system auto', icon: Icon.auto, run: () => void s.setTheme('system') },
+    ...APP_THEMES.map((t) => ({ id: `color-theme:${t.id}`, title: `Theme: ${t.name}`, keywords: `colour color theme palette appearance ${t.dark ? 'dark' : 'light'}`, icon: Icon.palette, run: () => void s.setColorTheme(t.id) })),
     { id: 'sidebar', title: s.sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar', hint: '⌘B', icon: Icon.panelRight, run: () => s.toggleSidebar() },
     { id: 'hosts', title: 'Go to hosts', hint: '⌘1', icon: Icon.cloud, run: () => s.setActive('hosts') },
     { id: 'notes', title: 'Open notes', keywords: 'obsidian markdown vault', hint: '⌘⇧N', icon: Icon.note, run: () => s.openNotes() },

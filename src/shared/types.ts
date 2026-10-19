@@ -161,6 +161,8 @@ export interface Settings {
   persistentShells: boolean
   /** An icon in the macOS menu bar listing favorite hosts to connect to (Electron only). */
   menuBarIcon: boolean
+  /** A colour theme for the whole app (renderer/appThemes.ts), '' for the default look that follows `theme`. */
+  colorTheme: string
   /** Folder of Markdown notes ('' = the vault Obsidian has open, else ~/Documents/EC2 Remote Access/Notes). */
   notesDir: string
   /** Subfolder of the notes folder that holds one note per host. */

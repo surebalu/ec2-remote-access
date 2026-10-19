@@ -7,6 +7,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { parseMark, parseOsc7, type ShellMark } from '@shared/termIntegration'
 import { isDarkMode, useStore } from '../../store'
 import { resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../../terminalThemes'
+import { effectiveScheme } from '../../appThemes'
 import { Icon } from '../icons'
 import type { Snippet } from '@shared/types'
 import InputDock, { type DockRequest } from './InputDock'
@@ -128,7 +129,9 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   const atPrompt = integration === true && phase === 'idle' && !alt
   const git = useGitStatus(chips.cwd, chips.git, visible, phase === 'idle')
 
-  const theme = resolveTerminalTheme(settings?.terminalTheme, isDarkMode())
+  // "Match app" follows the app's colour theme when one is chosen.
+  const scheme = effectiveScheme(settings?.terminalTheme, settings?.colorTheme)
+  const theme = resolveTerminalTheme(scheme, isDarkMode())
   const fontFamily = terminalFontFamily(settings?.terminalFont)
 
   // ----- the terminal and its shell -----
@@ -292,7 +295,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     term.options.fontFamily = fontFamily
     term.options.fontSize = settings?.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE
     try { fitRef.current?.fit() } catch { /* hidden */ }
-  }, [settings?.terminalTheme, settings?.terminalFont, settings?.terminalFontSize, isDarkMode()]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scheme, settings?.terminalFont, settings?.terminalFontSize, isDarkMode()]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The input box owns typing at the prompt; while a command runs (or without the box) the terminal does.
   useEffect(() => {
@@ -440,7 +443,7 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
   return (
     <div
       className={`tpane ${focused && multi ? 'focused' : ''} ${multi && !focused ? 'dim' : ''}`}
-      style={{ '--term-bg': theme.background ?? '#0d1117', '--term-backdrop': terminalBackdrop(settings?.terminalTheme, isDarkMode()), '--term-fg': theme.foreground ?? '#e6edf3' } as CSSProperties}
+      style={{ '--term-bg': theme.background ?? '#0d1117', '--term-backdrop': terminalBackdrop(scheme, isDarkMode()), '--term-fg': theme.foreground ?? '#e6edf3' } as CSSProperties}
       onMouseDown={onFocus}
     >
       <div

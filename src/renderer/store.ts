@@ -3,6 +3,7 @@ import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, Sca
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { ssoWaitOutcome } from '@shared/ssoWait'
+import { applyColorTheme } from './appThemes'
 
 export interface RdpTabRequest {
   user: string
@@ -166,7 +167,10 @@ interface State {
   deleteFolder: (name: string, moveTo: string | null) => Promise<void>
   folders: () => string[]
   deleteManualHost: (id: string) => Promise<void>
+  /** Auto / Light / Dark. Picking one goes back to the default colours (it clears a colour theme). */
   setTheme: (theme: Theme) => Promise<void>
+  /** A colour theme for the whole app ('' for the default); it decides light or dark itself. */
+  setColorTheme: (id: string) => Promise<void>
   toggleGroup: (key: string) => Promise<void>
   setAllGroups: (keys: string[], collapsed: boolean) => Promise<void>
   isFavorite: (key: string) => boolean
@@ -400,7 +404,8 @@ export const useStore = create<State>((set, get) => ({
       window.api.invoke('tunnels:list')
     ])
     set({ settings, tunnels })
-    applyTheme(settings.theme)
+    const shade = applyAppearance(settings.theme, settings.colorTheme)
+    if (settings.colorTheme) void window.api.invoke('theme:set', shade)
     if (cached) set({ instances: cached.instances, scanErrors: cached.errors, scannedAt: cached.scannedAt })
     window.api.on('scan:progress', (p) => set((s) => ({ progress: { ...s.progress, [`${p.profile}/${p.region}`]: p } })))
     window.api.on('tunnels:changed', (tunnels) => set({ tunnels }))
@@ -675,9 +680,16 @@ export const useStore = create<State>((set, get) => ({
     await get().saveSettings({ manualHosts: hosts, overrides, favorites })
   },
   setTheme: async (theme) => {
-    applyTheme(theme)
-    await get().saveSettings({ theme })
+    applyAppearance(theme, '')
+    await get().saveSettings({ theme, colorTheme: '' })
     await window.api.invoke('theme:set', theme)
+  },
+  setColorTheme: async (id) => {
+    const theme = get().settings?.theme ?? 'system'
+    const shade = applyAppearance(theme, id)
+    await get().saveSettings({ colorTheme: id })
+    // Native controls, scrollbars and the window background follow the theme's light or dark.
+    await window.api.invoke('theme:set', id ? shade : theme)
   },
 
   toggleGroup: async (key) => {
@@ -816,6 +828,17 @@ export function applyTheme(theme: Theme): void {
   const root = document.documentElement
   if (theme === 'system') root.removeAttribute('data-theme')
   else root.setAttribute('data-theme', theme)
+}
+
+/**
+ * Applies Auto / Light / Dark and the colour theme together: a colour theme brings its own tokens and fixes light or
+ * dark (so isDarkMode() and the stylesheet's dark rules agree with it). Returns the appearance it settled on.
+ */
+export function applyAppearance(theme: Theme, colorTheme: string | undefined): Theme {
+  const t = applyColorTheme(colorTheme)
+  const shade: Theme = t ? (t.dark ? 'dark' : 'light') : theme
+  applyTheme(shade)
+  return shade
 }
 
 export function isDarkMode(): boolean {
