@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -74,6 +74,9 @@ export function noteUse(id: string): void {
 const run = (cmd: string, args: string[], timeout = 4000): Promise<string> =>
   new Promise((resolve, reject) => execFile(cmd, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, out) => (err ? reject(err) : resolve(out))))
 
+/** The searches of the latest query; a new query stops them (typing fast would otherwise pile up mdfind runs). */
+let searches: ChildProcess[] = []
+
 /**
  * Spotlight's hits for `query` on every indexed disk, as they stream in, keeping those `keep` accepts; it stops at
  * `max` of them or after `ms` (a common word matches over 100,000 files, which mdfind would take seconds to list).
@@ -85,11 +88,13 @@ function spotlight(query: string, keep: (p: string) => boolean, max: number, ms:
     let rest = ''
     let done = false
     const child = spawn('mdfind', ['-0', query], { stdio: ['ignore', 'pipe', 'ignore'] })
+    searches.push(child)
     const finish = (): void => {
       if (done) return
       done = true
       clearTimeout(timer)
       child.kill()
+      searches = searches.filter((c) => c !== child)
       resolve(out)
     }
     const timer = setTimeout(finish, ms)
@@ -128,6 +133,8 @@ export async function launcherFiles(query: string, limit = 60): Promise<RecentFi
   if (process.platform !== 'darwin' || !name || String(query).trim().length < 2) return []
   const home = homedir()
   const keep = (p: string): boolean => wantedFile(p, home)
+  for (const c of searches) c.kill()
+  searches = []
   const [recent, any] = await Promise.all([
     spotlight(`(${name}) && kMDItemLastUsedDate >= $time.today(-365)`, keep, 150, 1500),
     spotlight(name, keep, 250, 1500)
