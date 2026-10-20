@@ -1462,9 +1462,14 @@ app.whenReady().then(async () => {
     await bjs(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Restore defaults').click()`)
     await buntil(`document.querySelector('[aria-label="Shortcut for Notes"]').textContent === '⇧⌘N' && document.querySelector('[aria-label="Shortcut for Claude"]').textContent === 'None'`, 'defaults')
     assert.deepEqual(settings.shortcuts, {})
+    // Each rail icon carries its shortcut underneath, straight from these settings: none for Claude now.
+    await buntil(`!document.querySelector('button[aria-label="Claude"] .rail-key')`, 'no key, no hint under Claude')
+    assert.equal(await bjs(`document.querySelector('button[aria-label="Notes"] .rail-key').dataset.keys`), '⇧⌘N')
+    assert.equal(await bjs(`document.querySelector('button[aria-label="Hosts"] .rail-key').dataset.keys`), '⌘1')
     await bjs(`document.querySelector('[aria-label="Shortcut for Claude"]').click()`)
     await press('c', 'KeyC', { metaKey: true, ctrlKey: true })
     await buntil(`document.querySelector('[aria-label="Shortcut for Claude"]').textContent === '⌃⌘C'`, 'recorded again')
+    await buntil(`document.querySelector('button[aria-label="Claude"] .rail-key')?.dataset.keys === '⌃⌘C'`, 'the hint under the rail icon follows the new key at once')
     // The launcher's key works in every app: ⌥E would type a character everywhere, ⌥Space is fine (with a note about
     // Raycast), and the old key is let go while recording.
     const pausesBefore = launcherDone.filter((d) => d[0] === 'launcher:pause').length
@@ -1474,6 +1479,16 @@ app.whenReady().then(async () => {
     await press(' ', 'Space', { altKey: true })
     await buntil(`document.querySelector('[aria-label="Shortcut for the launcher"]').textContent === '⌥Space'`, 'launcher key recorded')
     assert.equal(settings.launcherKey, 'alt+space')
+    await buntil(`document.querySelector('button[aria-label="Launcher"] .rail-key')?.dataset.keys === '⌥Space'`, 'the launcher hint follows its key')
+    // Even with a shortcut under every item, the rail keeps Settings on screen in a 900-point-tall window.
+    assert.ok(await bjs(`(() => {
+      const rail = document.querySelector('.app-rail')
+      const extra = [...rail.querySelectorAll('.rail-item:not(:has(.rail-key)):not([aria-label="Theme"])')].map((b) => b.appendChild(Object.assign(document.createElement('kbd'), { className: 'rail-key' })))
+      extra.forEach((k) => (k.dataset.keys = '⌃⌥⇧⌘K'))
+      const fits = rail.scrollHeight <= rail.clientHeight
+      extra.forEach((k) => k.remove())
+      return fits
+    })()`), 'the rail fits with a hint under every item')
     assert.match(await bjs(`document.querySelector('[data-shortcut-row="launcher"]').closest('.set-row').querySelector('.set-key-note').textContent`), /Raycast/)
     for (let n = 0; n < 60 && launcherDone.filter((d) => d[0] === 'launcher:pause').length < pausesBefore + 2; n++) await new Promise((r) => setTimeout(r, 30))
     assert.deepEqual(launcherDone.filter((d) => d[0] === 'launcher:pause').slice(pausesBefore).map((d) => d[1]), [true, false], 'the key is let go while recording')
