@@ -39,6 +39,35 @@ export function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
 }
 
+/**
+ * tmux drops output a terminal falls behind on (about eight screens' worth waiting, which SSM reaches with any long
+ * listing) and redraws only the final screen, so those lines never reach the app's scrollback; its own history keeps
+ * them. The title is how it tells us: tmux sends it with the redraw, and it counts the bytes dropped for this client
+ * (tmux 2.5+; older ones never drop, and leave the count empty). Set on every attach, since a server an earlier
+ * version started lacks it.
+ */
+const TITLE_OPTIONS = ['set -g set-titles on', `set -g set-titles-string ${shq('ec2ra:#{client_discarded}')}`]
+const TITLE = /\x1b\][02];ec2ra:(\d+)(?:\x07|\x1b\\)/g
+
+/** Follows that count through the output of a tab's tmux client, whose chunks may split a title in two. */
+export class DropWatch {
+  private seen = 0
+  private carry = ''
+  /** True when tmux has dropped output since the previous chunk. */
+  feed(data: string): boolean {
+    const text = this.carry + data
+    let dropped = false
+    for (const m of text.matchAll(TITLE)) {
+      const n = Number(m[1])
+      if (n > this.seen) dropped = true
+      this.seen = n
+    }
+    const open = text.lastIndexOf('\x1b]')
+    this.carry = open >= 0 && text.length - open < 64 && !/\x07|\x1b\\/.test(text.slice(open)) ? text.slice(open) : ''
+    return dropped
+  }
+}
+
 /** sshd hands exec requests to the user's login shell, which may not be POSIX; run the script with sh explicitly. */
 function viaSh(script: string): string {
   return `sh -c ${shq(script)}`
@@ -157,9 +186,18 @@ export function newShellName(sessionId: string): string {
   return `${shellNameFor(sessionId)}-${Date.now().toString(36)}`
 }
 
-/** The earlier output of a shell (above its screen), replayed into the terminal before switching to it. */
+/**
+ * The earlier output of a shell (above its screen), replayed into the terminal before switching to it or to refill
+ * the scrollback. Gzipped when the host has gzip: 10,000 lines with their colours are megabytes over SSM.
+ */
 export function historyCommand(name: string): string {
-  return viaSh(`${TMUX} capture-pane -p -J -e -t ${shq(name)} -S -10000 -E -1 2>/dev/null; exit 0`)
+  const capture = `${TMUX} capture-pane -p -J -e -t ${shq(name)} -S -10000 -E -1 2>/dev/null`
+  return viaSh(`if command -v gzip >/dev/null 2>&1; then ${capture} | gzip -c; else ${capture}; fi; exit 0`)
+}
+
+/** Redraws the screen of the client showing a shell, over scrollback the app has just replaced. */
+export function refreshCommand(name: string): string {
+  return viaSh(`C=$(${TMUX} list-clients -t ${shq(name)} -F '#{client_tty}' 2>/dev/null | head -n 1); [ -n "$C" ] && ${TMUX} refresh-client -t "$C"; exit 0`)
 }
 
 /** Names a shell, or clears its name when `label` is empty. Prints ec2ra:ok. */
@@ -230,6 +268,7 @@ export function attachCommand(p: AttachPlan): string {
     lines.push(`${TMUX} new-session -d -s ${n} ${size}`)
   }
   if (p.create && cleanLabel(p.label)) lines.push(`${TMUX} set-option -t ${n} ${LABEL} ${shq(cleanLabel(p.label))} >/dev/null 2>&1`)
+  for (const o of TITLE_OPTIONS) lines.push(`${TMUX} ${o} >/dev/null 2>&1`)
   lines.push(`if ${TMUX} has-session -t ${n} 2>/dev/null; then`)
   if (p.history) {
     lines.push(`  ${TMUX} capture-pane -p -J -e -t ${n} -S -10000 -E -1 2>/dev/null`)
