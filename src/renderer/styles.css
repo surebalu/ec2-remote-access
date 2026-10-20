@@ -223,6 +223,9 @@ tr.row:hover td { background: var(--accent-soft); }
 tr.row.selected td { background: var(--accent-soft-2); }
 tr.row.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 tr.row .row-actions .btn:not(.btn-ssh):not(.btn-rdp) { opacity: 0; transition: opacity .12s var(--ease); }
+.row-acts { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.row-acts .act-main { width: 62px; }
+.row-acts .act-files { flex-shrink: 0; width: 66px; }
 tr.row:hover .row-actions .btn, tr.row.selected .row-actions .btn, tr.row:focus-within .row-actions .btn { opacity: 1; }
 
 /* Tabs strip */
