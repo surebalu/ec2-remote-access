@@ -9,7 +9,7 @@ import { enabledRegions, scanAll, setInstanceState, findInstance } from './aws/i
 import { windowsPassword } from './aws/passwords'
 import { decideRoute } from './connect/route'
 import { getCachedInventory, getSettings, setSettings } from './store'
-import { consoleSignInUrl, loadBrowserState, saveBrowserState } from './browser'
+import { consoleSignInUrl, loadBrowserState, saveBrowserState, setPaneTargets } from './browser'
 import { opLogins, opSecrets } from './onepassword'
 import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
 import { localGitStatus } from './localgit'
@@ -155,6 +155,7 @@ export const handlers: Handlers = {
   'browser:save': (state) => saveBrowserState(state),
   'browser:consoleUrl': (profile, destination) => consoleSignInUrl(profile, destination),
   'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
+  'browser:paneTargets': async (targets) => setPaneTargets(targets),
   'app:emojiPanel': async () => host().showEmojiPanel?.(),
   'local:open': (path) => host().openPath(path),
   'local:quickLook': async (path) => host().quickLook?.(path),

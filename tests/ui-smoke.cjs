@@ -55,6 +55,12 @@ const webServer = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1')
   if (u.pathname === '/fed') { res.writeHead(302, { Location: u.searchParams.get('d') }); res.end(); return }
   const title = u.pathname.startsWith('/console') ? 'AWS Console fixture' : { '/one': 'Fixture page one', '/two': 'Fixture page two' }[u.pathname] ?? 'Fixture'
+  if (u.pathname === '/ticket') {
+    // A Jira-like ticket naming two hosts (one running, one stopped) and a config value to compare.
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end(`<!doctype html><title>INC-4211 Checkout 502s</title><body style="font:15px -apple-system,system-ui;padding:36px;line-height:1.6"><h1>INC-4211: Checkout returns 502</h1><p>Since 09:10 the load balancer marks web-prod-01 unhealthy. Expected max_connections=512 in nginx.conf.</p><p>worker-stopped was stopped for patching.</p></body>`)
+    return
+  }
   res.writeHead(200, { 'content-type': 'text/html' })
   res.end(`<!doctype html><title>${title}</title><body style="font:15px -apple-system,system-ui;padding:36px;line-height:1.6"><h1>${title}</h1><p>${u.pathname}${u.search}</p><p>find me, find me</p><a href="/two" target="_blank">two</a></body>`)
 })
@@ -230,7 +236,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     ]
     case 'ssh:switchShell': return { name: args[1] ?? 'ec2ra-new', label: args[2]?.label ?? (args[1] === 'ec2ra-old1' ? 'debug' : '') }
     case 'ssh:renameShell': return String(args[2]).trim()
-    case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': return
+    case 'ssh:close': case 'ssh:write': case 'ssh:resize': case 'clipboard:write': case 'theme:set': case 'browser:paneTargets': return
     // Dictation: a scripted "helper" that hears "connect to web prod one" (no microphone, no permission prompts).
     case 'voice:status': return { available: true, helper: true, mic: 'authorized', speech: 'notDetermined', onDevice: true, locale: 'en-US', supported: true, locales: ['en-GB', 'en-US', 'fr-FR'] }
     case 'voice:start': {
@@ -1272,6 +1278,104 @@ app.whenReady().then(async () => {
     await buntil(`!!document.querySelector('.browser.side-hidden')`)
     await bshot('browser-sidebar-hidden.png')
     await bkey('s')
+
+    // Side by side: a ticket names hosts; one opens beside it, the split resizes, rearranges, finds a value in every
+    // pane, and takes text from the page.
+    bwin.webContents.send('web:window', { webContentsId: guests()[0].id, url: page('/ticket'), background: false })
+    await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'INC-4211 Checkout 502s'`, 'ticket opens')
+    await buntil(`document.querySelector('.web-hosts-pill')?.textContent.includes('2 hosts on this page')`, 'hosts on the page')
+    await bjs(`document.querySelector('.web-hosts-pill button').click()`)
+    await buntil(`document.querySelectorAll('.popover .menu-item').length === 2`, 'hosts menu')
+    assert.deepEqual(await bjs(`[...document.querySelectorAll('.popover .menu-item')].map((b) => [b.querySelector('.font-medium').textContent, b.disabled])`), [['web-prod-01', false], ['worker-stopped', true]])
+    const browserTabId = await bjs(`document.querySelector('.browser').closest('.session-pane').dataset.tabId`)
+    await bjs(`document.querySelector('.popover .menu-item').click()`)
+    await buntil(`document.querySelectorAll('.session-panes.split > .split-pane:not(.hidden)').length === 2 && !!document.querySelector('.split-bar')`, 'host beside the ticket')
+    const sshA = await bjs(`[...document.querySelectorAll('.split-pane:not(.hidden)')].find((p) => p.dataset.tabId !== ${JSON.stringify(browserTabId)}).dataset.tabId`)
+    const paneBox = (id) => bjs(`(() => { const s = document.querySelector('[data-tab-id="${id}"]').style; return [s.left, s.top, s.width, s.height] })()`)
+    assert.deepEqual(await paneBox(browserTabId), ['0%', '0%', '50%', '100%'])
+    assert.deepEqual(await paneBox(sshA), ['50%', '0%', '50%', '100%'])
+    await buntil(`document.querySelector('[data-tab-id="${sshA}"] .tile-title')?.textContent === 'web-prod-01 @ production'`, 'pane header')
+    for (let n = 0; n < 60 && !calls.some((c) => c.channel === 'browser:paneTargets' && c.args[0].length === 1); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'browser:paneTargets').at(-1).args[0], [{ id: sshA, title: 'web-prod-01 @ production' }], 'the page menu offers the terminal')
+    // Find in all panes: the value once on the ticket, twice in the terminal.
+    await buntil(`document.querySelector('[data-tab-id="${sshA}"]')?.querySelector('.term-toolbar')?.textContent.includes('via ssm')`, 'terminal connected')
+    bwin.webContents.send('ssh:event', { sessionId: sshA, type: 'data', data: 'max_connections = 256\r\nmax_connections_per_ip = 10\r\n' })
+    await new Promise((r) => setTimeout(r, 200))
+    await typeIn('.split-find input', 'max_connections')
+    await buntil(`(() => { const c = [...document.querySelectorAll('.split-count')].map((b) => b.querySelector('b').textContent); return c.join(',') === '1,2' })()`, 'counts per pane')
+    await bshot('side-by-side-find.png')
+    await bjs(`document.querySelector('.split-find input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+    await buntil(`document.querySelector('.split-find input').value === '' && !document.querySelector('.split-count')`, 'find cleared')
+    // Dragging the border resizes; a double-click evens it out again.
+    const border = async () => bjs(`(() => { const r = document.querySelector('.split-divider.row').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })()`)
+    const pointer = (sel, type, x, y) => bjs(`document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { bubbles: true, cancelable: true, clientX: ${x}, clientY: ${y}, button: 0, pointerId: 1 }))`)
+    const [bx, by] = await border()
+    await pointer('.split-divider.row', 'pointerdown', bx, by)
+    await buntil(`!!document.querySelector('.split-shield')`, 'drag shield')
+    await pointer('.split-shield', 'pointermove', bx + 200, by)
+    await pointer('.split-shield', 'pointerup', bx + 200, by)
+    await buntil(`!document.querySelector('.split-shield')`)
+    const widened = parseFloat((await paneBox(browserTabId))[2])
+    assert.ok(widened > 60 && widened < 70, `the ticket pane grew to ${widened}%`)
+    await new Promise((r) => setTimeout(r, 400))
+    const [bx2, by2] = await border()
+    await pointer('.split-divider.row', 'pointerdown', bx2, by2)
+    await pointer('.split-shield', 'pointerup', bx2, by2)
+    await pointer('.split-divider.row', 'pointerdown', bx2, by2)
+    await buntil(`document.querySelector('[data-tab-id="${browserTabId}"]').style.width === '50%'`, 'double-click evens the sizes')
+    // ⌘\ picks a second host beside the focused pane; then one large and the rest stacked.
+    await bjs(`document.querySelector('[data-tab-id="${sshA}"] .tile-head').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+    await bkey('\\')
+    await buntil(`document.querySelector('[role="dialog"] h2')?.textContent === 'Open beside web-prod-01 @ production'`, 'beside picker')
+    await typeIn('input[aria-label="Find a host or open session"]', 'web-prod')
+    await buntil(`document.querySelector('.switcher-result.on')?.textContent.includes('SSH beside')`, 'host offered beside')
+    await enterIn('input[aria-label="Find a host or open session"]')
+    await buntil(`document.querySelectorAll('.session-panes.split > .split-pane:not(.hidden)').length === 3`, 'three panes')
+    await bjs(`document.querySelector('.split-bar button[aria-label="One large, the rest stacked beside it"]').click()`)
+    const sshB = await bjs(`[...document.querySelectorAll('.split-pane:not(.hidden)')].map((p) => p.dataset.tabId).find((id) => id !== ${JSON.stringify(browserTabId)} && id !== ${JSON.stringify(sshA)})`)
+    await buntil(`document.querySelector('[data-tab-id="${browserTabId}"]').style.width === '60%'`, 'main layout')
+    assert.deepEqual(await paneBox(sshB), ['60%', '50%', '40%', '50%'])
+    await bshot('side-by-side.png')
+    // ⌘⇧↩ shows the focused pane alone and back; ⌥⌘← moves to the ticket.
+    await bkey('Enter', { shiftKey: true })
+    await buntil(`document.querySelectorAll('.session-panes.split > .split-pane:not(.hidden)').length === 1`, 'zoomed')
+    await bkey('Enter', { shiftKey: true })
+    await buntil(`document.querySelectorAll('.session-panes.split > .split-pane:not(.hidden)').length === 3`, 'unzoomed')
+    await bkey('ArrowLeft', { altKey: true })
+    await buntil(`document.querySelector('.split-pane.focused')?.dataset.tabId === ${JSON.stringify(browserTabId)}`, 'focus moved to the ticket')
+    // Dragging a pane's header onto the ticket's left edge docks it there.
+    const drag = (sel, type, x, y) => bjs(`(() => { window.__dt ??= new DataTransfer(); document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new DragEvent(${JSON.stringify(type)}, { bubbles: true, cancelable: true, clientX: ${x}, clientY: ${y}, dataTransfer: window.__dt })) })()`)
+    const ticketBox = await bjs(`(() => { const r = document.querySelector('[data-tab-id="${browserTabId}"]').getBoundingClientRect(); return [r.left, r.top, r.width, r.height] })()`)
+    await drag(`[data-tab-id="${sshB}"] .tile-head`, 'dragstart', 0, 0)
+    await buntil(`!!document.querySelector('.dock-shield')`, 'dock shield')
+    await drag('.dock-shield', 'dragover', ticketBox[0] + 20, ticketBox[1] + ticketBox[3] / 2)
+    await buntil(`document.querySelector('.dock-hint span')?.textContent === 'Beside, on the left'`, 'dock hint')
+    await bshot('side-by-side-dock.png')
+    await drag('.dock-shield', 'drop', ticketBox[0] + 20, ticketBox[1] + ticketBox[3] / 2)
+    await buntil(`!document.querySelector('.dock-shield') && document.querySelector('[data-tab-id="${sshB}"]').style.left === '0%'`, 'docked on the left')
+    // The page's menu: paste the selection into a terminal beside (no Enter), or find it in every pane.
+    const writesNow = calls.filter((c) => c.channel === 'ssh:write').length
+    bwin.webContents.send('web:menu', { webContentsId: guestAt('/ticket').id, action: 'paste', url: page('/ticket'), title: 'INC-4211', text: 'grep max_connections /etc/nginx/nginx.conf', target: sshA })
+    for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'ssh:write').length === writesNow; n++) await new Promise((r) => setTimeout(r, 30))
+    const pasted = calls.filter((c) => c.channel === 'ssh:write').at(-1).args
+    assert.equal(pasted[0], sshA)
+    assert.ok(pasted[1].includes('grep max_connections /etc/nginx/nginx.conf') && !pasted[1].endsWith('\r'), 'pasted, not run')
+    await buntil(`document.querySelector('.split-pane.focused')?.dataset.tabId === ${JSON.stringify(sshA)}`, 'the terminal takes the keyboard')
+    bwin.webContents.send('web:menu', { webContentsId: guestAt('/ticket').id, action: 'find', url: page('/ticket'), title: 'INC-4211', text: 'web-prod-01' })
+    await buntil(`document.querySelector('.split-find input').value === 'web-prod-01' && document.querySelectorAll('.split-count').length === 3`, 'find from the page')
+    // From the hosts list, a host opens beside the tab that was in front (here the ticket).
+    await bjs(`document.querySelector('[data-tab-id="${browserTabId}"] .tile-head').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+    await buntil(`document.querySelector('.split-pane.focused')?.dataset.tabId === ${JSON.stringify(browserTabId)}`, 'ticket focused')
+    await bjs(`document.querySelector('button[aria-label="Hosts"]').click()`)
+    await buntil(`!!document.querySelector('[data-host-key="${running.key}"]')`)
+    await bjs(`document.querySelector('[data-host-key="${running.key}"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }))`)
+    await buntil(`[...document.querySelectorAll('.panel.modal button')].some((b) => b.textContent === 'SSH beside the Browser')`, 'host menu offers beside')
+    await bjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+    // Done leaves the split; every pane stays open as a tab.
+    await bjs(`document.querySelector('.tab.in-split, .tab')?.click()`)
+    await buntil(`!!document.querySelector('.split-bar')`, 'back to the split')
+    await bjs(`[...document.querySelectorAll('.split-bar button')].find((b) => b.textContent.trim() === 'Done').click()`)
+    await buntil(`!document.querySelector('.split-bar') && document.querySelectorAll('.session-panes > .session-pane:not(.hidden)').length === 1`, 'split done')
     browserScenario = false
     bwin.destroy()
     webServer.close()

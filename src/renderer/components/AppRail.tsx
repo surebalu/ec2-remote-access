@@ -1,13 +1,10 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
-import { isSession, useStore, type Tab } from '../store'
+import { isSession, TOOL_NAMES, useStore, type Tab, type ToolKind } from '../store'
 import { hasBrowser } from '../quickConnect'
 import { Icon } from './icons'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 import { APP_THEMES, findAppTheme } from '../appThemes'
-
-type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder'
-
-const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder' }
+import { endDockDrag, startDockDrag } from './SplitView'
 
 /**
  * The app's sections down the left edge: hosts, all sessions, and the built-in tools, with help, theme and settings at
@@ -37,7 +34,7 @@ export default function AppRail(): ReactElement {
     else s.openBoard()
   }
 
-  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void }): ReactElement => (
+  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind }): ReactElement => (
     <button
       key={o.label}
       type="button"
@@ -48,6 +45,10 @@ export default function AppRail(): ReactElement {
       disabled={o.disabled}
       onClick={o.onClick}
       onContextMenu={(e) => { if (o.onContextMenu) { e.preventDefault(); o.onContextMenu(e.currentTarget) } }}
+      // A tool dragged onto the session area docks beside the pane it is dropped on.
+      draggable={!!o.dock}
+      onDragStart={o.dock ? (e) => startDockDrag(e, { tool: o.dock }) : undefined}
+      onDragEnd={o.dock ? endDockDrag : undefined}
     >
       <span className="rail-icon">
         {o.icon}
@@ -67,7 +68,8 @@ export default function AppRail(): ReactElement {
       on: front?.kind === kind,
       dot: !!tab,
       onClick: () => open(kind),
-      onContextMenu: tab ? (el) => setMenu({ kind, anchor: el }) : undefined
+      onContextMenu: tab || (front && front.kind !== kind) ? (el) => setMenu({ kind, anchor: el }) : undefined,
+      dock: kind
     })
   }
 
@@ -137,9 +139,14 @@ export default function AppRail(): ReactElement {
         </Popover>
       )}
       {menu && (
-        <Popover anchor={menu.anchor} width={190} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { setMenu(null); open(menu.kind) }}>Show {TOOL_NAMES[menu.kind]}</MenuItem>
-          <MenuItem danger onClick={() => { const t = toolTab(menu.kind); setMenu(null); if (t) void st().closeTab(t.id) }} hint="⌘W">Close {TOOL_NAMES[menu.kind]}</MenuItem>
+        <Popover anchor={menu.anchor} width={230} onClose={() => setMenu(null)}>
+          <MenuItem onClick={() => { setMenu(null); open(menu.kind) }}>{toolTab(menu.kind) ? 'Show' : 'Open'} {TOOL_NAMES[menu.kind]}</MenuItem>
+          {front && front.kind !== menu.kind && (
+            <MenuItem onClick={() => { setMenu(null); st().splitWith(front.id, st().toolTab(menu.kind)) }}>Beside {front.kind === 'browser' || front.kind === 'local' || front.kind === 'notes' || front.kind === 'board' || front.kind === 'finder' ? TOOL_NAMES[front.kind] : front.title}</MenuItem>
+          )}
+          {toolTab(menu.kind) && <MenuItem danger onClick={() => { const t = toolTab(menu.kind); setMenu(null); if (t) void st().closeTab(t.id) }} hint="⌘W">Close {TOOL_NAMES[menu.kind]}</MenuItem>}
+          <MenuSep />
+          <div className="muted px-3 pb-1.5 pt-0.5 text-[10.5px] leading-snug">Or drag it onto a session to put it beside that one.</div>
         </Popover>
       )}
     </nav>

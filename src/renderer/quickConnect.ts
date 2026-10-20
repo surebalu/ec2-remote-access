@@ -5,7 +5,7 @@
  */
 import type { Instance, SftpOpenRequest } from '@shared/types'
 import { consoleHome, ec2InstanceUrl } from '@shared/browser'
-import { allInstances, useStore } from './store'
+import { allInstances, useStore, type Beside } from './store'
 import { nativeApp } from './mobile'
 
 /** The built-in browser needs Electron's <webview>; on a phone or the gateway page links open in the device's browser. */
@@ -49,12 +49,12 @@ export function openInConsole(i: Instance): void {
   openAccountConsole(i.profile, ec2InstanceUrl(i.region, i.instanceId))
 }
 
-/** Double-click behaviour: RDP for Windows hosts, SSH for everything else. */
-export function openDefaultFor(key: string): void {
+/** Double-click behaviour: RDP for Windows hosts, SSH for everything else. `beside` opens it next to another tab. */
+export function openDefaultFor(key: string, beside?: Beside): void {
   const i = instanceFor(key)
   if (!i) return
-  if (i.platform === 'windows') void openRdpFor(key)
-  else openSshFor(key)
+  if (i.platform === 'windows') void openRdpFor(key, false, beside)
+  else openSshFor(key, false, beside)
 }
 
 const newId = (kind: string): string => `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -86,38 +86,38 @@ function sshParams(key: string): SshParams | null {
   return { user: ov?.sshUser, port: ov?.sshPort, identityFile: ov?.identityFile, useAgent: ov?.useAgent, forceRoute: ov?.forceRoute }
 }
 
-export function openSshFor(key: string, forceDialog = false): void {
+export function openSshFor(key: string, forceDialog = false, beside?: Beside): void {
   const s = useStore.getState()
   const i = instanceFor(key)
   if (!i) return
   const p = forceDialog ? null : sshParams(key)
   if (!p) {
-    s.set({ connectFor: { kind: 'ssh', key } })
+    s.set({ connectFor: { kind: 'ssh', key, beside } })
     return
   }
   const id = newId('ssh')
-  s.addTab({ id, kind: 'ssh', instanceKey: key, title: `${i.name} @ ${i.profile}`, status: 'connecting', request: { instanceKey: key, sessionId: id, ...p } })
+  s.addTab({ id, kind: 'ssh', instanceKey: key, title: `${i.name} @ ${i.profile}`, status: 'connecting', request: { instanceKey: key, sessionId: id, ...p } }, { beside })
 }
 
-export function openFilesFor(key: string, forceDialog = false): void {
+export function openFilesFor(key: string, forceDialog = false, beside?: Beside): void {
   const s = useStore.getState()
   const i = instanceFor(key)
   if (!i) return
   const p = forceDialog ? null : sshParams(key)
   if (!p) {
-    s.set({ connectFor: { kind: 'sftp', key } })
+    s.set({ connectFor: { kind: 'sftp', key, beside } })
     return
   }
-  s.addTab({ id: newId('sftp'), kind: 'sftp', instanceKey: key, title: `${i.name} @ ${i.profile}`, status: 'connecting', sftpRequest: { instanceKey: key, ...p } })
+  s.addTab({ id: newId('sftp'), kind: 'sftp', instanceKey: key, title: `${i.name} @ ${i.profile}`, status: 'connecting', sftpRequest: { instanceKey: key, ...p } }, { beside })
 }
 
-export async function openRdpFor(key: string, forceDialog = false): Promise<void> {
+export async function openRdpFor(key: string, forceDialog = false, beside?: Beside): Promise<void> {
   const s = useStore.getState()
   const i = instanceFor(key)
   if (!i) return
   const cred = forceDialog ? null : await window.api.invoke('creds:get', key).catch(() => null)
   if (!cred) {
-    s.set({ connectFor: { kind: 'rdp', key } })
+    s.set({ connectFor: { kind: 'rdp', key, beside } })
     return
   }
   const ov = s.settings?.overrides[key]
@@ -128,5 +128,5 @@ export async function openRdpFor(key: string, forceDialog = false): Promise<void
     title: `${i.name} @ ${i.profile}`,
     status: 'connecting',
     rdpRequest: { user: cred.user, password: cred.password, port: ov?.rdpPort, forceRoute: ov?.forceRoute }
-  })
+  }, { beside })
 }

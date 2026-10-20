@@ -422,6 +422,7 @@ function ContextMenu({
 }): ReactElement {
   const s = useStore()
   const reachable = ['direct', 'ssm'].includes(routeOf(i, s.settings).route)
+  const beside = s.lastTab ? s.tabs.find((t) => t.id === s.lastTab && t.instanceKey !== i.key) : undefined
   // Keep the menu inside the window: flip up/left when it would overflow.
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x, y })
@@ -454,6 +455,8 @@ function ContextMenu({
       {item('Host details', () => s.revealHost(i.key))}
       {i.platform === 'windows' && item('Remote desktop', () => void openRdpFor(i.key), !reachable)}
       {i.platform !== 'windows' && item('Open SSH', () => openSshFor(i.key), !reachable)}
+      {/* Beside the tab that was in front before Hosts: a ticket in the Browser, another host's terminal. */}
+      {beside && item(`${i.platform === 'windows' ? 'Remote desktop' : 'SSH'} beside ${beside.kind === 'browser' ? 'the Browser' : beside.title}`, () => openDefaultFor(i.key, { tab: beside.id }), !reachable)}
       {(i.platform !== 'windows' || i.manual) && item('SSH with options…', () => s.set({ connectFor: { kind: 'ssh', key: i.key } }), i.state !== 'running')}
       {(i.platform !== 'windows' || i.manual) &&
         item(`SSH in ${s.settings?.externalTerminal ?? 'Terminal'}`, async () => {

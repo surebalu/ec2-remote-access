@@ -158,6 +158,33 @@ export const Icon = {
       <path d="M8 4c-2 0-3 1-3 3v2c0 1-1 2-2 3 1 1 2 2 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1 1 2 2 3-1 1-2 2-2 3v2c0 2-1 3-3 3" />
     </svg>
   ),
+  splitRows: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 12h18" />
+    </svg>
+  ),
+  splitMain: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M14 5v14M14 12h7" />
+    </svg>
+  ),
+  restore: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+    </svg>
+  ),
+  grip: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="9" cy="6" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="6" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="18" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="18" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
   maximize: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />

@@ -4,6 +4,7 @@
  * the same combinations through isAppShortcut.
  */
 import { isSession, useStore } from './store'
+import { neighbor, type Direction } from './termLayout'
 
 export interface ShortcutInfo {
   keys: string
@@ -21,6 +22,9 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘9', label: 'Last session tab' },
   { keys: '⌘⇧] / ⌘⇧[', label: 'Next / previous tab' },
   { keys: '⌘W', label: 'Close the current tab' },
+  { keys: '⌘\\', label: 'Side by side: open a host, a tab or a tool beside this one' },
+  { keys: '⌥⌘← → ↑ ↓', label: 'Side by side: move to the pane in that direction (the Browser keeps ⌥⌘↑ ↓ for spaces)' },
+  { keys: '⌘⇧↩', label: 'Side by side: show the focused pane alone, or every pane again' },
   { keys: '⌘D', label: 'Split: open the same session beside this one' },
   { keys: '⌘⇧D', label: 'Duplicate the current session in a new tab' },
   { keys: '⌘⇧I', label: 'Broadcast typing to every pane in the split' },
@@ -139,17 +143,20 @@ export function setBrowserKeys(fn: ((k: TabKey) => boolean) | null): void {
   setTabKeys('browser', fn)
 }
 
-type TerminalAction = 'find' | 'snippets'
+type TerminalAction = 'find' | 'snippets' | 'paste'
 
-/** Asks a terminal tab to open one of its own panels (find bar, snippet menu). */
-export function terminalAction(tabId: string, action: TerminalAction): void {
-  window.dispatchEvent(new CustomEvent('ec2ra:terminal', { detail: { tabId, action } }))
+/**
+ * Asks a terminal tab to open one of its own panels (find bar, snippet menu), or to take `text`: pasted at the prompt
+ * (never run: no Enter is added), or looked for in its scrollback.
+ */
+export function terminalAction(tabId: string, action: TerminalAction, text?: string): void {
+  window.dispatchEvent(new CustomEvent('ec2ra:terminal', { detail: { tabId, action, text } }))
 }
 
-export function onTerminalAction(tabId: string, fn: (action: TerminalAction) => void): () => void {
+export function onTerminalAction(tabId: string, fn: (action: TerminalAction, text?: string) => void): () => void {
   const h = (e: Event): void => {
-    const d = (e as CustomEvent<{ tabId: string; action: TerminalAction }>).detail
-    if (d.tabId === tabId) fn(d.action)
+    const d = (e as CustomEvent<{ tabId: string; action: TerminalAction; text?: string }>).detail
+    if (d.tabId === tabId) fn(d.action, d.text)
   }
   window.addEventListener('ec2ra:terminal', h)
   return () => window.removeEventListener('ec2ra:terminal', h)
@@ -157,13 +164,20 @@ export function onTerminalAction(tabId: string, fn: (action: TerminalAction) => 
 
 const modalOpen = (): boolean => !!document.querySelector('.modal-backdrop')
 
+const inSplit = (): boolean => {
+  const st = useStore.getState()
+  return !st.gridView && st.splitGroup.includes(st.activeTab)
+}
+
 /** Combinations the app owns while a terminal has focus (Cmd on macOS; Ctrl+K kept for the switcher). */
 export function isAppShortcut(e: KeyboardEvent): boolean {
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') return true
   if (e.ctrlKey && !e.metaKey && (e.key === '`' || e.code === 'Backquote')) return true
+  // In a split, ⌥⌘ arrows and ⌘⇧↩ move between and zoom panes; elsewhere they stay the shell's.
+  if (e.metaKey && !e.ctrlKey && ((e.altKey && e.key.startsWith('Arrow')) || (e.shiftKey && e.key === 'Enter')) && inSplit()) return true
   if (!e.metaKey || e.altKey || e.ctrlKey) return false
   const k = e.key.toLowerCase()
-  return /^[0-9]$/.test(k) || ['n', 'w', 't', 'd', 'f', 'b', '/', ',', '[', ']', '{', '}', 'p', 'i'].includes(k)
+  return /^[0-9]$/.test(k) || ['n', 'w', 't', 'd', 'f', 'b', '/', ',', '[', ']', '{', '}', 'p', 'i', '\\'].includes(k)
 }
 
 /** Returns true when the event was a shortcut and has been handled. */
@@ -184,6 +198,16 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   if (tabHandler && tabCombo && !e.repeat && !modalOpen() && tabHandler({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
     e.preventDefault()
     e.stopPropagation()
+    return true
+  }
+  // ⌥⌘ arrows: the pane of the split in that direction (keys come lower-cased when a web page forwarded them).
+  const key = e.key.toLowerCase()
+  if (e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey && key.startsWith('arrow') && inSplit() && !modalOpen()) {
+    const next = st.splitTree && !st.splitZoom ? neighbor(st.splitTree, st.activeTab, key.slice(5) as Direction) : null
+    if (!next) return false
+    e.preventDefault()
+    e.stopPropagation()
+    st.focusPane(next)
     return true
   }
   if (!e.metaKey || e.altKey || e.ctrlKey || e.repeat) return false
@@ -209,6 +233,8 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
     const at = order.indexOf(st.activeTab)
     return go(() => st.setActive(order[(at + step + order.length) % order.length]))
   }
+  if (k === 'enter' && e.shiftKey && inSplit()) return go(() => st.set({ splitZoom: st.splitZoom ? null : st.activeTab }))
+  if (k === '\\' && !e.shiftKey && active && !st.gridView) return go(() => st.openQuickSwitcher('', { beside: active.id }))
   if (k === 'w' && !e.shiftKey) return go(() => { if (active) void st.closeTab(active.id) })
   if (k === 't' && !e.shiftKey) return go(() => st.openQuickSwitcher())
   if (k === 'p' && e.shiftKey) return go(() => st.openQuickSwitcher('>'))

@@ -18,6 +18,7 @@ export interface WebviewEl extends HTMLElement {
   setZoomFactor(factor: number): void
   /** Types text into the page's focused field, as an input method would. */
   insertText(text: string): Promise<void>
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>
 }
 
 export interface WebviewEvents {

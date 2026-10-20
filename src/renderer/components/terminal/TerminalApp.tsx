@@ -196,10 +196,12 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
     const t = currentRef.current
     if (t && t.activePane !== pane) patchTab(t.id, { activePane: pane })
   }
-  const moveFocus = (dir: Direction): void => {
+  /** Whether there was a pane that way; at the edge the key goes on to the app's side-by-side view. */
+  const moveFocus = (dir: Direction): boolean => {
     const t = currentRef.current
     const next = t && neighbor(t.root, t.activePane, dir)
     if (next) focusPane(next)
+    return !!next
   }
   const cyclePane = (step: number): void => {
     const t = currentRef.current
@@ -241,10 +243,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
       if (target) activateTab(target.id)
       return true
     }
-    if (k.alt && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k.key)) {
-      moveFocus(k.key.slice(5) as Direction)
-      return true
-    }
+    if (k.alt && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k.key)) return moveFocus(k.key.slice(5) as Direction)
     switch (k.key) {
       case 't':
         if (k.shift) reopenTab()

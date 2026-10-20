@@ -12,6 +12,17 @@ import { credentialsFor } from './aws/credentials'
 import { host } from './host'
 
 const file = (): string => join(host().userDataDir(), 'browser.json')
+
+/** The terminals beside the Browser in a split (the renderer keeps it current), for the page menu's "Paste into …". */
+let paneTargets: { id: string; title: string }[] = []
+
+export function setPaneTargets(targets: { id: string; title: string }[]): void {
+  paneTargets = Array.isArray(targets) ? targets.filter((t) => typeof t?.id === 'string' && typeof t.title === 'string').slice(0, 6) : []
+}
+
+export function getPaneTargets(): { id: string; title: string }[] {
+  return paneTargets
+}
 const MAX_HISTORY = 1500
 
 export function loadBrowserState(): BrowserState | null {

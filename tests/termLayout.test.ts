@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { PaneNode } from '../src/shared/types.ts'
-import { layoutRects, neighbor, paneIds, removePane, resizeSplit, splitPane } from '../src/renderer/termLayout.ts'
+import { arrange, dockZone, equalize, insertPane, layoutRects, neighbor, paneIds, removePane, resizeSplit, splitPane, swapPanes } from '../src/renderer/termLayout.ts'
 
 const one: PaneNode = { type: 'pane', id: 'a' }
 
@@ -55,4 +55,50 @@ test('presets lay panes out in reading order: two side by side, one big and two,
   assert.equal(neighbor(grid, 'c', 'right'), 'd')
   assert.deepEqual(layoutRects(presetLayout('main', ['a', 'b', 'c'])).panes.c, { x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
   assert.equal(PRESET_PANES.grid, 4)
+})
+
+test('docking puts a pane on any side, joining a split that runs the same way', () => {
+  const two = insertPane(one, 'a', 'b', 'left')
+  assert.deepEqual(paneIds(two), ['b', 'a'])
+  const three = insertPane(two, 'a', 'c', 'up')
+  assert.deepEqual(paneIds(three), ['b', 'c', 'a'])
+  assert.deepEqual(layoutRects(three).panes.c, { x: 0.5, y: 0, w: 0.5, h: 0.5 })
+  const four = insertPane(three, 'b', 'd', 'right')
+  assert.equal(four.type === 'split' && four.children.length, 3)
+  assert.deepEqual(four.type === 'split' && four.sizes, [0.25, 0.25, 0.5])
+})
+
+test('swapping trades places, or replaces a pane with one from outside', () => {
+  const tree = arrange('main', ['a', 'b', 'c'])
+  assert.deepEqual(paneIds(swapPanes(tree, 'a', 'c')), ['c', 'b', 'a'])
+  assert.deepEqual(paneIds(swapPanes(tree, 'b', 'z')), ['a', 'z', 'c'])
+})
+
+test('arrangements fit any number of panes', () => {
+  assert.deepEqual(layoutRects(arrange('columns', ['a', 'b', 'c'])).panes.c, { x: 2 / 3, y: 0, w: 1 / 3, h: 1 })
+  assert.deepEqual(layoutRects(arrange('rows', ['a', 'b'])).panes.b, { x: 0, y: 0.5, w: 1, h: 0.5 })
+  const main = layoutRects(arrange('main', ['a', 'b', 'c', 'd'])).panes
+  assert.equal(main.a.w, 0.6)
+  assert.ok(Math.abs(main.d.h - 1 / 3) < 1e-9)
+  const grid = layoutRects(arrange('grid', ['a', 'b', 'c'])).panes
+  assert.deepEqual(grid.c, { x: 0, y: 0.5, w: 1, h: 0.5 })
+  assert.equal(layoutRects(arrange('grid', ['a', 'b', 'c', 'd', 'e', 'f'])).panes.c.w, 1 / 3)
+  assert.deepEqual(arrange('grid', ['a', 'b']), arrange('columns', ['a', 'b']))
+})
+
+test('equalizing one split leaves the others alone', () => {
+  const tree = resizeSplit(resizeSplit(arrange('main', ['a', 'b', 'c']), [1], 0, 0.2), [], 0, 0.1)
+  const even = equalize(tree, [1])
+  assert.ok(even.type === 'split' && Math.abs(even.sizes[0] - 0.7) < 1e-9)
+  const inner = even.type === 'split' ? even.children[1] : even
+  assert.deepEqual(inner.type === 'split' && inner.sizes, [0.5, 0.5])
+})
+
+test('a drop goes to the nearest edge, or in place in the middle', () => {
+  const r = { x: 100, y: 0, w: 400, h: 200 }
+  assert.equal(dockZone(r, 300, 100), 'center')
+  assert.equal(dockZone(r, 120, 100), 'left')
+  assert.equal(dockZone(r, 480, 120), 'right')
+  assert.equal(dockZone(r, 300, 10), 'up')
+  assert.equal(dockZone(r, 300, 195), 'down')
 })
