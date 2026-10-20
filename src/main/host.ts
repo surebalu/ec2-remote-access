@@ -80,6 +80,8 @@ export interface LauncherHost {
   /** A Quick Look thumbnail as a data URL ('' when there is none). */
   thumbnail(path: string, px: number): Promise<string>
   quickLook(path: string): void
+  /** Asks before something that cannot be undone, with the app brought forward so the question is not hidden. */
+  confirm(message: string, detail: string, button: string): Promise<boolean>
 }
 
 /** What dictation (voice.ts) needs from the Mac app. */

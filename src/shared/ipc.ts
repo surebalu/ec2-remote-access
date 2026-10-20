@@ -7,7 +7,7 @@ import type {
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
-import type { LauncherApp, LauncherPreview, LauncherUsage } from './launcher'
+import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -164,6 +164,8 @@ export interface IpcApi {
   'launcher:files': (query: string) => Promise<RecentFile[]>
   /** The side pane's thumbnail and details for a file, folder or app. */
   'launcher:preview': (path: string) => Promise<LauncherPreview>
+  /** A Mac command (Sleep, Lock Screen, Empty Trash…); the ones that cannot be undone ask first. */
+  'launcher:system': (action: SystemAction) => Promise<void>
   /** Quick Look over the launcher. */
   'launcher:quickLook': (path: string) => Promise<void>
   /** Counts a use of a result the launcher acted on some other way. */

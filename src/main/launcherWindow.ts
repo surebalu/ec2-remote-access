@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, nativeImage, screen } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, nativeImage, screen } from 'electron'
 import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppCommand } from '@shared/types'
@@ -118,6 +118,14 @@ export function closeLauncher(): void {
   registered = ''
   win?.destroy()
   win = null
+}
+
+/** Asks first, with the app in front: the launcher is a panel that never makes the app active, so a dialog could hide. */
+export async function launcherConfirm(message: string, detail: string, button: string): Promise<boolean> {
+  hideLauncher()
+  app.focus({ steal: true })
+  const r = await dialog.showMessageBox({ type: 'warning', message, detail, buttons: [button, 'Cancel'], defaultId: 1, cancelId: 1, noLink: true })
+  return r.response === 0
 }
 
 /** Opens Quick Look on a file, over the launcher, which stays up behind it until you click elsewhere. */

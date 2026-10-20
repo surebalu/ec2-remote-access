@@ -31,6 +31,7 @@ import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals 
 import { recentLog } from './log'
 import { finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
+import { runSystemAction } from './system'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
 
@@ -170,6 +171,7 @@ export const handlers: Handlers = {
     await host().openPath(path)
   },
   'launcher:used': async (id) => noteUse(id),
+  'launcher:system': (action) => runSystemAction(action),
   'launcher:files': (query) => launcherFiles(query),
   'launcher:preview': async (path) => {
     if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('Not a path on this Mac.')

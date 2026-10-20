@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppCommand, AwsProfile, BrowserState, Instance, NoteHit, Settings } from '@shared/types'
 import type { RecentFile } from '@shared/finder'
 import { displayPath, formatDate, formatSize, parentOf } from '@shared/finder'
-import { calculate, formatNumber, matchScore, recentIds, usageBoost, type LauncherApp, type LauncherPreview, type LauncherUsage } from '@shared/launcher'
+import { calculate, convert, formatNumber, issueKey, jiraSite, matchScore, recentIds, usageBoost, type LauncherApp, type LauncherPreview, type LauncherUsage, type SystemAction } from '@shared/launcher'
 import { comboOf, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
 import { manualToInstance } from '@shared/manual'
 import { matchesHost } from '@shared/hostSearch'
@@ -36,7 +36,7 @@ type Detail =
   | { kind: 'host'; host: Instance }
   | { kind: 'note'; path: string; text: string }
   | { kind: 'web'; url: string; space: string; favicon?: string }
-  | { kind: 'calc'; value: number; expr: string }
+  | { kind: 'calc'; value: number; expr: string; unit?: string }
 
 interface Row {
   id: string
@@ -104,6 +104,21 @@ const reveal = (path: string) => (): void => {
   hide()
 }
 const quickLook = (path: string) => (): void => void window.api.invoke('launcher:quickLook', path)
+const system = (id: string, action: SystemAction) => (): void => {
+  used(id)
+  void window.api.invoke('launcher:system', action).catch(() => undefined)
+}
+
+/** The Mac commands, found by name only (never in the empty launcher). */
+const MAC_COMMANDS: { action: SystemAction; title: string; subtitle: string; words: string; icon: ReactElement }[] = [
+  { action: 'sleep', title: 'Sleep', subtitle: 'Put the Mac to sleep', words: 'sleep suspend', icon: <Icon.moon /> },
+  { action: 'lock', title: 'Lock Screen', subtitle: 'Sleep the displays, which locks the Mac', words: 'lock screen displays away', icon: <Icon.lock /> },
+  { action: 'darkMode', title: 'Toggle Dark Mode', subtitle: 'Switch macOS between light and dark', words: 'dark light appearance theme', icon: <Icon.auto /> },
+  { action: 'mute', title: 'Mute or Unmute Sound', subtitle: 'The Mac’s output volume', words: 'mute unmute sound volume audio', icon: <Icon.mic /> },
+  { action: 'emptyTrash', title: 'Empty Trash…', subtitle: 'Asks first', words: 'empty trash bin delete', icon: <Icon.x /> },
+  { action: 'restart', title: 'Restart…', subtitle: 'Asks first', words: 'restart reboot', icon: <Icon.refresh /> },
+  { action: 'shutdown', title: 'Shut Down…', subtitle: 'Asks first', words: 'shut down shutdown power off', icon: <Icon.alert /> }
+]
 
 const baseName = (p: string): string => p.replace(/\/+$/, '').split('/').pop() ?? p
 
@@ -275,12 +290,31 @@ export default function Launcher(): ReactElement {
     }),
     { id: 'cmd:today', title: 'Today’s Note', subtitle: 'Notes', keywords: 'daily journal obsidian', icon: <Icon.note />, actions: [{ title: 'Open Today’s Note', key: 'enter', run: inApp('cmd:today', { kind: 'today' }) }] },
     { id: 'cmd:scan', title: 'Rescan AWS Accounts', subtitle: 'Hosts', keywords: 'refresh inventory reload', icon: <Icon.refresh />, actions: [{ title: 'Rescan', key: 'enter', run: inApp('cmd:scan', { kind: 'scan' }) }] },
+    ...(settings?.workspaces ?? []).map((w): Row => ({
+      id: `workspace:${w.id}`, title: `Workspace: ${w.name}`, subtitle: `${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`, keywords: 'workspace session layout tabs', icon: <Icon.grid />,
+      actions: [{ title: 'Open the Workspace', key: 'enter', run: inApp(`workspace:${w.id}`, { kind: 'workspace', id: w.id }) }]
+    })),
+    ...(settings?.portForwards ?? []).map((p): Row => ({
+      id: `forward:${p.id}`, title: `Forward: ${p.name}`, subtitle: `${p.remoteHost ? `${p.remoteHost}:` : 'port '}${p.remotePort}${p.localPort ? ` → localhost:${p.localPort}` : ''}`, keywords: 'tunnel port forward database', icon: <Icon.plug />,
+      actions: [{ title: 'Open the Forward', key: 'enter', run: inApp(`forward:${p.id}`, { kind: 'portForward', id: p.id }) }]
+    })),
+    ...(settings?.snippets ?? []).map((sn): Row => ({
+      id: `snippet:${sn.id}`, title: `Snippet: ${sn.name}`, subtitle: sn.command, keywords: `snippet command ${sn.command}`, icon: <Icon.snippet />,
+      actions: [{ title: 'Copy the Command', key: 'enter', run: copy(sn.command) }]
+    })),
     ...data.profiles.filter((p) => p.enabled && p.kind !== 'static').map((p): Row => {
       const id = `console:${p.name}`
       const label = settings?.accountMeta?.[p.name]?.label ?? p.name
       return {
         id, title: `AWS Console: ${label}`, subtitle: `${p.name} · ${p.region}`, keywords: `aws console ${p.name}`, icon: <Icon.cloud />,
         actions: [{ title: 'Open Signed In', key: 'enter', run: inApp(id, { kind: 'console', profile: p.name, url: consoleHome(p.region) }) }]
+      }
+    }),
+    ...data.profiles.filter((p) => p.enabled).map((p): Row => {
+      const id = `aws-terminal:${p.name}`
+      return {
+        id, title: `Terminal with AWS profile: ${settings?.accountMeta?.[p.name]?.label ?? p.name}`, subtitle: `AWS_PROFILE=${p.name}`, keywords: `terminal shell cli aws_profile ${p.name}`, icon: <Icon.console />,
+        actions: [{ title: 'Open a Terminal Tab', key: 'enter', run: inApp(id, { kind: 'terminal', profile: p.name }) }]
       }
     })
   ], [data, keys.hosts, keys.overview, keys.local, keys.finder, keys.browser, keys.notes, keys.board, keys.claude, keys.chatgpt]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -307,11 +341,18 @@ export default function Launcher(): ReactElement {
     const v = calculate(query)
     return v === null || formatNumber(v) === query ? null : v
   }, [query])
+  const conversion = useMemo(() => convert(query), [query])
+  /** Where your Jira lives, from the Browser's history and tabs, for a typed issue key. */
+  const jira = useMemo(() => {
+    const b = data.browser
+    if (!b) return null
+    return jiraSite([...b.history.map((h) => ({ url: h.url, space: h.spaceId, at: h.at })), ...b.tabs.map((t) => ({ url: t.url, space: t.spaceId, at: t.lastActive ?? 0 }))])
+  }, [data.browser])
 
   // Files anywhere on the Mac (Spotlight) and notes, once two letters are typed and it is not a sum.
   useEffect(() => {
     const n = ++searchSeq.current
-    if (query.length < 2 || calc !== null) {
+    if (query.length < 2 || calc !== null || conversion !== null) {
       setFiles([])
       setNotes([])
       return
@@ -325,7 +366,7 @@ export default function Launcher(): ReactElement {
       window.api.invoke('notes:search', query).then((hits) => { if (n === searchSeq.current) setNotes(hits) }).catch(() => undefined)
     }, 120)
     return () => clearTimeout(t)
-  }, [query, calc])
+  }, [query, calc, conversion])
 
   const groups: Group[] = useMemo(() => {
     const now = Date.now()
@@ -351,6 +392,18 @@ export default function Launcher(): ReactElement {
         actions: [{ title: 'Copy Answer', key: 'enter', run: copy(String(calc)) }, { title: 'Copy Sum and Answer', key: 'cmd+enter', run: copy(`${query} = ${String(calc)}`) }]
       }] })
     }
+    if (conversion) {
+      const answer = `${formatNumber(conversion.value)} ${conversion.unit}`
+      out.push({ title: 'Convert', rows: [{
+        id: 'convert', title: answer, subtitle: `${conversion.from} =`, icon: <span className="launcher-calc">⇄</span>, detail: { kind: 'calc', value: conversion.value, expr: conversion.from, unit: conversion.unit },
+        actions: [{ title: 'Copy Answer', key: 'enter', run: copy(String(conversion.value)) }, { title: 'Copy With the Unit', key: 'cmd+enter', run: copy(answer) }]
+      }] })
+    }
+    const key = issueKey(query)
+    if (key && jira) {
+      const url = `${jira.base}/browse/${key}`
+      out.push({ title: 'Jira', rows: [webRow({ id: `jira:${key}`, title: `Open ${key}`, url, space: jira.space })] })
+    }
     const middle: Group[] = []
     const apps = rankRows(data.apps.map(appRow), query, data.usage, now)
     middle.push({ title: 'Applications', rows: apps.rows.slice(0, 6), best: apps.best })
@@ -367,6 +420,11 @@ export default function Launcher(): ReactElement {
     middle.push({ title: 'Browser', rows: web.rows.slice(0, 5), best: web.best })
     const inside = rankRows(appRows, query, data.usage, now)
     middle.push({ title: 'EC2 Remote Access', rows: inside.rows.slice(0, 6), best: inside.best })
+    const mac = rankRows(MAC_COMMANDS.map((c): Row => ({
+      id: `mac:${c.action}`, title: c.title, subtitle: c.subtitle, keywords: c.words, icon: c.icon,
+      actions: [{ title: c.title.replace(/…$/, ''), key: 'enter', run: system(`mac:${c.action}`, c.action) }]
+    })), query, data.usage, now)
+    middle.push({ title: 'Mac', rows: mac.rows.slice(0, 4), best: mac.best })
     // Groups in the order of their best match (a stable sort keeps this order on ties).
     out.push(...middle.filter((g) => g.rows.length).sort((a, b) => (b.best ?? 0) - (a.best ?? 0)))
     const url = normalizeInput(query)
@@ -382,7 +440,7 @@ export default function Launcher(): ReactElement {
     )
     out.push({ title: 'Search', rows: search })
     return out
-  }, [query, data, files, notes, calc, appRows, webRows]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => groups.flatMap((g) => g.rows), [groups])
   const current = rows[Math.min(sel, rows.length - 1)]
@@ -614,7 +672,7 @@ function DetailPane({ row, preview, icon, home, accountLabel, spaceName }: {
     return (
       <div className="launcher-calc-big">
         <div className="muted">{d.expr} =</div>
-        <div className="launcher-calc-value">{formatNumber(d.value)}</div>
+        <div className="launcher-calc-value">{formatNumber(d.value)}{d.unit ? ` ${d.unit}` : ''}</div>
       </div>
     )
   }

@@ -5,7 +5,7 @@ import type { Host, LauncherHost, VoiceHost } from './host'
 import { broadcastToPhones } from './phoneAccess'
 import { cancelDownload, fillPage } from './webviews'
 import { mainWindow } from './windows'
-import { fileIcons, hideLauncher, launcherCommand, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
+import { fileIcons, hideLauncher, launcherCommand, launcherConfirm, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
 const electronVoice: VoiceHost = {
@@ -36,7 +36,8 @@ const electronLauncher: LauncherHost = {
   status: launcherStatus,
   icons: fileIcons,
   thumbnail,
-  quickLook: launcherQuickLook
+  quickLook: launcherQuickLook,
+  confirm: launcherConfirm
 }
 
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */

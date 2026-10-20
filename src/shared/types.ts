@@ -523,7 +523,9 @@ export type AppCommand =
   | { kind: 'section'; section: RailSection }
   | { kind: 'reveal'; key: string }
   | { kind: 'finder'; path: string }
-  | { kind: 'terminal'; cwd: string }
+  | { kind: 'terminal'; cwd?: string; profile?: string }
+  | { kind: 'workspace'; id: string }
+  | { kind: 'portForward'; id: string }
   | { kind: 'browse'; url: string; space?: string; tab?: string }
   | { kind: 'note'; path: string }
   | { kind: 'files'; key: string }

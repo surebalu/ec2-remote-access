@@ -283,7 +283,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       const e = Object.values(finderFs).flat().find((x) => x.path === args[0])
       return { path: args[0], isDir: e?.type === 'dir', kind: e?.name.endsWith('.pdf') ? 'PDF document' : 'Document', size: e?.size ?? 0, created: now - 86400000 * 30, modified: e?.mtime ?? now, lastOpened: null, thumbnail: '' }
     }
-    case 'launcher:quickLook': launcherDone.push([channel, ...args]); return
+    case 'launcher:quickLook': case 'launcher:system': launcherDone.push([channel, ...args]); return
     case 'launcher:status': return { key: settings.launcherKey ?? '', registered: true }
     case 'launcher:open': case 'launcher:used': case 'launcher:command': case 'launcher:show': case 'launcher:hide': case 'launcher:pause': {
       launcherDone.push([channel, ...args])
@@ -1542,6 +1542,21 @@ app.whenReady().then(async () => {
     await lkey('Enter')
     for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'clipboard:write').length === copies; n++) await new Promise((r) => setTimeout(r, 30))
     assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], '14', 'Enter copies the answer')
+    // Units convert; a Mac command is found by name (recorded here, never run).
+    await ltype('5 gb to mib')
+    await luntil(`${picked} === '4,768.37158203 MiB'`, 'a conversion')
+    await ltype('sleep')
+    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Mac"] .launcher-title')].some((t) => t.textContent === 'Sleep')`, 'mac commands')
+    for (let n = 0; n < 12 && (await ljs(picked)) !== 'Sleep'; n++) await lkey('ArrowDown')
+    await lkey('Enter')
+    await done('Sleep asks main for the command', (d) => d[0] === 'launcher:system' && d[1] === 'sleep')
+    // A saved snippet is copied, to paste anywhere.
+    await ltype('disk usage')
+    await luntil(`${picked} === 'Snippet: Disk usage'`, 'a snippet')
+    const snippetCopies = calls.filter((c) => c.channel === 'clipboard:write').length
+    await lkey('Enter')
+    for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'clipboard:write').length === snippetCopies; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], 'df -h', 'the snippet is copied')
     await ltype('10.0.1.15')
     await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Hosts"] .launcher-title')].some((t) => t.textContent === 'web-prod-01')`, 'a host by its IP')
     await ltype('web-prod-01')

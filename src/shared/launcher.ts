@@ -9,6 +9,9 @@ export interface LauncherApp {
   path: string
 }
 
+/** The Mac commands the launcher offers (main/system.ts). */
+export type SystemAction = 'sleep' | 'lock' | 'darkMode' | 'mute' | 'emptyTrash' | 'restart' | 'shutdown'
+
 /** What the launcher's side pane shows for a file, folder or app. */
 export interface LauncherPreview {
   path: string
@@ -190,4 +193,85 @@ export function calculate(input: string): number | null {
 export function formatNumber(n: number): string {
   if (Math.abs(n) >= 1e21 || (n !== 0 && Math.abs(n) < 1e-10)) return n.toExponential(6)
   return n.toLocaleString('en-US', { maximumFractionDigits: 10 })
+}
+
+interface Unit { dim: 'length' | 'mass' | 'temp' | 'data' | 'time' | 'volume'; factor: number; label: string }
+
+/** Units by what you might type, each as a factor of its dimension's base (metre, gram, byte, second, litre). */
+const UNITS: Record<string, Unit> = {}
+const unit = (names: string[], dim: Unit['dim'], factor: number, label: string): void => { for (const n of names) UNITS[n] = { dim, factor, label } }
+unit(['mm', 'millimeter', 'millimeters', 'millimetre', 'millimetres'], 'length', 0.001, 'mm')
+unit(['cm', 'centimeter', 'centimeters', 'centimetre', 'centimetres'], 'length', 0.01, 'cm')
+unit(['m', 'meter', 'meters', 'metre', 'metres'], 'length', 1, 'm')
+unit(['km', 'kilometer', 'kilometers', 'kilometre', 'kilometres'], 'length', 1000, 'km')
+unit(['in', 'inch', 'inches', '"'], 'length', 0.0254, 'in')
+unit(['ft', 'foot', 'feet', "'"], 'length', 0.3048, 'ft')
+unit(['yd', 'yard', 'yards'], 'length', 0.9144, 'yd')
+unit(['mi', 'mile', 'miles'], 'length', 1609.344, 'mi')
+unit(['mg', 'milligram', 'milligrams'], 'mass', 0.001, 'mg')
+unit(['g', 'gram', 'grams'], 'mass', 1, 'g')
+unit(['kg', 'kilo', 'kilos', 'kilogram', 'kilograms'], 'mass', 1000, 'kg')
+unit(['t', 'tonne', 'tonnes'], 'mass', 1e6, 't')
+unit(['oz', 'ounce', 'ounces'], 'mass', 28.349523125, 'oz')
+unit(['lb', 'lbs', 'pound', 'pounds'], 'mass', 453.59237, 'lb')
+unit(['c', '°c', 'celsius'], 'temp', 0, '°C')
+unit(['f', '°f', 'fahrenheit'], 'temp', 0, '°F')
+unit(['k', 'kelvin'], 'temp', 0, 'K')
+unit(['b', 'byte', 'bytes'], 'data', 1, 'B')
+unit(['kb', 'kilobyte', 'kilobytes'], 'data', 1e3, 'KB')
+unit(['mb', 'megabyte', 'megabytes'], 'data', 1e6, 'MB')
+unit(['gb', 'gigabyte', 'gigabytes'], 'data', 1e9, 'GB')
+unit(['tb', 'terabyte', 'terabytes'], 'data', 1e12, 'TB')
+unit(['pb', 'petabyte', 'petabytes'], 'data', 1e15, 'PB')
+unit(['kib', 'kibibyte', 'kibibytes'], 'data', 1024, 'KiB')
+unit(['mib', 'mebibyte', 'mebibytes'], 'data', 1024 ** 2, 'MiB')
+unit(['gib', 'gibibyte', 'gibibytes'], 'data', 1024 ** 3, 'GiB')
+unit(['tib', 'tebibyte', 'tebibytes'], 'data', 1024 ** 4, 'TiB')
+unit(['bit', 'bits'], 'data', 1 / 8, 'bit')
+unit(['ms', 'millisecond', 'milliseconds'], 'time', 0.001, 'ms')
+unit(['s', 'sec', 'secs', 'second', 'seconds'], 'time', 1, 's')
+unit(['min', 'mins', 'minute', 'minutes'], 'time', 60, 'min')
+unit(['h', 'hr', 'hrs', 'hour', 'hours'], 'time', 3600, 'h')
+unit(['d', 'day', 'days'], 'time', 86400, 'days')
+unit(['wk', 'week', 'weeks'], 'time', 604800, 'weeks')
+unit(['ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres'], 'volume', 0.001, 'ml')
+unit(['l', 'liter', 'liters', 'litre', 'litres'], 'volume', 1, 'l')
+unit(['gal', 'gallon', 'gallons'], 'volume', 3.785411784, 'gal')
+
+const toKelvin = (v: number, u: string): number => (u === '°C' ? v + 273.15 : u === '°F' ? (v - 32) * 5 / 9 + 273.15 : v)
+const fromKelvin = (v: number, u: string): number => (u === '°C' ? v - 273.15 : u === '°F' ? (v - 273.15) * 9 / 5 + 32 : v)
+
+/**
+ * A unit conversion: "5 GB to MiB", "100f in c", "90 min as h", "3.5 ft = cm". Null when the text is not one (or
+ * the units measure different things). The number may itself be a sum ("2*1.5 km to mi").
+ */
+export function convert(input: string): { value: number; unit: string; from: string } | null {
+  const m = /^\s*(.+?)\s*([a-z°'"]+)\s+(?:to|in|as|=)\s+([a-z°'"]+)\s*$/i.exec(input) ?? /^\s*(.+?)\s*([a-z°'"]+)\s*=\s*([a-z°'"]+)\s*$/i.exec(input)
+  if (!m) return null
+  const from = UNITS[m[2].toLowerCase()]
+  const to = UNITS[m[3].toLowerCase()]
+  if (!from || !to || from.dim !== to.dim) return null
+  const n = /^-?\d*\.?\d+$/.test(m[1].replace(/,/g, '')) ? Number(m[1].replace(/,/g, '')) : calculate(m[1])
+  if (n === null || !Number.isFinite(n)) return null
+  const value = from.dim === 'temp' ? fromKelvin(toKelvin(n, from.label), to.label) : (n * from.factor) / to.factor
+  return { value: Number(value.toPrecision(12)), unit: to.label, from: `${formatNumber(n)} ${from.label}` }
+}
+
+/** "PLM-123" or "inc-4211": a Jira issue key, upper-cased, or null. */
+export function issueKey(input: string): string | null {
+  const t = input.trim()
+  return /^[a-z][a-z0-9]{1,9}-\d{1,7}$/i.test(t) ? t.toUpperCase() : null
+}
+
+/**
+ * Where your Jira lives, from pages you opened in the Browser ("https://acme.atlassian.net/browse/PLM-1"): the most
+ * recent site that showed an issue, and the space it was opened in. Null when there is none.
+ */
+export function jiraSite(pages: { url: string; space: string; at: number }[]): { base: string; space: string } | null {
+  let best: { base: string; space: string; at: number } | null = null
+  for (const p of pages) {
+    const m = /^(https:\/\/[^/?#]+)\/(?:browse\/[A-Z][A-Z0-9]+-\d+|jira\/software\/)/.exec(p.url)
+    if (m && (!best || p.at > best.at)) best = { base: m[1], space: p.space, at: p.at }
+  }
+  return best && { base: best.base, space: best.space }
 }

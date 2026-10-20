@@ -126,7 +126,12 @@ export default function App(): ReactElement {
     }
     else if (c.kind === 'reveal') st.revealHost(c.key)
     else if (c.kind === 'finder') st.openFinder(c.path)
-    else if (c.kind === 'terminal') st.openTerminal({ cwd: c.cwd, newTab: true })
+    else if (c.kind === 'terminal') st.openTerminal({ cwd: c.cwd, profile: c.profile, newTab: true })
+    else if (c.kind === 'workspace') st.openWorkspace(c.id)
+    else if (c.kind === 'portForward') {
+      const p = st.settings?.portForwards.find((x) => x.id === c.id)
+      if (p) void st.openPortForward({ instanceKey: p.instanceKey, remotePort: p.remotePort, localPort: p.localPort, remoteHost: p.remoteHost, name: p.name })
+    }
     else if (c.kind === 'browse') st.openBrowser({ url: c.url, space: c.space, tab: c.tab })
     else if (c.kind === 'note') st.openNotes(c.path)
     else if (c.kind === 'files') openFilesFor(c.key)

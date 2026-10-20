@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { calculate, formatNumber, matchScore, nameQuery, rank, recentIds, recordUse, usageBoost, wantedFile } from '../src/shared/launcher.ts'
+import { calculate, convert, formatNumber, issueKey, jiraSite, matchScore, nameQuery, rank, recentIds, recordUse, usageBoost, wantedFile } from '../src/shared/launcher.ts'
 
 test('names match best whole, then by their start, a word, initials, anywhere, letters in order', () => {
   const s = (q: string, t: string): number => matchScore(q, t)
@@ -83,4 +83,34 @@ test('several typed words each match the name, in any order', () => {
   assert.equal(nameQuery('  tax  2024 '), 'kMDItemFSName == "*tax*"cd && kMDItemFSName == "*2024*"cd')
   assert.equal(nameQuery('a"b*c?d\\e'), 'kMDItemFSName == "*abcde*"cd', 'quotes and wildcards cannot break out of the query')
   assert.equal(nameQuery('   '), '')
+})
+
+test('units convert within what they measure', () => {
+  const c = (q: string) => { const r = convert(q); return r && `${formatNumber(r.value)} ${r.unit}` }
+  assert.equal(c('5 GB to MiB'), '4,768.37158203 MiB')
+  assert.equal(c('1 GiB in MB'), '1,073.741824 MB')
+  assert.equal(c('100f to c'), '37.7777777778 °C')
+  assert.equal(c('0 c in f'), '32 °F')
+  assert.equal(c('90 min as h'), '1.5 h')
+  assert.equal(c('3.5 ft = cm'), '106.68 cm')
+  assert.equal(c('2*1.5 km to mi'), '1.8641135767 mi')
+  assert.equal(c('1,000 lb to kg'), '453.59237 kg')
+  assert.equal(c('10 kg to km'), null, 'mass is not length')
+  assert.equal(c('5 apples to pears'), null)
+  assert.equal(c('5 GB'), null)
+  assert.equal(convert('5 gb to mib')?.from, '5 GB')
+})
+
+test('Jira issue keys, and where your Jira is from the Browser history', () => {
+  assert.equal(issueKey('plm-123'), 'PLM-123')
+  assert.equal(issueKey(' INC-4211 '), 'INC-4211')
+  for (const no of ['web-prod-01', 'PLM-', '123-45', 'a-1', 'plm 123']) assert.equal(issueKey(no), null, no)
+  const pages = [
+    { url: 'https://old.atlassian.net/browse/OPS-1', space: 'w1', at: 1 },
+    { url: 'https://mainspring.atlassian.net/browse/PLM-77?focus=1', space: 'work', at: 5 },
+    { url: 'https://mainspring.atlassian.net/wiki/spaces/X', space: 'work', at: 9 },
+    { url: 'https://github.com/x/y/browse/README', space: 'p', at: 10 }
+  ]
+  assert.deepEqual(jiraSite(pages), { base: 'https://mainspring.atlassian.net', space: 'work' })
+  assert.equal(jiraSite([]), null)
 })
