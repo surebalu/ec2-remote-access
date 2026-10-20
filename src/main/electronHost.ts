@@ -1,9 +1,11 @@
 import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Host, VoiceHost } from './host'
+import type { Host, LauncherHost, VoiceHost } from './host'
 import { broadcastToPhones } from './phoneAccess'
 import { cancelDownload, fillPage } from './webviews'
+import { mainWindow } from './windows'
+import { fileIcons, hideLauncher, launcherCommand, launcherStatus, pauseLauncherKey, showLauncher } from './launcherWindow'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
 const electronVoice: VoiceHost = {
@@ -21,15 +23,25 @@ const electronVoice: VoiceHost = {
   },
   askMicrophone: async () => process.platform === 'darwin' && systemPreferences.askForMediaAccess('microphone'),
   send(channel, payload) {
-    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
+    mainWindow()?.webContents.send(channel, payload)
   },
   openPrivacy: (pane) => shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?Privacy_${pane === 'microphone' ? 'Microphone' : 'SpeechRecognition'}`)
 }
 
+const electronLauncher: LauncherHost = {
+  show: showLauncher,
+  hide: hideLauncher,
+  command: launcherCommand,
+  pause: pauseLauncherKey,
+  status: launcherStatus,
+  icons: fileIcons
+}
+
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */
 export const electronHost: Host = {
+  // The main window only: the launcher's window has no use for sessions' events.
   broadcast(channel, payload) {
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
+    mainWindow()?.webContents.send(channel, payload)
     broadcastToPhones(channel, payload)
   },
   userDataDir: () => app.getPath('userData'),
@@ -48,12 +60,12 @@ export const electronHost: Host = {
   fillWebPage: fillPage,
   showEmojiPanel: () => app.showEmojiPanel(),
   quickLook(path) {
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow()
     win?.previewFile(path)
   },
   shareUrl(url) {
     if (process.platform !== 'darwin') return false
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow()
     new ShareMenu({ urls: [url] }).popup(win ? { window: win } : {})
     return true
   },
@@ -85,5 +97,6 @@ export const electronHost: Host = {
   },
   encrypt: (plain) => (safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(plain) : null),
   decrypt: (cipher) => safeStorage.decryptString(cipher),
-  voice: electronVoice
+  voice: electronVoice,
+  launcher: electronLauncher
 }

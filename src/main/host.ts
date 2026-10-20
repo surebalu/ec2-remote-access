@@ -3,7 +3,7 @@
  * gateway. Modules under src/main call `host()` instead of importing 'electron', so the same SSH/SFTP/RDP/AWS
  * code runs inside the desktop app and inside `src/gateway` (a Node server reached from a phone's browser).
  */
-import type { Theme, VoiceEvent, VoicePermission } from '@shared/types'
+import type { AppCommand, Theme, VoiceEvent, VoicePermission } from '@shared/types'
 
 export interface OpenDialogOptions {
   title: string
@@ -63,6 +63,20 @@ export interface Host {
   decrypt(cipher: Buffer): string
   /** Voice dictation needs this Mac's microphone and speech recognizer (see voice.ts); null where there are none (gateway). */
   voice: VoiceHost | null
+  /** The launcher's window and its key in every app (main/launcherWindow.ts); null without a desktop (gateway). */
+  launcher: LauncherHost | null
+}
+
+/** What the launcher needs from the Mac app. */
+export interface LauncherHost {
+  show(): void
+  hide(): void
+  /** Hides the launcher and has the main window carry out `c`, bringing it to the front. */
+  command(c: AppCommand): void
+  /** Lets go of the launcher's key while Settings records a new one, or takes it again. */
+  pause(paused: boolean): void
+  status(): { key: string; registered: boolean }
+  icons(paths: string[]): Promise<Record<string, string>>
 }
 
 /** What dictation (voice.ts) needs from the Mac app. */

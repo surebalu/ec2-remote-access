@@ -49,7 +49,16 @@ interface PageState {
 export default function WebAppTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const kind = tab.kind as WebAppKind
   const app = WEB_APPS[kind]
-  const [src] = useState(() => startUrl(kind))
+  const handledRequest = useRef(0)
+  // Opened to ask something (the launcher): that chat first, else the one it showed last time.
+  const [src] = useState(() => {
+    const r = useStore.getState().webAppRequest
+    if (r?.kind === kind) {
+      handledRequest.current = r.nonce
+      return r.url
+    }
+    return startUrl(kind)
+  })
   const [page, setPage] = useState<PageState>({ url: src, title: '', loading: true, back: false, fwd: false })
   const [menu, setMenu] = useState<{ kind: 'more' | 'fill'; anchor: HTMLElement } | null>(null)
   const view = useRef<WebviewEl | null>(null)
@@ -135,6 +144,13 @@ export default function WebAppTab({ tab, active }: { tab: Tab; active: boolean }
     const t = setTimeout(() => act((v) => v.focus()), 0)
     return () => clearTimeout(t)
   }, [inFront]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const request = useStore((s) => s.webAppRequest)
+  useEffect(() => {
+    if (!request || request.kind !== kind || handledRequest.current === request.nonce) return
+    handledRequest.current = request.nonce
+    navigate(request.url)
+  }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The tile head of a split names the chat.
   const shownTitle = page.title.replace(new RegExp(`\\s*[-|–—]\\s*${app.name}$`), '').replace(new RegExp(`^${app.name}$`), '')

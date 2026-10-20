@@ -163,10 +163,11 @@ export type ComboCheck =
   /** `from`: the section that had this combination and loses it. `notes`: where a tool keeps it. */
   | { ok: true; from?: RailSection; notes: string[] }
 
-/** Whether `combo` can be the shortcut of `section`. */
-export function checkCombo(combo: string, section: RailSection, saved: Partial<Record<string, string>> | undefined): ComboCheck {
+/** Whether `combo` can be the shortcut of `section`; `launcherKey` is the launcher's, which works in every app. */
+export function checkCombo(combo: string, section: RailSection, saved: Partial<Record<string, string>> | undefined, launcherKey = ''): ComboCheck {
   const { mods, key } = parts(combo)
   const shown = formatCombo(combo)
+  if (launcherKey && normalizeCombo(launcherKey) === combo) return { ok: false, reason: `${shown} opens the launcher, from any app.` }
   if (!mods.has('cmd') && !mods.has('ctrl') && !/^f\d+$/.test(key)) return { ok: false, reason: 'Hold ⌘ or ⌃ with the key (or use an F-key), so typing never sets it off.' }
   if (SYSTEM[combo]) return { ok: false, reason: `macOS keeps ${shown} for ${SYSTEM[combo]}.` }
   if (APP[combo]) return { ok: false, reason: `${shown} is already ${APP[combo]}.` }
@@ -177,4 +178,38 @@ export function checkCombo(combo: string, section: RailSection, saved: Partial<R
   const from = RAIL_SECTIONS.find((s) => s !== section && keys[s] === combo)
   const notes = Object.entries(TOOL_KEYS).filter(([, m]) => m[combo]).map(([tool, m]) => `In ${SECTION_NAMES[tool as RailSection]}, ${shown} stays ${m[combo]}.`)
   return { ok: true, from, notes }
+}
+
+/**
+ * Whether `combo` can open the launcher from any app (a global shortcut takes the key from every app, this one
+ * included). ⌥Space is allowed, as launchers use it; ⌥ with a letter types a character everywhere.
+ */
+export function checkGlobalCombo(combo: string, saved: Partial<Record<string, string>> | undefined): ComboCheck {
+  const { mods, key } = parts(combo)
+  const shown = formatCombo(combo)
+  const fkey = /^f\d+$/.test(key)
+  if (!mods.has('cmd') && !mods.has('ctrl') && !mods.has('alt') && !fkey) return { ok: false, reason: 'Hold ⌘, ⌃ or ⌥ with the key (or use an F-key), so typing in other apps never sets it off.' }
+  if (mods.has('alt') && !mods.has('cmd') && !mods.has('ctrl') && key !== 'space' && !fkey) return { ok: false, reason: `${shown} types a character in every app (⌥E is an accent). Add ⌘ or ⌃, or use ⌥Space.` }
+  if (SYSTEM[combo]) return { ok: false, reason: `macOS keeps ${shown} for ${SYSTEM[combo]}.` }
+  if (APP[combo]) return { ok: false, reason: `${shown} is already ${APP[combo]} in this app.` }
+  if (mods.has('ctrl') && !mods.has('cmd') && !mods.has('alt') && /^[a-z[\]\\]$/.test(key)) {
+    return { ok: false, reason: `${shown} is a terminal control key in every terminal. Add ⌘ or ⌥.` }
+  }
+  const section = sectionFor(saved, combo)
+  if (section) return { ok: false, reason: `${shown} opens ${SECTION_NAMES[section]} in this app; give one of them another key.` }
+  return { ok: true, notes: combo === 'alt+space' ? ['Raycast and Alfred use ⌥Space too: if one of them is on it, only one app gets the key.'] : [] }
+}
+
+const ACCELERATOR_KEYS: Record<string, string> = {
+  up: 'Up', down: 'Down', left: 'Left', right: 'Right', enter: 'Return', space: 'Space', tab: 'Tab', backspace: 'Backspace', delete: 'Delete',
+  escape: 'Escape', home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown'
+}
+
+/** The combination as an Electron accelerator ('alt+space' → 'Alt+Space'), for globalShortcut; '' when there is none. */
+export function toAccelerator(combo: string): string {
+  if (!combo) return ''
+  const { mods, key } = parts(normalizeCombo(combo))
+  const k = ACCELERATOR_KEYS[key] ?? (/^f\d+$/.test(key) || key.length === 1 ? key.toUpperCase() : '')
+  if (!k) return ''
+  return [mods.has('ctrl') && 'Control', mods.has('alt') && 'Alt', mods.has('shift') && 'Shift', mods.has('cmd') && 'Command', k].filter(Boolean).join('+')
 }

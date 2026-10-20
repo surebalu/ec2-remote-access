@@ -9,6 +9,8 @@ const output = mkdtempSync(join(tmpdir(), 'ec2ra-ui-'))
 app.setPath('userData', output)
 app.setPath('sessionData', output)
 const now = Date.now()
+// Recents' dates stay "Today" even when the suite runs just after midnight.
+const today = new Date(now).setHours(0, 0, 0, 0)
 const calls = []
 const errors = []
 const profiles = ['production', 'development'].map((name) => ({ name, region: 'us-east-1', kind: 'static', enabled: true, accountId: '123456789012' }))
@@ -71,10 +73,14 @@ app.on('session-created', (ses) => {
     if (u.hostname === '127.0.0.1') return callback({})
     if (/(^|\.)console\.aws\.amazon\.com$/.test(u.hostname)) return callback({ redirectURL: `http://127.0.0.1:${webPort}/console${u.pathname}${u.search}` })
     // Claude and ChatGPT tabs get a fixture page instead of the real sites.
-    if (/^(claude\.ai|chatgpt\.com)$/.test(u.hostname)) return callback({ redirectURL: `http://127.0.0.1:${webPort}/chat/${u.hostname}${u.pathname}` })
+    if (/^(claude\.ai|chatgpt\.com)$/.test(u.hostname)) return callback({ redirectURL: `http://127.0.0.1:${webPort}/chat/${u.hostname}${u.pathname}${u.search}` })
     callback({ cancel: /^(https?|wss?):/.test(details.url) })
   })
 })
+// The launcher: a few installed apps, what it counted and what it was asked to do.
+const launcherApps = ['Safari', 'Slack', 'Visual Studio Code', 'System Settings'].map((name) => ({ name, path: `/Applications/${name}.app` }))
+let launcherUsage = {}
+const launcherDone = []
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
 // The Finder tab's pretend disk under /Users/fixture, its Finder favorites and locations, and what it was asked to do.
@@ -204,7 +210,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       ].filter((f) => !(settings.finderHidden ?? []).includes(f.path)),
       locations: [{ name: 'iCloud Drive', path: '/Users/fixture/Library/Mobile Documents/com~apple~CloudDocs', kind: 'icloud' }, { name: 'Google Drive - me@example.com', path: '/Users/fixture/Library/CloudStorage/GoogleDrive-me@example.com', kind: 'cloud' }, { name: 'Macintosh HD', path: '/', kind: 'computer' }]
     }
-    case 'finder:recents': return [{ ...fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), lastUsed: now - 3600000 }, { ...fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200), lastUsed: now - 7200000 }]
+    case 'finder:recents': return [{ ...fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), lastUsed: Math.max(now - 3600000, today + 2000) }, { ...fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200), lastUsed: Math.max(now - 7200000, today + 1000) }]
     case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
     case 'term:history': return ['ls -la', 'git status', 'git checkout main', 'npm test']
@@ -263,6 +269,16 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return
     }
     case 'voice:openPrivacy': return
+    case 'launcher:apps': return launcherApps
+    case 'launcher:usage': return launcherUsage
+    case 'launcher:icons': return {}
+    case 'launcher:status': return { key: settings.launcherKey ?? '', registered: true }
+    case 'launcher:open': case 'launcher:used': case 'launcher:command': case 'launcher:show': case 'launcher:hide': case 'launcher:pause': {
+      launcherDone.push([channel, ...args])
+      const id = channel === 'launcher:open' ? args[1] : channel === 'launcher:used' ? args[0] : null
+      if (id) launcherUsage = { ...launcherUsage, [id]: { count: (launcherUsage[id]?.count ?? 0) + 1, last: Date.now() } }
+      return
+    }
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
 })
@@ -1437,6 +1453,18 @@ app.whenReady().then(async () => {
     await bjs(`document.querySelector('[aria-label="Shortcut for Claude"]').click()`)
     await press('c', 'KeyC', { metaKey: true, ctrlKey: true })
     await buntil(`document.querySelector('[aria-label="Shortcut for Claude"]').textContent === '⌃⌘C'`, 'recorded again')
+    // The launcher's key works in every app: ⌥E would type a character everywhere, ⌥Space is fine (with a note about
+    // Raycast), and the old key is let go while recording.
+    const pausesBefore = launcherDone.filter((d) => d[0] === 'launcher:pause').length
+    await bjs(`document.querySelector('[aria-label="Shortcut for the launcher"]').click()`)
+    await press('e', 'KeyE', { altKey: true })
+    await buntil(`document.querySelector('[data-shortcut-row="launcher"]').closest('.set-row').querySelector('.set-key-error')?.textContent.includes('types a character')`, '⌥E is refused')
+    await press(' ', 'Space', { altKey: true })
+    await buntil(`document.querySelector('[aria-label="Shortcut for the launcher"]').textContent === '⌥Space'`, 'launcher key recorded')
+    assert.equal(settings.launcherKey, 'alt+space')
+    assert.match(await bjs(`document.querySelector('[data-shortcut-row="launcher"]').closest('.set-row').querySelector('.set-key-note').textContent`), /Raycast/)
+    for (let n = 0; n < 60 && launcherDone.filter((d) => d[0] === 'launcher:pause').length < pausesBefore + 2; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(launcherDone.filter((d) => d[0] === 'launcher:pause').slice(pausesBefore).map((d) => d[1]), [true, false], 'the key is let go while recording')
     await bjs(`document.querySelector('.settings button[aria-label="Close dialog"]').click()`)
     await buntil(`!document.querySelector('.modal-backdrop')`, 'settings closed')
     assert.match(await bjs(`document.querySelector('button[aria-label="Claude"]').title`), /\(⌃⌘C\)$/, 'the rail shows the key')
@@ -1448,6 +1476,13 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('button[aria-label="Claude"]').classList.contains('on')`, 'shortcut shows claude')
     bwin.webContents.send('web:shortcut', { webContentsId: claudeGuest().id, key: 'c', code: 'KeyC', meta: true, ctrl: true, shift: false, alt: false })
     await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'pressed again from the page: back to hosts')
+    // What the launcher asks of the window: a question for ChatGPT (a new chat with ?q=), a section.
+    bwin.webContents.send('app:command', { kind: 'ask', app: 'chatgpt', text: 'why 502' })
+    await buntil(`document.querySelector('button[aria-label="ChatGPT"]').classList.contains('on')`, 'ask opens chatgpt')
+    for (let n = 0; n < 100 && !guests().some((g) => g.getURL().includes('/chat/chatgpt.com/?q=why%20502')); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(guests().some((g) => g.getURL().includes('/chat/chatgpt.com/?q=why%20502')), 'the question is in the address')
+    bwin.webContents.send('app:command', { kind: 'section', section: 'hosts' })
+    await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'section command')
     // ⌘/ lists it under App sections.
     await bkey('/')
     await buntil(`[...document.querySelectorAll('.modal dl')][0]?.textContent.includes('⌃⌘CClaude')`, 'shortcuts dialog lists it')
@@ -1456,6 +1491,72 @@ app.whenReady().then(async () => {
     browserScenario = false
     bwin.destroy()
     webServer.close()
+
+    // The launcher's own window: apps by initials, a sum, hosts by name or IP, the app's sections, Spotlight files,
+    // the actions menu, Ask Claude, and Esc.
+    const lwin = new BrowserWindow({ show: false, width: 760, height: 520, frame: false, transparent: true, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    lwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const ljs = (code) => lwin.webContents.executeJavaScript(code)
+    const luntil = async (code, what = code) => {
+      for (let n = 0; n < 200; n++) { if (await ljs(code)) return; await new Promise((r) => setTimeout(r, 30)) }
+      throw new Error(`Timed out (launcher): ${what}`)
+    }
+    const lshot = async (name) => { await ljs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 150)); writeFileSync(join(output, name), (await lwin.webContents.capturePage()).toPNG()) }
+    const ltype = (v) => ljs(`(() => { const i = document.querySelector('.launcher-search input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    const lkey = (k, mods = {}) => ljs(`document.querySelector('.launcher-search input').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const picked = `document.querySelector('.launcher-item.on .launcher-title')?.textContent`
+    const done = async (what, test) => {
+      for (let n = 0; n < 100 && !launcherDone.some(test); n++) await new Promise((r) => setTimeout(r, 30))
+      assert.ok(launcherDone.some(test), what)
+    }
+    await lwin.loadFile(resolve('out/renderer/index.html'), { query: { launcher: '1' } })
+    await luntil(`[...document.querySelectorAll('.launcher-group')].some((g) => g.textContent === 'Favorite Hosts') && document.body.textContent.includes('web-prod-01')`, 'suggestions: favorite hosts')
+    assert.equal(await ljs(`document.documentElement.classList.contains('launcher-page')`), true)
+    await lshot('launcher.png')
+    await ltype('vsc')
+    await luntil(`${picked} === 'Visual Studio Code'`, 'initials find the app')
+    await lkey('Enter')
+    await done('Enter opens the app', (d) => d[0] === 'launcher:open' && d[1] === '/Applications/Visual Studio Code.app' && d[2] === 'app:/Applications/Visual Studio Code.app')
+    await ltype('2*(3+4)')
+    await luntil(`${picked} === '14'`, 'a sum')
+    const copies = calls.filter((c) => c.channel === 'clipboard:write').length
+    await lkey('Enter')
+    for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'clipboard:write').length === copies; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'clipboard:write').at(-1).args[0], '14', 'Enter copies the answer')
+    await ltype('10.0.1.15')
+    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Hosts"] .launcher-title')].some((t) => t.textContent === 'web-prod-01')`, 'a host by its IP')
+    await ltype('web-prod-01')
+    await luntil(`${picked} === 'web-prod-01'`, 'a host by name')
+    await lkey('k', { metaKey: true })
+    await luntil(`[...document.querySelectorAll('.launcher-action')].map((a) => a.textContent).join('|').includes('Copy Instance ID')`, 'actions menu')
+    await lkey('Escape')
+    await luntil(`!document.querySelector('.launcher-actions')`, 'actions menu closes')
+    await lkey('Enter')
+    await done('Enter connects', (d) => d[0] === 'launcher:command' && d[1].kind === 'connect' && d[1].key === running.key)
+    await ltype('notes')
+    await luntil(`${picked} === 'Notes'`, 'a section of the app')
+    await lkey('Enter')
+    await done('Enter shows the section', (d) => d[0] === 'launcher:command' && d[1].kind === 'section' && d[1].section === 'notes')
+    await ltype('Runbook')
+    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Files"] .launcher-title')].some((t) => t.textContent === 'Runbook.pdf')`, 'Spotlight files')
+    await lshot('launcher-files.png')
+    for (let n = 0; n < 12 && (await ljs(picked)) !== 'Runbook.pdf'; n++) await lkey('ArrowDown')
+    await lkey('Enter', { metaKey: true })
+    for (let n = 0; n < 60 && calls.at(-1)?.channel !== 'local:reveal'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'local:reveal').at(-1).args, ['/Users/fixture/Documents/Runbook.pdf'], '⌘↵ shows it in Finder')
+    await ltype('why is nginx 502')
+    await luntil(`[...document.querySelectorAll('.launcher-title')].some((t) => t.textContent.startsWith('Ask Claude'))`, 'ask claude')
+    await ljs(`[...document.querySelectorAll('.launcher-item')].find((r) => r.textContent.startsWith('Ask Claude')).click()`)
+    await done('ask claude', (d) => d[0] === 'launcher:command' && d[1].kind === 'ask' && d[1].app === 'claude' && d[1].text === 'why is nginx 502')
+    await lkey('Escape')
+    await luntil(`document.querySelector('.launcher-search input').value === ''`, 'Esc clears the field')
+    const hides = launcherDone.filter((d) => d[0] === 'launcher:hide').length
+    await lkey('Escape')
+    await done('Esc on an empty field puts it away', () => launcherDone.filter((d) => d[0] === 'launcher:hide').length > hides)
+    // Opened since: Visual Studio Code is a recent item now.
+    lwin.webContents.send('launcher:shown', { at: Date.now() })
+    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Recent"] .launcher-title')].some((t) => t.textContent === 'Visual Studio Code')`, 'recent items')
+    lwin.destroy()
 
     // The Terminal tab: Warp-style tabs, split panes, command blocks and the input box, against a fake zsh.
     const twin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })

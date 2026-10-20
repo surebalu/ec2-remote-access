@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { AppAbout, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
-import { checkCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
+import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
 import { CAN_DICTATE, voice } from '../voice'
 import { useStore } from '../store'
 import Modal from './Modal'
@@ -185,16 +185,26 @@ const SECTION_HINTS: Record<RailSection, string> = {
 
 const heldMods = (e: KeyboardEvent): string => `${e.ctrlKey ? '⌃' : ''}${e.altKey ? '⌥' : ''}${e.shiftKey ? '⇧' : ''}${e.metaKey ? '⌘' : ''}`
 
+/** What Settings → Keyboard records a key for: a rail section, or the launcher (a key in every app). */
+type KeyTarget = RailSection | 'launcher'
+
 /**
- * Settings → Keyboard: a shortcut for each section of the app rail, recorded by pressing it. Changes apply at once
- * (and go into the draft, so Save keeps them). Only shortcuts that differ from the defaults are stored.
+ * Settings → Keyboard: the launcher's key, which works in every app, and a shortcut for each section of the app
+ * rail, recorded by pressing them. Changes apply at once (and go into the draft, so Save keeps them). Only section
+ * shortcuts that differ from the defaults are stored.
  */
-function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (shortcuts: Record<string, string>) => void }): ReactElement {
-  const [recording, setRecording] = useState<RailSection | null>(null)
+function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; onChange: (shortcuts: Record<string, string>) => void; onLauncher: (key: string) => Promise<void> }): ReactElement {
+  const [recording, setRecording] = useState<KeyTarget | null>(null)
   const [held, setHeld] = useState('')
-  const [notice, setNotice] = useState<{ section: RailSection; text: string; error?: boolean } | null>(null)
+  const [notice, setNotice] = useState<{ section: KeyTarget; text: string; error?: boolean } | null>(null)
+  const [status, setStatus] = useState<{ key: string; registered: boolean } | null>(null)
   const keys = sectionKeys(draft.shortcuts)
   const sections = RAIL_SECTIONS.filter((x) => IN_ELECTRON || (x !== 'local' && x !== 'finder'))
+  const launcherKey = draft.launcherKey ?? ''
+
+  const refreshStatus = (): void => { if (IN_ELECTRON) void window.api.invoke('launcher:status').then(setStatus, () => undefined) }
+  useEffect(refreshStatus, [])
+  const setLauncher = (key: string): void => { void onLauncher(key).then(refreshStatus) }
 
   const assign = (section: RailSection, combo: string, from?: RailSection): void => {
     const next = { ...(draft.shortcuts ?? {}) }
@@ -211,6 +221,13 @@ function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (sho
     setHeld('')
   }
 
+  // While any key is being recorded the launcher's key is let go, or pressing it would open the launcher instead.
+  useEffect(() => {
+    if (!recording || !IN_ELECTRON) return
+    void window.api.invoke('launcher:pause', true).catch(() => undefined)
+    return () => void window.api.invoke('launcher:pause', false).then(refreshStatus, () => undefined)
+  }, [!!recording]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!recording) return
     // Window capture, so no app shortcut, dialog or the remote desktop sees the keys being recorded.
@@ -220,7 +237,8 @@ function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (sho
       const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
       if (plain && e.key === 'Escape') return stop()
       if (plain && (e.key === 'Backspace' || e.key === 'Delete')) {
-        assign(recording, '')
+        if (recording === 'launcher') setLauncher('')
+        else assign(recording, '')
         setNotice(null)
         return stop()
       }
@@ -229,13 +247,14 @@ function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (sho
       // Holding Right Option a moment before the letter starts dictation; this was a shortcut instead.
       voice.cancel()
       if (e.repeat) return
-      const check = checkCombo(combo, recording, draft.shortcuts)
+      const check = recording === 'launcher' ? checkGlobalCombo(combo, draft.shortcuts) : checkCombo(combo, recording, draft.shortcuts, launcherKey)
       if (!check.ok) {
         setHeld('')
         setNotice({ section: recording, text: check.reason, error: true })
         return
       }
-      assign(recording, combo, check.from)
+      if (recording === 'launcher') setLauncher(combo)
+      else assign(recording, combo, check.from)
       const notes = [...(check.from ? [`Moved from ${SECTION_NAMES[check.from]}, which has no shortcut now.`] : []), ...check.notes]
       setNotice(notes.length ? { section: recording, text: notes.join(' ') } : null)
       stop()
@@ -257,36 +276,55 @@ function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (sho
       window.removeEventListener('keyup', up, true)
       window.removeEventListener('mousedown', away, true)
     }
-  }, [recording, draft.shortcuts]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recording, draft.shortcuts, launcherKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** The field that records a key, with Remove and (where there is a default) Restore. */
+  const field = (target: KeyTarget, name: string, value: string, fallback: string): ReactElement => {
+    const rec = recording === target
+    return (
+      <div className="flex items-center gap-1" data-shortcut-row={target}>
+        <button
+          type="button"
+          className={`key-field ${rec ? 'recording' : ''} ${value ? '' : 'empty'}`}
+          aria-label={`Shortcut for ${name}`}
+          title={rec ? 'Press the keys; Esc stops, ⌫ removes the shortcut' : 'Click, then press the keys'}
+          onClick={() => { setNotice(null); if (rec) stop(); else { setHeld(''); setRecording(target) } }}
+        >
+          {rec ? (held ? <kbd className="kbd">{held}</kbd> : <span>Press keys…</span>) : value ? <kbd className="kbd">{formatCombo(value)}</kbd> : <span>None</span>}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Remove the shortcut for ${name}`} title="Remove" disabled={!value || rec}
+          onClick={() => { setNotice(null); if (target === 'launcher') setLauncher(''); else assign(target, '') }}><Icon.x /></button>
+        <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Restore the shortcut for ${name}`} title={fallback ? `Back to ${formatCombo(fallback)}` : 'No shortcut by default'} disabled={!fallback || value === fallback || rec}
+          onClick={() => { setNotice(null); if (target !== 'launcher') assign(target, fallback) }}><Icon.refresh /></button>
+      </div>
+    )
+  }
+  const hintFor = (target: KeyTarget, normal: ReactNode): ReactNode => {
+    const note = notice?.section === target ? notice : null
+    return note ? <span className={note.error ? 'set-key-error' : 'set-key-note'}>{note.text}</span> : normal
+  }
+  const launcherHint = !launcherKey
+    ? 'A search bar over any app, like Raycast: apps, files, your hosts, AWS consoles, the app’s sections, sums and web searches. Give it a key, for example ⌥Space.'
+    : status && status.key === launcherKey && !status.registered
+      ? <span className="set-key-error">macOS did not give the app {formatCombo(launcherKey)}: another app (Raycast, Alfred?) holds it. Free it there, or pick another key.</span>
+      : `Press ${formatCombo(launcherKey)} in any app to search apps, files, hosts and more; press it again or Esc to put it away.`
 
   const customised = Object.keys(draft.shortcuts ?? {}).length > 0
   return (
     <>
+      {IN_ELECTRON && (
+        <Group title="Anywhere on your Mac">
+          <Row label={<span className="flex items-center gap-2"><Icon.search className="set-key-icon" />Launcher</span>} hint={hintFor('launcher', launcherHint)}>
+            {field('launcher', 'the launcher', launcherKey, '')}
+          </Row>
+        </Group>
+      )}
       <Group title="App sections">
         {sections.map((sec) => {
           const SecIcon = SECTION_ICONS[sec]
-          const rec = recording === sec
-          const def = DEFAULT_SHORTCUTS[sec] ?? ''
-          const note = notice?.section === sec ? notice : null
           return (
-            <Row
-              key={sec}
-              label={<span className="flex items-center gap-2"><SecIcon className="set-key-icon" />{SECTION_NAMES[sec]}</span>}
-              hint={note ? <span className={note.error ? 'set-key-error' : 'set-key-note'}>{note.text}</span> : SECTION_HINTS[sec]}
-            >
-              <div className="flex items-center gap-1" data-shortcut-row={sec}>
-                <button
-                  type="button"
-                  className={`key-field ${rec ? 'recording' : ''} ${keys[sec] ? '' : 'empty'}`}
-                  aria-label={`Shortcut for ${SECTION_NAMES[sec]}`}
-                  title={rec ? 'Press the keys; Esc stops, ⌫ removes the shortcut' : 'Click, then press the keys'}
-                  onClick={() => { setNotice(null); if (rec) stop(); else { setHeld(''); setRecording(sec) } }}
-                >
-                  {rec ? (held ? <kbd className="kbd">{held}</kbd> : <span>Press keys…</span>) : keys[sec] ? <kbd className="kbd">{formatCombo(keys[sec])}</kbd> : <span>None</span>}
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Remove the shortcut for ${SECTION_NAMES[sec]}`} title="Remove" disabled={!keys[sec] || rec} onClick={() => { setNotice(null); assign(sec, '') }}><Icon.x /></button>
-                <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Restore the shortcut for ${SECTION_NAMES[sec]}`} title={def ? `Back to ${formatCombo(def)}` : 'No shortcut by default'} disabled={!def || keys[sec] === def || rec} onClick={() => { setNotice(null); assign(sec, def) }}><Icon.refresh /></button>
-              </div>
+            <Row key={sec} label={<span className="flex items-center gap-2"><SecIcon className="set-key-icon" />{SECTION_NAMES[sec]}</span>} hint={hintFor(sec, SECTION_HINTS[sec])}>
+              {field(sec, SECTION_NAMES[sec], keys[sec], DEFAULT_SHORTCUTS[sec] ?? '')}
             </Row>
           )
         })}
@@ -298,7 +336,7 @@ function KeyboardSettings({ draft, onChange }: { draft: Settings; onChange: (sho
         <div className="set-row stack">
           <ul className="set-list">
             <li><Icon.check /><span>Click a shortcut, then press the keys: ⌘ or ⌃ with a letter, number or symbol (⌃⌘C, ⌥⌘1), or an F-key. Esc stops recording, ⌫ removes the shortcut.</span></li>
-            <li><Icon.check /><span>They work all over the app, in terminals, remote desktops and web pages too.</span></li>
+            <li><Icon.check /><span>They work all over the app, in terminals, remote desktops and web pages too. The launcher’s key works in every app on the Mac while this app is open.</span></li>
             <li><Icon.check /><span>Press one again while its section is in front to go back to where you were, say from Claude to the session you were in.</span></li>
             <li><Icon.check /><span>A tool keeps its own keys while it is in front: give ChatGPT ⌘L and the Browser still edits its address with it.</span></li>
           </ul>
@@ -593,7 +631,13 @@ export default function SettingsDialog(): ReactElement | null {
   )
 
   const voiceSection = <VoiceSettings draft={draft} upd={upd} />
-  const keyboard = <KeyboardSettings draft={draft} onChange={(shortcuts) => { upd('shortcuts', shortcuts); void s.saveSettings({ shortcuts }) }} />
+  const keyboard = (
+    <KeyboardSettings
+      draft={draft}
+      onChange={(shortcuts) => { setDraft((d) => (d ? { ...d, shortcuts } : d)); void s.saveSettings({ shortcuts }) }}
+      onLauncher={async (launcherKey) => { setDraft((d) => (d ? { ...d, launcherKey } : d)); await s.saveSettings({ launcherKey }) }}
+    />
+  )
 
 
   const requirements = (

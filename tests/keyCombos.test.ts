@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, normalizeCombo, sectionFor, sectionKeys, toolOwns } from '../src/shared/keyCombos.ts'
+import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, normalizeCombo, sectionFor, sectionKeys, toAccelerator, toolOwns } from '../src/shared/keyCombos.ts'
 
 const press = (code: string, key: string, mods: Partial<{ meta: boolean; ctrl: boolean; alt: boolean; shift: boolean }> = {}) =>
   comboOf({ code, key, meta: false, ctrl: false, alt: false, shift: false, ...mods })
@@ -102,4 +102,33 @@ test('a combination another section had moves, and a tool in front keeps its own
   assert.equal(toolOwns('ssh', 'cmd+l'), false)
   assert.equal(toolOwns(undefined, 'cmd+l'), false)
   assert.equal(toolOwns('claude', null), false)
+})
+
+test('the launcher key works in every app, so it is checked against typing everywhere', () => {
+  const reason = (combo: string, saved?: Record<string, string>): string => { const r = checkGlobalCombo(combo, saved); return r.ok ? '' : r.reason }
+  const ok = checkGlobalCombo('alt+space', undefined)
+  assert.equal(ok.ok, true)
+  assert.match(ok.ok ? ok.notes[0] : '', /Raycast/)
+  for (const combo of ['ctrl+alt+cmd+space', 'shift+cmd+space', 'alt+cmd+l', 'f13', 'ctrl+alt+k']) assert.equal(checkGlobalCombo(combo, undefined).ok, true, combo)
+  assert.match(reason('space'), /⌘, ⌃ or ⌥/)
+  assert.match(reason('alt+e'), /types a character/)
+  assert.match(reason('shift+alt+e'), /types a character/)
+  assert.match(reason('cmd+space'), /Spotlight/)
+  assert.match(reason('cmd+k'), /quick switcher/)
+  assert.match(reason('ctrl+r'), /terminal control key/)
+  assert.match(reason('ctrl+cmd+c', { claude: 'ctrl+cmd+c' }), /opens Claude/)
+  assert.match(reason('shift+cmd+n'), /opens Notes/)
+  // And a section cannot take the launcher's key.
+  const taken = checkCombo('alt+cmd+l', 'claude', undefined, 'alt+cmd+l')
+  assert.match(taken.ok ? '' : taken.reason, /launcher/)
+})
+
+test('combinations become Electron accelerators', () => {
+  assert.equal(toAccelerator('alt+space'), 'Alt+Space')
+  assert.equal(toAccelerator('ctrl+alt+shift+cmd+k'), 'Control+Alt+Shift+Command+K')
+  assert.equal(toAccelerator('cmd+`'), 'Command+`')
+  assert.equal(toAccelerator('f13'), 'F13')
+  assert.equal(toAccelerator('ctrl+cmd+up'), 'Control+Command+Up')
+  assert.equal(toAccelerator('Cmd+Shift+Enter'), 'Shift+Command+Return')
+  assert.equal(toAccelerator(''), '')
 })

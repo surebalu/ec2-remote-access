@@ -30,6 +30,7 @@ import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
 import { finderPlaces, finderRecents, finderSearch } from './finder'
+import { launcherUsage, listApps, noteUse } from './apps'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
 
@@ -159,6 +160,21 @@ export const handlers: Handlers = {
   'app:emojiPanel': async () => host().showEmojiPanel?.(),
   'local:open': (path) => host().openPath(path),
   'local:quickLook': async (path) => host().quickLook?.(path),
+  'launcher:apps': async () => listApps(),
+  'launcher:usage': async () => launcherUsage(),
+  'launcher:icons': async (paths) => (Array.isArray(paths) ? host().launcher?.icons(paths) : undefined) ?? {},
+  'launcher:open': async (path, id) => {
+    if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('Not a path on this Mac.')
+    noteUse(id)
+    host().launcher?.hide()
+    await host().openPath(path)
+  },
+  'launcher:used': async (id) => noteUse(id),
+  'launcher:command': async (c) => host().launcher?.command(c),
+  'launcher:show': async () => host().launcher?.show(),
+  'launcher:hide': async () => host().launcher?.hide(),
+  'launcher:pause': async (paused) => host().launcher?.pause(!!paused),
+  'launcher:status': async () => host().launcher?.status() ?? { key: '', registered: false },
   'finder:places': () => finderPlaces(),
   'finder:recents': () => finderRecents(),
   'finder:search': (query, dir) => finderSearch(query, dir),

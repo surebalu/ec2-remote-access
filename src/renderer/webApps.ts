@@ -23,6 +23,12 @@ const SIGN_IN_SITES = ['accounts.google.com', 'appleid.apple.com', 'login.micros
 
 export const isWebApp = (kind: string): kind is WebAppKind => kind === 'claude' || kind === 'chatgpt'
 
+/** A new chat asking `text`: both sites take a question in ?q=. */
+export function askUrl(kind: WebAppKind, text: string): string {
+  const q = encodeURIComponent(text)
+  return kind === 'claude' ? `https://claude.ai/new?q=${q}` : `https://chatgpt.com/?q=${q}`
+}
+
 function onSite(url: string, sites: string[]): boolean {
   try {
     const host = new URL(url).hostname

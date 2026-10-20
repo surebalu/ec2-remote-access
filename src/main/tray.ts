@@ -1,8 +1,11 @@
-import { app, BrowserWindow, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
+import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import type { AppCommand, Instance } from '@shared/types'
 import { manualToInstance } from '@shared/manual'
+import { toAccelerator } from '@shared/keyCombos'
 import { getCachedInventory, getSettings } from './store'
+import { mainWindow } from './windows'
+import { showLauncher } from './launcherWindow'
 
 /**
  * The menu-bar icon: favorite hosts to connect to without bringing the window forward first, plus Find a host,
@@ -18,7 +21,7 @@ function iconPath(): string {
 }
 
 function command(c: AppCommand): void {
-  const win = BrowserWindow.getAllWindows()[0]
+  const win = mainWindow()
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.show()
@@ -48,8 +51,10 @@ function menu(): Menu {
       : [{ label: 'Star hosts in the app to list them here', enabled: false }]),
     { type: 'separator' },
     { label: 'Find a Host…', click: () => command({ kind: 'switcher' }) },
+    // The launcher's key works in every app; shown here as a reminder, not taken a second time.
+    { label: 'Launcher…', accelerator: toAccelerator(s.launcherKey ?? '') || undefined, registerAccelerator: false, click: () => showLauncher() },
     { label: 'Rescan Accounts', click: () => command({ kind: 'scan' }) },
-    { label: 'Open EC2 Remote Access', click: () => { const w = BrowserWindow.getAllWindows()[0]; w?.show(); app.focus({ steal: true }) } },
+    { label: 'Open EC2 Remote Access', click: () => { mainWindow()?.show(); app.focus({ steal: true }) } },
     { type: 'separator' },
     { label: 'Quit EC2 Remote Access', role: 'quit' }
   ]

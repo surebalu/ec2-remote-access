@@ -7,7 +7,7 @@ import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
 import { applySectionZoom, type ZoomSection } from './sectionZoom'
 import { arrange, insertPane, paneIds, removePane, swapPanes, type Arrangement, type Direction } from './termLayout'
-import { isWebApp, WEB_APPS } from './webApps'
+import { askUrl, isWebApp, WEB_APPS, type WebAppKind } from './webApps'
 
 export interface RdpTabRequest {
   user: string
@@ -142,6 +142,10 @@ interface State {
   toolTab: (kind: ToolKind) => string
   /** Shows a tool, as its rail button does. Off the Mac app, Claude and ChatGPT open in a new browser tab instead. */
   openTool: (kind: ToolKind) => void
+  /** Opens Claude or ChatGPT on a new chat that asks `text` (the launcher's Ask). */
+  askAssistant: (kind: WebAppKind, text: string) => void
+  /** The latest page a chat tab is asked to load (nonce makes repeats distinct). */
+  webAppRequest: { kind: WebAppKind; url: string; nonce: number } | null
   moveTab: (id: string, beforeId: string | null) => void
   /** Opens another session with the same parameters; `split` shows it next to the original. */
   duplicateTab: (id: string, split?: boolean) => void
@@ -349,6 +353,15 @@ export const useStore = create<State>((set, get) => ({
     else if (kind === 'board') s.openBoard()
     else if (inElectron) s.setActive(s.toolTab(kind))
     else void window.api.invoke('shell:open', WEB_APPS[kind].home)
+  },
+  webAppRequest: null,
+  askAssistant: (kind, text) => {
+    if (!inElectron) {
+      void window.api.invoke('shell:open', askUrl(kind, text))
+      return
+    }
+    set({ webAppRequest: { kind, url: askUrl(kind, text), nonce: Date.now() + Math.random() } })
+    get().openTool(kind)
   },
   moveTab: (id, beforeId) => set((s) => {
     const tab = s.tabs.find((t) => t.id === id)

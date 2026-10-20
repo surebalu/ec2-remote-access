@@ -1724,3 +1724,34 @@ html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 .webapp-page { position: relative; flex: 1; min-height: 0; }
 .webapp-error { position: absolute; z-index: 2; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: var(--bg); text-align: center; }
 .webapp-error-logo { width: 34px; height: 34px; margin-bottom: 4px; color: var(--muted); }
+
+/* The launcher (src/renderer/launcher): a card in a transparent floating window, the margin leaving room for its shadow. */
+html.launcher-page, html.launcher-page body { background: transparent; }
+.launcher-frame { display: flex; align-items: flex-start; justify-content: center; height: 100%; padding: 14px 20px 26px; }
+.launcher { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; border: 1px solid var(--border-strong, var(--border)); border-radius: 14px; background: var(--panel); box-shadow: 0 22px 60px rgba(0, 0, 0, .38), 0 2px 10px rgba(0, 0, 0, .18); }
+.launcher-search { display: flex; flex-shrink: 0; align-items: center; gap: 12px; height: 58px; padding: 0 18px; border-bottom: 1px solid var(--border); }
+.launcher-search-icon { flex-shrink: 0; width: 18px; height: 18px; color: var(--muted); }
+.launcher-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: 400 18px/1.2 var(--ui-font); }
+.launcher-search input::placeholder { color: var(--muted); }
+.launcher-list { flex: 1; min-height: 0; padding: 4px 8px 8px; overflow-y: auto; }
+.launcher-group { padding: 10px 10px 4px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.launcher-item { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: 8px; cursor: default; }
+.launcher-item.on { background: var(--accent-soft-2); }
+.launcher-icon { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--text-2); }
+.launcher-icon img { width: 24px; height: 24px; }
+.launcher-icon svg { width: 18px; height: 18px; }
+.launcher-title { flex-shrink: 0; max-width: 55%; overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-sub { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-acc { display: inline-flex; flex-shrink: 0; align-items: center; margin-left: auto; padding-left: 8px; color: var(--muted); font-size: 11.5px; }
+.launcher-fav { width: 13px; height: 13px; color: var(--warn); fill: currentColor; }
+.launcher-state { padding: 1px 6px; border-radius: 5px; background: var(--panel-2); text-transform: capitalize; }
+.launcher-calc { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft-2); color: var(--accent); font: 700 15px/1 var(--ui-font); }
+.launcher-empty { padding: 24px; color: var(--muted); text-align: center; }
+.launcher-foot { display: flex; flex-shrink: 0; align-items: center; gap: 14px; height: 40px; padding: 0 14px; border-top: 1px solid var(--border); background: var(--bg-elev); color: var(--text-2); font-size: 12px; }
+.launcher-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.launcher-mark { width: 20px; height: 20px; border-radius: 5px; font-size: 9px; line-height: 20px; }
+.launcher-hint { display: inline-flex; align-items: center; gap: 6px; }
+.launcher-actions { position: absolute; right: 12px; bottom: 48px; z-index: 2; width: 300px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-lg); }
+.launcher-actions-title { padding: 4px 8px 6px; overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-action { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; cursor: default; }
+.launcher-action.on { background: var(--accent-soft-2); }

@@ -26,7 +26,7 @@ import ShortcutsDialog from './components/ShortcutsDialog'
 import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
-import { hasBrowser, openDefaultFor } from './quickConnect'
+import { consoleHomeFor, hasBrowser, openAccountConsole, openDefaultFor } from './quickConnect'
 import { ZoomBadge, zoomSection } from './components/ZoomControls'
 import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
@@ -112,12 +112,25 @@ export default function App(): ReactElement {
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // The menu-bar icon (src/main/tray.ts) asks the window to connect to a favorite, find a host or rescan.
+  // The menu-bar icon (src/main/tray.ts) and the launcher (src/renderer/launcher) ask the window to connect to a host,
+  // find one, rescan, or show something of the app's.
   useEffect(() => window.api.on('app:command', (c) => {
     const st = useStore.getState()
     if (c.kind === 'connect') openDefaultFor(c.key)
     else if (c.kind === 'switcher') { if (!st.quickSwitcherOpen) st.openQuickSwitcher() }
     else if (c.kind === 'scan') void st.scan()
+    else if (c.kind === 'section') {
+      if (c.section === 'hosts') st.setActive('hosts')
+      else if (c.section === 'overview') st.showGrid(true)
+      else st.openTool(c.section)
+    }
+    else if (c.kind === 'reveal') st.revealHost(c.key)
+    else if (c.kind === 'finder') st.openFinder(c.path)
+    else if (c.kind === 'terminal') st.openTerminal({ cwd: c.cwd, newTab: true })
+    else if (c.kind === 'browse') st.openBrowser({ url: c.url })
+    else if (c.kind === 'console') openAccountConsole(c.profile, c.url ?? consoleHomeFor(c.profile))
+    else if (c.kind === 'ask') st.askAssistant(c.app, c.text)
+    else if (c.kind === 'today') void window.api.invoke('notes:daily').then((p) => st.openNotes(p), (e: Error) => st.toast('error', e.message))
   }), [])
 
   // ⌘B shows or hides the hosts sidebar. Here rather than in the sidebar, which unmounts while hidden; on document so
