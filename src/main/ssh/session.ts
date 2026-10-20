@@ -3,6 +3,7 @@ const { Client } = ssh2
 type Client = InstanceType<typeof ssh2.Client>
 import { readFileSync } from 'node:fs'
 import { StringDecoder } from 'node:string_decoder'
+import { gunzipSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -18,7 +19,7 @@ import { findBinary, shellQuote, uid } from '../util'
 import { getCredential } from '../creds'
 import { lookupClient, registerClient, unregisterClient } from './clients'
 import { startRecorder, type Recorder } from './recorder'
-import { attachCommand, cleanLabel, detachedShells, historyCommand, hostShells, isShellName, killCommand, labelCommand, newShellName, parseProbe, probeCommand, shellNameFor, switchCommand, type AttachPlan } from './persist'
+import { attachCommand, cleanLabel, detachedShells, DropWatch, historyCommand, hostShells, isShellName, killCommand, labelCommand, newShellName, parseProbe, probeCommand, refreshCommand, shellNameFor, switchCommand, type AttachPlan } from './persist'
 
 interface Live {
   info: SshSessionInfo
@@ -35,9 +36,19 @@ interface Live {
   /** Terminal size, for shells started or switched to later. */
   cols?: number
   rows?: number
+  /** Persistent shells: notices tmux dropping output, which refillScrollback then restores. */
+  drops?: DropWatch
+  refillDue?: boolean
+  refillTimer?: ReturnType<typeof setTimeout>
+  refilling?: boolean
+  /** A session switch is replacing the scrollback itself. */
+  switching?: boolean
 }
 
 const sessions = new Map<string, Live>()
+
+/** How long output must pause before the scrollback is refilled: each refill fetches the shell's whole history. */
+const REFILL_AFTER_MS = 1000
 
 function emit(ev: SshEvent): void {
   host().broadcast('ssh:event', ev)
@@ -192,15 +203,15 @@ export async function openSsh(req: SshOpenRequest): Promise<SshSessionInfo> {
 }
 
 /** Runs a command on a channel of its own and returns its stdout; null when it fails or takes longer than `ms`. */
-function execOutput(client: Client, cmd: string, ms: number): Promise<string | null> {
+function execBytes(client: Client, cmd: string, ms: number): Promise<Buffer | null> {
   return new Promise((resolve) => {
-    let out = ''
+    const out: Buffer[] = []
     let channel: ClientChannel | undefined
     const timer = setTimeout(() => {
       channel?.close()
       resolve(null)
     }, ms)
-    const finish = (v: string | null): void => {
+    const finish = (v: Buffer | null): void => {
       clearTimeout(timer)
       resolve(v)
     }
@@ -208,14 +219,61 @@ function execOutput(client: Client, cmd: string, ms: number): Promise<string | n
       client.exec(cmd, (err, ch) => {
         if (err) return finish(null)
         channel = ch
-        ch.on('data', (d: Buffer) => (out += d.toString()))
+        ch.on('data', (d: Buffer) => out.push(d))
         ch.stderr.on('data', () => undefined)
-        ch.on('close', () => finish(out))
+        ch.on('close', () => finish(Buffer.concat(out)))
       })
     } catch {
       finish(null) // the connection is already gone
     }
   })
+}
+
+async function execOutput(client: Client, cmd: string, ms: number): Promise<string | null> {
+  return (await execBytes(client, cmd, ms))?.toString() ?? null
+}
+
+/** A shell's earlier output (historyCommand), unpacked; null when the host could not be asked. */
+async function fetchHistory(client: Client, name: string): Promise<string | null> {
+  const out = await execBytes(client, historyCommand(name), 30_000)
+  if (!out) return null
+  try {
+    return (out[0] === 0x1f && out[1] === 0x8b ? gunzipSync(out) : out).toString()
+  } catch {
+    return null
+  }
+}
+
+/** Clears the tab's screen and scrollback and replays `history`, pushed up above the screen tmux redraws next. */
+function replayHistory(sessionId: string, history: string, rows: number): void {
+  emit({ sessionId, type: 'data', data: `\x1b[H\x1b[2J\x1b[3J${history.replace(/\r?\n/g, '\r\n')}${history ? '\r\n'.repeat(rows) : ''}` })
+}
+
+function scheduleRefill(live: Live): void {
+  clearTimeout(live.refillTimer)
+  live.refillTimer = setTimeout(() => void refillScrollback(live), REFILL_AFTER_MS)
+}
+
+/**
+ * Rebuilds the tab's scrollback from tmux's history once output has paused, after tmux dropped some (DropWatch) or
+ * after attaching to a shell that kept running with no tab showing it: the clear-and-replay of a session switch, then
+ * tmux redraws the screen over it.
+ */
+async function refillScrollback(live: Live): Promise<void> {
+  const { sessionId } = live.info
+  const name = live.shell
+  if (sessions.get(sessionId) !== live || !name) return
+  if (live.refilling || live.switching) return scheduleRefill(live)
+  live.refillDue = false
+  live.refilling = true
+  try {
+    const history = await fetchHistory(live.client, name)
+    if (history === null || sessions.get(sessionId) !== live || live.shell !== name || live.switching) return
+    replayHistory(sessionId, history, live.rows ?? 24)
+    await execOutput(live.client, refreshCommand(name), 10_000)
+  } finally {
+    live.refilling = false
+  }
 }
 
 /** Looks at what already runs on the host and decides how to open this tab's persistent shell; null = plain shell. */
@@ -264,10 +322,13 @@ async function openShell(live: Live, req: SshOpenRequest): Promise<void> {
     emit({ sessionId, type: 'status', message: `Session log not written: ${(e as Error).message}` })
   }
   const dec = new StringDecoder('utf8')
+  if (plan) live.drops = new DropWatch()
   const out = (data: string): void => {
     if (sessions.get(sessionId) !== live) return
     live.recorder?.write(data)
     emit({ sessionId, type: 'data', data })
+    if (live.drops?.feed(data)) live.refillDue = true
+    if (live.refillDue) scheduleRefill(live)
   }
   channel.on('data', (d: Buffer) => out(dec.write(d)))
   channel.stderr.on('data', (d: Buffer) => out(d.toString()))
@@ -283,6 +344,11 @@ async function openShell(live: Live, req: SshOpenRequest): Promise<void> {
   live.cols = req.cols
   live.rows = req.rows
   if (live.init && (!plan || plan.create)) channel.write(typedLine(live.init))
+  // A shell resumed without its history replayed (a reconnect) went on printing while no tab showed it.
+  if (plan && !plan.create && !plan.history) {
+    live.refillDue = true
+    scheduleRefill(live)
+  }
 }
 
 function typedLine(cmd: string): string {
@@ -316,16 +382,24 @@ export async function switchShell(sessionId: string, target: string | null, opts
   if (!isShellName(to)) throw new Error('Unknown shell.')
   if (to === live.shell) return { name: to, label: '' }
   const rows = live.rows ?? 24
-  const history = target ? ((await execOutput(live.client, historyCommand(to), 10_000)) ?? '') : ''
-  if (sessions.get(sessionId) !== live) throw new Error('cancelled')
-  // Clear screen and scrollback, replay, then push the replay above the screen tmux is about to redraw.
-  emit({ sessionId, type: 'data', data: `\x1b[H\x1b[2J\x1b[3J${history.replace(/\r?\n/g, '\r\n')}${history ? '\r\n'.repeat(rows) : ''}` })
-  const out = (await execOutput(live.client, switchCommand({ from: live.shell, to, create: !target, label: opts.label, cols: live.cols ?? 80, rows }), 10_000)) ?? ''
+  let out: string
+  live.switching = true
+  try {
+    const history = target ? ((await fetchHistory(live.client, to)) ?? '') : ''
+    if (sessions.get(sessionId) !== live) throw new Error('cancelled')
+    replayHistory(sessionId, history, rows)
+    out = (await execOutput(live.client, switchCommand({ from: live.shell, to, create: !target, label: opts.label, cols: live.cols ?? 80, rows }), 10_000)) ?? ''
+  } finally {
+    live.switching = false
+  }
   if (!out.includes('ec2ra:switched')) {
     throw new Error(out.includes('ec2ra:gone') ? 'That session has ended on the host.' : 'Could not switch sessions. Reconnect the tab and try again.')
   }
   const previous = live.shell
   live.shell = to
+  // The replay above already holds the new shell's history.
+  live.refillDue = false
+  clearTimeout(live.refillTimer)
   if (!target && live.init) live.channel?.write(typedLine(live.init))
   if (opts.endPrevious) await execOutput(live.client, killCommand(previous), 5000)
   return { name: to, label: cleanLabel(/^ec2ra:label (.*)$/m.exec(out)?.[1]) }
@@ -356,6 +430,7 @@ export async function closeSsh(sessionId: string, opts: { endShell?: boolean } =
   const live = sessions.get(sessionId)
   if (!live) return
   sessions.delete(sessionId)
+  clearTimeout(live.refillTimer)
   live.recorder?.close()
   // Closing the tab ends its shell. A dropped connection, a reconnect, a phone that went away or quitting the app
   // leave it running on the host to be resumed.

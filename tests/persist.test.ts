@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { attachCommand, cleanLabel, detachedShells, hostShells, isShellName, killCommand, labelCommand, newShellName, parseProbe, probeCommand, shellNameFor, shq, switchCommand } from '../src/main/ssh/persist.ts'
+import { attachCommand, cleanLabel, detachedShells, DropWatch, historyCommand, hostShells, isShellName, killCommand, labelCommand, newShellName, parseProbe, probeCommand, refreshCommand, shellNameFor, shq, switchCommand } from '../src/main/ssh/persist.ts'
 
 const sh = (cmd: string): string => execFileSync('/bin/sh', ['-c', cmd], { encoding: 'utf8' })
 
@@ -46,9 +46,12 @@ test('attach commands create only when needed, configure only a new server, and 
   for (const part of ['start-server', 'set -g default-terminal', 'new-session -d -s \'ec2ra-a\' -x 120 -y 32', 'set -g mouse off', 'set -g prefix None', 'smcup@:rmcup@', "attach-session -d -t 'ec2ra-a'", 'exec "${SHELL:-/bin/sh}" -l']) {
     assert.ok(fresh.includes(part), `fresh server script has ${part}`)
   }
-  const resume = attachCommand({ ...plan, create: false, startServer: false })
+  const resume = sh(`printf %s ${attachCommand({ ...plan, create: false, startServer: false }).replace(/^sh -c /, '')}`)
   assert.equal(resume.includes('new-session'), false)
-  assert.equal(resume.includes('set -g'), false)
+  assert.equal(resume.includes('set -g mouse'), false)
+  // Only the drop count in the title, which a server started by an earlier version lacks.
+  assert.ok(resume.includes("set -g set-titles-string 'ec2ra:#{client_discarded}'"))
+  assert.ok(resume.indexOf('set-titles-string') < resume.indexOf('attach-session'))
   assert.ok(killCommand('ec2ra-a').includes('kill-session'))
   assert.ok(probeCommand().includes('-L ec2ra'))
 })
@@ -88,6 +91,30 @@ test('the probe reads each shell\'s name, real user and command, and last screen
   assert.deepEqual([a.label, a.user, a.args, a.preview], ['debug', '3dxadmin', 'tail -f /var/log/catalina.out', '2026-10-17 INFO\tServer startup in 4211 ms'])
   assert.deepEqual([b.label, b.user, b.args, b.preview], ['', 'root', 'bash', 'root@ip-10-1-2-144:/etc/systemd/system#'])
   assert.ok(probeCommand().includes('@ec2ra_label') && probeCommand().includes('tpgid'))
+})
+
+test('a rising drop count in tmux\'s title means lines are missing, even when a chunk splits the title', () => {
+  const w = new DropWatch()
+  assert.equal(w.feed('\x1b]0;ec2ra:0\x07$ '), false)
+  assert.equal(w.feed('LINE000140\r\n\x1b]0;ec2ra:2808'), false)
+  assert.equal(w.feed('67\x07\x1b[H\x1b[2J'), true)
+  assert.equal(w.feed('\x1b]0;ec2ra:280867\x07'), false)
+  assert.equal(w.feed('\x1b]2;ec2ra:300000\x1b\\'), true)
+  // A tmux too old to drop anything leaves the count empty; other programs' titles are not ours.
+  assert.equal(new DropWatch().feed('\x1b]0;ec2ra:\x07\x1b]0;ec2ra 5\x07\x1b]0;vim ec2ra:9\x07'), false)
+  // A fresh client (a reconnect) starts counting from zero again.
+  const r = new DropWatch()
+  r.feed('\x1b]0;ec2ra:500\x07')
+  r.feed('\x1b]0;ec2ra:0\x07')
+  assert.equal(r.feed('\x1b]0;ec2ra:10\x07'), true)
+})
+
+test('history is gzipped when the host can, and the screen is redrawn by the client showing the shell', () => {
+  const script = (c: string): string => sh(`printf %s ${c.replace(/^sh -c /, '')}`)
+  const h = script(historyCommand('ec2ra-a'))
+  for (const part of ["capture-pane -p -J -e -t 'ec2ra-a' -S -10000 -E -1", '| gzip -c', 'command -v gzip']) assert.ok(h.includes(part), part)
+  const r = script(refreshCommand('ec2ra-a'))
+  for (const part of ["list-clients -t 'ec2ra-a'", 'refresh-client -t "$C"']) assert.ok(r.includes(part), part)
 })
 
 test('names are one clean line, stored on the session and cleared when empty', () => {
