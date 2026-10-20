@@ -34,11 +34,3 @@ function onSite(url: string, sites: string[]): boolean {
 
 export const ownPage = (app: WebApp, url: string): boolean => onSite(url, app.sites)
 export const staysInApp = (app: WebApp, url: string): boolean => onSite(url, app.sites) || onSite(url, SIGN_IN_SITES)
-
-/**
- * Electron's user agent names the app and Electron. Some sign-in pages turn such "embedded browsers" away, so the
- * assistants' pages present themselves as the Chrome they run on.
- */
-export function plainChromeAgent(ua: string): string {
-  return ua.replace(/\sElectron\/\S+/, '').replace(/\s[^\s/()]+\/[\d.]+(?=\sChrome\/)/, '')
-}

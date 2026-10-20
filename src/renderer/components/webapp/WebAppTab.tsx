@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore, type Tab } from '../../store'
 import { replayPageKey, setTabKeys, terminalAction, type TabKey } from '../../shortcuts'
 import { findInAllPanes } from '../../paneFind'
-import { ownPage, plainChromeAgent, staysInApp, WEB_APPS, type WebAppKind } from '../../webApps'
+import { ownPage, staysInApp, WEB_APPS, type WebAppKind } from '../../webApps'
 import Webview, { type WebviewEl, type WebviewEvents } from '../browser/Webview'
 import OnePassword from '../browser/OnePassword'
 import Popover, { MenuItem, MenuSep } from '../Popover'
@@ -31,8 +31,6 @@ function startUrl(kind: WebAppKind): string {
   }
 }
 
-const AGENT = plainChromeAgent(navigator.userAgent)
-
 interface PageState {
   url: string
   title: string
@@ -44,7 +42,8 @@ interface PageState {
 
 /**
  * Claude or ChatGPT on the app rail: the site in one page of its own (its own partition, so it stays signed in apart
- * from the Browser's spaces), with back, forward, reload and New chat. Links that leave the site open in the Browser;
+ * from the Browser's spaces), with back, forward, reload and New chat. It keeps the app's own user agent, as the
+ * Browser does: Google's sign-in accepts that one and turns away a page claiming to be Chrome. Links that leave the site open in the Browser;
  * the site's own pages and its sign-in pages stay here. Beside a terminal, a selection's context menu pastes into it.
  */
 export default function WebAppTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
@@ -189,7 +188,7 @@ export default function WebAppTab({ tab, active }: { tab: Tab; active: boolean }
         <button ref={moreBtn} type="button" className="fi-btn" aria-label={`${app.name} options`} onClick={(e) => setMenu(menu ? null : { kind: 'more', anchor: e.currentTarget })}><Icon.more /></button>
       </div>
       <div className="webapp-page">
-        <Webview tabId={tab.id} partition={app.partition} src={src} visible events={events} userAgent={AGENT} register={(_id, el) => { view.current = el }} />
+        <Webview tabId={tab.id} partition={app.partition} src={src} visible events={events} register={(_id, el) => { view.current = el }} />
         {page.error && (
           <div className="webapp-error">
             <AppIcon className="webapp-error-logo" />

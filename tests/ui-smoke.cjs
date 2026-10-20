@@ -1397,13 +1397,13 @@ app.whenReady().then(async () => {
     await bjs(`[...document.querySelectorAll('.split-bar button')].find((b) => b.textContent.trim() === 'Done').click()`)
     await buntil(`!document.querySelector('.split-bar') && document.querySelectorAll('.session-panes > .session-pane:not(.hidden)').length === 1`, 'split done')
 
-    // Claude on the rail: its own page (a fixture here) in its own partition, a plain Chrome user agent, links to other
-    // sites going to the Browser.
+    // Claude on the rail: its own page (a fixture here) in its own partition with the app's own user agent (Google's
+    // sign-in rejects one claiming to be Chrome), links to other sites going to the Browser.
     await bjs(`document.querySelector('button[aria-label="Claude"]').click()`)
     await buntil(`document.querySelector('.webapp[data-webapp="claude"] .webapp-title')?.textContent.includes('Debug nginx 502s')`, 'claude page loads')
     const claudeGuest = () => guests().find((g) => g.getURL().includes('/chat/claude.ai/'))
     assert.ok(claudeGuest(), 'claude page in a webview')
-    assert.ok(!/Electron\//.test(claudeGuest().getUserAgent()), 'chat pages do not announce Electron')
+    assert.ok(/Electron\//.test(claudeGuest().getUserAgent()), 'chat pages keep the app user agent')
     assert.equal(await bjs(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
     assert.equal(await bjs(`document.querySelector('button[aria-label="Claude"]').classList.contains('on')`), true)
     await bshot('claude.png')
