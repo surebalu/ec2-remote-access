@@ -1223,23 +1223,28 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .input:focus-visible, textarea:focus-visible, .xterm-helper-textarea:focus-visible, .cm-content:focus-visible, [contenteditable]:focus-visible { outline: none; }
 ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 
-.app-rail { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; width: var(--rail-w); padding: 10px 0; overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg-elev); scrollbar-width: none; }
+.app-rail { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: var(--rail-w); padding: 8px 0; overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg-elev); scrollbar-width: none; }
 .app-rail::-webkit-scrollbar { display: none; }
-.rail-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; width: 60px; padding: 4px 0 5px; border-radius: 10px; color: var(--text-2); transition: color .15s var(--ease); }
-.rail-item .rail-icon { position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 30px; border-radius: 9px; transition: background .15s var(--ease), color .15s var(--ease), transform .15s var(--ease); }
+.rail-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; width: 60px; padding: 3px 0 4px; border-radius: 10px; color: var(--text-2); transition: color .15s var(--ease); }
+.rail-item .rail-icon { position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 28px; border-radius: 9px; transition: background .15s var(--ease), color .15s var(--ease), transform .15s var(--ease); }
 .rail-item .rail-icon svg { width: 18px; height: 18px; }
 .rail-item .rail-label { max-width: 60px; overflow: hidden; font-size: 10px; font-weight: 550; letter-spacing: -.005em; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+/* The section's shortcut under its label: small and quiet, a reminder rather than a second label (no keycap box: at
+   this size the border crowds the glyphs). The rail is a little tighter than before so a hint under every item fits. */
+.rail-item .rail-key { display: block; max-width: 60px; padding: 0; overflow: hidden; border: 0; background: none; color: var(--muted); font: 500 9.5px/1 var(--ui-font); letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
+.rail-item:hover:not(:disabled) .rail-key, .rail-item.on .rail-key { color: var(--text-2); }
+.rail-item .rail-key::before { content: attr(data-keys); }
 .rail-item:hover:not(:disabled) { color: var(--text); }
 .rail-item:hover:not(:disabled) .rail-icon { background: var(--accent-soft); }
 .rail-item:active:not(:disabled) .rail-icon { transform: scale(.94); }
 .rail-item.on { color: var(--text); }
 .rail-item.on .rail-icon { background: var(--accent-soft-2); color: var(--accent); }
-.rail-item.on::before { content: ''; position: absolute; top: 9px; left: -4px; width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.rail-item.on::before { content: ''; position: absolute; top: 7px; left: -4px; width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--accent); }
 .rail-item:disabled { opacity: .38; }
 .rail-item:focus-visible { outline-offset: -2px; }
 .rail-badge { position: absolute; top: -4px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font: 700 9.5px/16px var(--ui-font); text-align: center; box-shadow: 0 0 0 2px var(--bg-elev); }
 .rail-open { position: absolute; right: 3px; bottom: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-elev); }
-.rail-divider { flex-shrink: 0; width: 28px; height: 1px; margin: 6px 0; background: var(--border); }
+.rail-divider { flex-shrink: 0; width: 28px; height: 1px; margin: 5px 0; background: var(--border); }
 .rail-spacer { flex: 1; min-height: 12px; }
 
 .titlebar-btn { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 7px; color: var(--muted); transition: background .12s, color .12s; }
