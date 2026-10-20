@@ -7,7 +7,7 @@ import type {
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
-import type { LauncherApp, LauncherUsage } from './launcher'
+import type { LauncherApp, LauncherPreview, LauncherUsage } from './launcher'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -160,6 +160,12 @@ export interface IpcApi {
   'launcher:icons': (paths: string[]) => Promise<Record<string, string>>
   /** Opens an app or file with its default app, counting a use of `id`, and puts the launcher away. */
   'launcher:open': (path: string, id: string) => Promise<void>
+  /** Files and folders anywhere on the Mac whose names hold every typed word (Spotlight), recently opened first. */
+  'launcher:files': (query: string) => Promise<RecentFile[]>
+  /** The side pane's thumbnail and details for a file, folder or app. */
+  'launcher:preview': (path: string) => Promise<LauncherPreview>
+  /** Quick Look over the launcher. */
+  'launcher:quickLook': (path: string) => Promise<void>
   /** Counts a use of a result the launcher acted on some other way. */
   'launcher:used': (id: string) => Promise<void>
   /** Puts the launcher away and has the app's window carry out a command, bringing it to the front. */

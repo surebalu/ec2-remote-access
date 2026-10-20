@@ -67,7 +67,7 @@ function commands(): Command[] {
     { id: 'add-host', title: 'Add a server outside AWS…', keywords: 'manual host', icon: Icon.server, run: () => s.set({ manualHostEditor: 'new' }) },
     { id: 'add-account', title: 'Add AWS account…', keywords: 'sso profile', icon: Icon.cloud, run: () => s.set({ addAccountOpen: true }) },
     { id: 'shortcuts', title: 'Keyboard shortcuts', hint: '⌘/', icon: Icon.keyboard, run: () => s.set({ shortcutsOpen: true }) },
-    { id: 'launcher', title: 'Open the launcher', keywords: 'raycast spotlight alfred search apps files anywhere', hint: s.settings?.launcherKey ? formatCombo(s.settings.launcherKey) : undefined, icon: Icon.search, run: () => void window.api.invoke('launcher:show'), when: hasBrowser() },
+    { id: 'launcher', title: 'Open the launcher', keywords: 'raycast spotlight alfred search apps files anywhere', hint: s.settings?.launcherKey ? formatCombo(s.settings.launcherKey) : undefined, icon: Icon.launcher, run: () => void window.api.invoke('launcher:show'), when: hasBrowser() },
     { id: 'shortcuts-edit', title: 'Set keyboard shortcuts for the sections…', keywords: 'keys hotkey customize rail claude chatgpt terminal finder', icon: Icon.keyboard, run: () => openKeyboardSettings() },
     { id: 'close', title: 'Close current tab', hint: '⌘W', icon: Icon.x, run: () => void s.closeTab(active!.id), when: !!active },
     { id: 'beside', title: 'Open beside this tab…', keywords: 'split side by side compare next to pane', hint: '⌘\\', icon: Icon.split, run: () => s.openQuickSwitcher('', { beside: active!.id }), when: !!active },

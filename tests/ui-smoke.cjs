@@ -81,6 +81,8 @@ app.on('session-created', (ses) => {
 const launcherApps = ['Safari', 'Slack', 'Visual Studio Code', 'System Settings'].map((name) => ({ name, path: `/Applications/${name}.app` }))
 let launcherUsage = {}
 const launcherDone = []
+// While the launcher's window is up, notes:search finds notes by name.
+let launcherNotes = false
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
 // The Finder tab's pretend disk under /Users/fixture, its Finder favorites and locations, and what it was asked to do.
@@ -164,7 +166,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'notes:hostNote': { const p = 'EC2 Remote/Hosts/web-prod-01 (production).md'; notes[p] ??= { text: '---\nec2_key: production/us-east-1/web-prod-01\n---\n# web-prod-01\n\n', mtime: Date.now() }; return p }
     case 'notes:daily': { const p = 'Journal/2026-10-18.md'; notes[p] ??= { text: '# 2026-10-18\n\n', mtime: Date.now() }; return p }
     case 'notes:append': notes[args[0]].text += `\n${args[1]}\n`; notes[args[0]].mtime = Date.now(); return
-    case 'notes:search': return []
+    case 'notes:search': return launcherNotes ? Object.keys(notes).filter((p) => p.toLowerCase().includes(String(args[0]).toLowerCase())).map((path) => ({ path, line: 0, text: '' })) : []
     case 'notes:openInObsidian': return
     case 'browser:load': return browserSaved
     case 'browser:save': browserSaved = args[0]; return
@@ -272,6 +274,16 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'launcher:apps': return launcherApps
     case 'launcher:usage': return launcherUsage
     case 'launcher:icons': return {}
+    // Files by every typed word in the name, anywhere on the pretend disk, never opened.
+    case 'launcher:files': {
+      const words = String(args[0]).toLowerCase().split(/\s+/).filter(Boolean)
+      return Object.values(finderFs).flat().filter((e) => words.every((w) => e.name.toLowerCase().includes(w))).map((e) => ({ ...e, lastUsed: 0 }))
+    }
+    case 'launcher:preview': {
+      const e = Object.values(finderFs).flat().find((x) => x.path === args[0])
+      return { path: args[0], isDir: e?.type === 'dir', kind: e?.name.endsWith('.pdf') ? 'PDF document' : 'Document', size: e?.size ?? 0, created: now - 86400000 * 30, modified: e?.mtime ?? now, lastOpened: null, thumbnail: '' }
+    }
+    case 'launcher:quickLook': launcherDone.push([channel, ...args]); return
     case 'launcher:status': return { key: settings.launcherKey ?? '', registered: true }
     case 'launcher:open': case 'launcher:used': case 'launcher:command': case 'launcher:show': case 'launcher:hide': case 'launcher:pause': {
       launcherDone.push([channel, ...args])
@@ -1483,6 +1495,12 @@ app.whenReady().then(async () => {
     assert.ok(guests().some((g) => g.getURL().includes('/chat/chatgpt.com/?q=why%20502')), 'the question is in the address')
     bwin.webContents.send('app:command', { kind: 'section', section: 'hosts' })
     await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'section command')
+    // The rail's Launcher button opens it without the keyboard.
+    const shows = launcherDone.filter((d) => d[0] === 'launcher:show').length
+    await bjs(`document.querySelector('button[aria-label="Launcher"]').click()`)
+    for (let n = 0; n < 60 && launcherDone.filter((d) => d[0] === 'launcher:show').length === shows; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(launcherDone.filter((d) => d[0] === 'launcher:show').length > shows, 'the rail button opens the launcher')
+    assert.match(await bjs(`document.querySelector('button[aria-label="Launcher"]').title`), /⌥Space/, 'its tooltip names the key')
     // ⌘/ lists it under App sections.
     await bkey('/')
     await buntil(`[...document.querySelectorAll('.modal dl')][0]?.textContent.includes('⌃⌘CClaude')`, 'shortcuts dialog lists it')
@@ -1494,7 +1512,7 @@ app.whenReady().then(async () => {
 
     // The launcher's own window: apps by initials, a sum, hosts by name or IP, the app's sections, Spotlight files,
     // the actions menu, Ask Claude, and Esc.
-    const lwin = new BrowserWindow({ show: false, width: 760, height: 520, frame: false, transparent: true, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    const lwin = new BrowserWindow({ show: false, width: 700, height: 446, frame: false, transparent: true, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
     lwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
     const ljs = (code) => lwin.webContents.executeJavaScript(code)
     const luntil = async (code, what = code) => {
@@ -1509,6 +1527,7 @@ app.whenReady().then(async () => {
       for (let n = 0; n < 100 && !launcherDone.some(test); n++) await new Promise((r) => setTimeout(r, 30))
       assert.ok(launcherDone.some(test), what)
     }
+    launcherNotes = true
     await lwin.loadFile(resolve('out/renderer/index.html'), { query: { launcher: '1' } })
     await luntil(`[...document.querySelectorAll('.launcher-group')].some((g) => g.textContent === 'Favorite Hosts') && document.body.textContent.includes('web-prod-01')`, 'suggestions: favorite hosts')
     assert.equal(await ljs(`document.documentElement.classList.contains('launcher-page')`), true)
@@ -1539,8 +1558,14 @@ app.whenReady().then(async () => {
     await done('Enter shows the section', (d) => d[0] === 'launcher:command' && d[1].kind === 'section' && d[1].section === 'notes')
     await ltype('Runbook')
     await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Files"] .launcher-title')].some((t) => t.textContent === 'Runbook.pdf')`, 'Spotlight files')
-    await lshot('launcher-files.png')
+    assert.ok(await ljs(`[...document.querySelectorAll('[role="group"][aria-label="Notes"] .launcher-title')].some((t) => t.textContent === 'Runbook')`), 'a note by name')
     for (let n = 0; n < 12 && (await ljs(picked)) !== 'Runbook.pdf'; n++) await lkey('ArrowDown')
+    // The side pane: the file's kind, folder, size and dates, as in FileMinutes; ⌘Y is Quick Look.
+    await luntil(`document.querySelector('.launcher-detail')?.textContent.includes('PDF document') && document.querySelector('.launcher-detail').textContent.includes('~/Documents') && document.querySelector('.launcher-detail').textContent.includes('1.2 MB')`, 'file details')
+    assert.equal(await ljs(`document.querySelector('.launcher-item.on .launcher-sub')?.textContent`), '~/Documents', 'the folder under the name')
+    await lshot('launcher-files.png')
+    await lkey('y', { metaKey: true, code: 'KeyY' })
+    await done('⌘Y is Quick Look', (d) => d[0] === 'launcher:quickLook' && d[1] === '/Users/fixture/Documents/Runbook.pdf')
     await lkey('Enter', { metaKey: true })
     for (let n = 0; n < 60 && calls.at(-1)?.channel !== 'local:reveal'; n++) await new Promise((r) => setTimeout(r, 30))
     assert.deepEqual(calls.filter((c) => c.channel === 'local:reveal').at(-1).args, ['/Users/fixture/Documents/Runbook.pdf'], '⌘↵ shows it in Finder')
@@ -1557,6 +1582,7 @@ app.whenReady().then(async () => {
     lwin.webContents.send('launcher:shown', { at: Date.now() })
     await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Recent"] .launcher-title')].some((t) => t.textContent === 'Visual Studio Code')`, 'recent items')
     lwin.destroy()
+    launcherNotes = false
 
     // The Terminal tab: Warp-style tabs, split panes, command blocks and the input box, against a fake zsh.
     const twin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })

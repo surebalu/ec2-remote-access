@@ -1,5 +1,5 @@
 import { useEffect, type ReactElement } from 'react'
-import { useStore, type Tab } from './store'
+import { allInstances, useStore, type Tab } from './store'
 import Sidebar from './components/Sidebar'
 import AppRail from './components/AppRail'
 import InstanceTable from './components/InstanceTable'
@@ -26,7 +26,7 @@ import ShortcutsDialog from './components/ShortcutsDialog'
 import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
-import { consoleHomeFor, hasBrowser, openAccountConsole, openDefaultFor } from './quickConnect'
+import { consoleHomeFor, hasBrowser, openAccountConsole, openDefaultFor, openFilesFor } from './quickConnect'
 import { ZoomBadge, zoomSection } from './components/ZoomControls'
 import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
@@ -127,7 +127,18 @@ export default function App(): ReactElement {
     else if (c.kind === 'reveal') st.revealHost(c.key)
     else if (c.kind === 'finder') st.openFinder(c.path)
     else if (c.kind === 'terminal') st.openTerminal({ cwd: c.cwd, newTab: true })
-    else if (c.kind === 'browse') st.openBrowser({ url: c.url })
+    else if (c.kind === 'browse') st.openBrowser({ url: c.url, space: c.space, tab: c.tab })
+    else if (c.kind === 'note') st.openNotes(c.path)
+    else if (c.kind === 'files') openFilesFor(c.key)
+    else if (c.kind === 'run') st.set({ runCommandFor: { keys: [c.key] } })
+    else if (c.kind === 'forward') st.set({ portForwardFor: { key: c.key } })
+    else if (c.kind === 'power') {
+      const i = allInstances(st).find((x) => x.key === c.key)
+      if (i && window.confirm(`${c.action === 'start' ? 'Start' : 'Stop'} ${i.name} (${i.instanceId}) in ${i.profile}?`)) {
+        window.api.invoke(c.action === 'start' ? 'ec2:start' : 'ec2:stop', i.key)
+          .then(() => st.toast('success', `${c.action === 'start' ? 'Starting' : 'Stopping'} ${i.name}. Rescan in a minute.`), (e: Error) => st.toast('error', e.message))
+      }
+    }
     else if (c.kind === 'console') openAccountConsole(c.profile, c.url ?? consoleHomeFor(c.profile))
     else if (c.kind === 'ask') st.askAssistant(c.app, c.text)
     else if (c.kind === 'today') void window.api.invoke('notes:daily').then((p) => st.openNotes(p), (e: Error) => st.toast('error', e.message))

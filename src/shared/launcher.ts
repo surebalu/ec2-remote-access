@@ -9,6 +9,39 @@ export interface LauncherApp {
   path: string
 }
 
+/** What the launcher's side pane shows for a file, folder or app. */
+export interface LauncherPreview {
+  path: string
+  isDir: boolean
+  /** Spotlight's kind ("PDF document", "Folder", "Application"). */
+  kind: string
+  size: number
+  created: number
+  modified: number
+  lastOpened: number | null
+  /** A Quick Look thumbnail (an app's icon, a document's first page) as a data URL, '' when there is none. */
+  thumbnail: string
+}
+
+/**
+ * Whether a Spotlight hit is one of your files, anywhere on the Mac (other disks included): not macOS's own folders,
+ * not ~/Library (except cloud drives and iCloud Drive, where most documents live), not hidden, not inside an app,
+ * package, Git or node_modules folder, and not an app itself (the launcher lists those as apps).
+ */
+export function wantedFile(path: string, home: string): boolean {
+  if (/^\/(System|Library|private|usr|bin|sbin|cores|opt)\//.test(path)) return false
+  const lib = `${home}/Library/`
+  if (path.startsWith(lib) && !path.startsWith(`${lib}CloudStorage/`) && !path.startsWith(`${lib}Mobile Documents/`)) return false
+  if (/\.app\/?$/i.test(path)) return false
+  return !/\/\.|\/node_modules\/|\.(app|bundle|framework|photoslibrary|pkg|xcodeproj|xcassets)\//i.test(path)
+}
+
+/** A Spotlight query for file names holding every word typed, in any order, ignoring case and accents. */
+export function nameQuery(query: string): string {
+  const words = query.trim().split(/\s+/).map((w) => w.replace(/[\\"*?]/g, '')).filter(Boolean).slice(0, 6)
+  return words.map((w) => `kMDItemFSName == "*${w}*"cd`).join(' && ')
+}
+
 /** How often and how lately the launcher opened something, by result id ('app:/Applications/Safari.app'). */
 export type LauncherUsage = Record<string, { count: number; last: number }>
 

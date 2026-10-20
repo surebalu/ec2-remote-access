@@ -47,6 +47,13 @@ export interface Tab {
   notesPath?: string
 }
 
+export interface BrowserRequest {
+  url?: string
+  profile?: string
+  space?: string
+  tab?: string
+}
+
 /** The built-in tools: one tab each, opened from the app rail. */
 export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt'
 export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT' }
@@ -153,10 +160,13 @@ interface State {
   openShellTab: (fromId: string, shell: HostShell) => void
   /** Shows the Notes tab (there is one), on `path` when given; `beside` shows it next to that tab in a split. */
   openNotes: (path?: string, opts?: { beside?: string }) => void
-  /** Shows the Browser tab (there is one), opening `url` in a new web tab when given: in the AWS account space of `profile`. */
-  openBrowser: (req?: { url?: string; profile?: string }) => void
+  /**
+   * Shows the Browser tab (there is one), opening `url` in a new web tab when given: in the AWS account space of
+   * `profile`, or in `space`; `tab` shows that tab (a favorite) in its own space.
+   */
+  openBrowser: (req?: BrowserRequest) => void
   /** The latest open request for the Browser tab to carry out (nonce makes repeats distinct). */
-  browserRequest: { url?: string; profile?: string; nonce: number } | null
+  browserRequest: (BrowserRequest & { nonce: number }) | null
   /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
   openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
   terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; nonce: number } | null
@@ -387,7 +397,7 @@ export const useStore = create<State>((set, get) => ({
   browserRequest: null,
   openBrowser: (req) => {
     const id = get().toolTab('browser')
-    if (req?.url || req?.profile) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
+    if (req?.url || req?.profile || req?.space || req?.tab) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
     get().setActive(id)
   },
   openNotes: (path, opts) => {

@@ -782,7 +782,12 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   useEffect(() => {
     if (!request || !st || handledRequest.current === request.nonce) return
     handledRequest.current = request.nonce
-    let spaceId = request.profile ? spaceIdForProfile(request.profile) : st.activeSpace
+    // A tab by id (a favorite from the launcher) opens in its own space, with that space's logins.
+    if (request.tab && findTab(request.tab)) {
+      activate(request.tab)
+      return
+    }
+    let spaceId = request.profile ? spaceIdForProfile(request.profile) : request.space && spacesRef.current.some((x) => x.id === request.space) ? request.space : st.activeSpace
     if (!spacesRef.current.some((x) => x.id === spaceId)) {
       if (request.profile) toast('info', `${request.profile} has no AWS space (only SSO accounts sign in to the console); opened in ${spaces[0].name}.`)
       spaceId = spacesRef.current[0].id

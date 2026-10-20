@@ -30,7 +30,7 @@ import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
 import { finderPlaces, finderRecents, finderSearch } from './finder'
-import { launcherUsage, listApps, noteUse } from './apps'
+import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
 
@@ -170,6 +170,13 @@ export const handlers: Handlers = {
     await host().openPath(path)
   },
   'launcher:used': async (id) => noteUse(id),
+  'launcher:files': (query) => launcherFiles(query),
+  'launcher:preview': async (path) => {
+    if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('Not a path on this Mac.')
+    const [details, thumbnail] = await Promise.all([fileDetails(path), host().launcher?.thumbnail(path, 360) ?? Promise.resolve('')])
+    return { ...details, thumbnail }
+  },
+  'launcher:quickLook': async (path) => { if (typeof path === 'string' && path.startsWith('/')) host().launcher?.quickLook(path) },
   'launcher:command': async (c) => host().launcher?.command(c),
   'launcher:show': async () => host().launcher?.show(),
   'launcher:hide': async () => host().launcher?.hide(),

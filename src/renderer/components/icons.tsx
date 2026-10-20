@@ -392,6 +392,14 @@ export const Icon = {
       {p.filled && <rect x="15" y="5" width="6" height="14" rx="1" fill="currentColor" stroke="none" />}
     </svg>
   ),
+  /** A search glass in a key cap: the launcher. */
+  launcher: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="11" cy="11" r="3.6" />
+      <path d="M13.7 13.7 16.5 16.5" />
+    </svg>
+  ),
   /** Claude's spark: the Claude tool on the rail. */
   claude: (p: { className?: string }): ReactElement => (
     <svg {...base} strokeWidth={2.1} className={p.className}>

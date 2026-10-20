@@ -77,6 +77,9 @@ export interface LauncherHost {
   pause(paused: boolean): void
   status(): { key: string; registered: boolean }
   icons(paths: string[]): Promise<Record<string, string>>
+  /** A Quick Look thumbnail as a data URL ('' when there is none). */
+  thumbnail(path: string, px: number): Promise<string>
+  quickLook(path: string): void
 }
 
 /** What dictation (voice.ts) needs from the Mac app. */

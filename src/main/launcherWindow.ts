@@ -1,4 +1,5 @@
-import { app, BrowserWindow, globalShortcut, screen } from 'electron'
+import { app, BrowserWindow, globalShortcut, nativeImage, screen } from 'electron'
+import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppCommand } from '@shared/types'
 import { toAccelerator } from '@shared/keyCombos'
@@ -18,9 +19,11 @@ let win: BrowserWindow | null = null
 let registered = ''
 /** Settings is recording a new key: let go of the old one meanwhile, or pressing it would open the launcher. */
 let paused = false
+/** Quick Look is up over the launcher: it takes the keyboard, which must not put the launcher away. */
+let quickLooking = false
 
 /** The card plus a margin for its shadow (the window is transparent). */
-const SIZE = { width: 760, height: 520 }
+const SIZE = { width: 700, height: 446 }
 
 function create(): BrowserWindow {
   const w = new BrowserWindow({
@@ -40,7 +43,8 @@ function create(): BrowserWindow {
     webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   })
   w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  w.on('blur', () => { if (!w.webContents.isDevToolsOpened()) w.hide() })
+  w.on('blur', () => { if (!quickLooking && !w.webContents.isDevToolsOpened()) w.hide() })
+  w.on('focus', () => { quickLooking = false })
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   w.webContents.on('will-navigate', (e) => e.preventDefault())
   w.on('closed', () => { if (win === w) win = null })
@@ -116,16 +120,46 @@ export function closeLauncher(): void {
   win = null
 }
 
-const icons = new Map<string, string>()
+/** Opens Quick Look on a file, over the launcher, which stays up behind it until you click elsewhere. */
+export function launcherQuickLook(path: string): void {
+  if (!win?.isVisible()) return
+  quickLooking = true
+  win.previewFile(path)
+}
 
-/** Finder's icon for each path (an app's own, a file type's), as data URLs, remembered for the run. */
+const icons = new Map<string, string>()
+const thumbs = new Map<string, string>()
+
+/**
+ * A Quick Look thumbnail at `px` (an app's icon, a document's first page) as a data URL, '' when there is none.
+ * Through the link's target: /Applications/Safari.app is a link into the system, whose icon only the target has.
+ */
+export async function thumbnail(path: string, px: number): Promise<string> {
+  const key = `${px}:${path}`
+  let url = thumbs.get(key)
+  if (url === undefined) {
+    try { url = (await nativeImage.createThumbnailFromPath(realpathSync(path), { width: px, height: px })).toDataURL() } catch { url = '' }
+    if (thumbs.size > 400) thumbs.clear()
+    thumbs.set(key, url)
+  }
+  return url
+}
+
+/**
+ * The icon to show before each path, remembered for the run: an app's own icon (Quick Look; getFileIcon gives every
+ * app the same blank one), and for files and folders Finder's icon for their type (Word, Acrobat, the blue folder).
+ */
 export async function fileIcons(paths: string[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {}
   for (const p of paths.slice(0, 80)) {
     if (typeof p !== 'string' || !p.startsWith('/')) continue
     let url = icons.get(p)
     if (url === undefined) {
-      try { url = (await app.getFileIcon(p, { size: 'normal' })).toDataURL() } catch { url = '' }
+      if (/\.app\/?$/i.test(p)) url = await thumbnail(p, 64)
+      else {
+        // 'normal' only: macOS has no 'large' file icon, and asking for one ends the process.
+        try { url = (await app.getFileIcon(p, { size: 'normal' })).toDataURL() } catch { url = '' }
+      }
       if (icons.size > 2000) icons.clear()
       icons.set(p, url)
     }

@@ -314,7 +314,7 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
     <>
       {IN_ELECTRON && (
         <Group title="Anywhere on your Mac">
-          <Row label={<span className="flex items-center gap-2"><Icon.search className="set-key-icon" />Launcher</span>} hint={hintFor('launcher', launcherHint)}>
+          <Row label={<span className="flex items-center gap-2"><Icon.launcher className="set-key-icon" />Launcher</span>} hint={hintFor('launcher', launcherHint)}>
             {field('launcher', 'the launcher', launcherKey, '')}
           </Row>
         </Group>

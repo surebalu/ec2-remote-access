@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { calculate, formatNumber, matchScore, rank, recentIds, recordUse, usageBoost } from '../src/shared/launcher.ts'
+import { calculate, formatNumber, matchScore, nameQuery, rank, recentIds, recordUse, usageBoost, wantedFile } from '../src/shared/launcher.ts'
 
 test('names match best whole, then by their start, a word, initials, anywhere, letters in order', () => {
   const s = (q: string, t: string): number => matchScore(q, t)
@@ -67,4 +67,20 @@ test('results read with grouped thousands', () => {
   assert.equal(formatNumber(14), '14')
   assert.equal(formatNumber(1 / 3), '0.3333333333')
   assert.equal(formatNumber(1e22), '1.000000e+22')
+})
+
+test('file search covers the whole Mac but leaves out system folders, app insides and hidden folders', () => {
+  const home = '/Users/me'
+  for (const yes of ['/Users/me/Documents/plan.pdf', '/Users/me/Desktop/Desktop-Content/x.pdf', '/Users/me/Library/CloudStorage/GoogleDrive-me@x.com/Shared drives/Quality (Shared)/Part qualification',
+    '/Users/me/Library/Mobile Documents/com~apple~CloudDocs/taxes.xlsx', '/Volumes/Backup/photos/a.png', '/Applications/Setapp/readme.txt']) assert.equal(wantedFile(yes, home), true, yes)
+  for (const no of ['/System/Library/Fonts/a.ttf', '/Library/Application Support/x', '/private/var/log/x', '/usr/share/doc/readme', '/Users/me/Library/Caches/notes.db',
+    '/Users/me/.config/notes', '/Users/me/code/app/node_modules/x/readme.md', '/Applications/Obsidian.app', '/Applications/Obsidian.app/Contents/Info.plist',
+    '/Users/me/Pictures/Photos Library.photoslibrary/x.jpg']) assert.equal(wantedFile(no, home), false, no)
+})
+
+test('several typed words each match the name, in any order', () => {
+  assert.equal(nameQuery('invoice'), 'kMDItemFSName == "*invoice*"cd')
+  assert.equal(nameQuery('  tax  2024 '), 'kMDItemFSName == "*tax*"cd && kMDItemFSName == "*2024*"cd')
+  assert.equal(nameQuery('a"b*c?d\\e'), 'kMDItemFSName == "*abcde*"cd', 'quotes and wildcards cannot break out of the query')
+  assert.equal(nameQuery('   '), '')
 })
