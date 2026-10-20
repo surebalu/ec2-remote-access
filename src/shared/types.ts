@@ -1,3 +1,5 @@
+import type { RailSection } from './keyCombos'
+
 export type Platform = 'linux' | 'windows' | 'unknown'
 export type InstanceState = 'pending' | 'running' | 'stopping' | 'stopped' | 'shutting-down' | 'terminated'
 
@@ -213,6 +215,8 @@ export interface Settings {
    * (src/shared/keyCombos.ts). Sections left out keep their default; '' turns one off.
    */
   shortcuts?: Record<string, string>
+  /** Opens the launcher from any app (Settings → Keyboard), a combination like 'alt+space'; '' for none, the default. */
+  launcherKey?: string
 }
 
 export interface Snippet {
@@ -506,7 +510,31 @@ export interface BrowserState {
 
 /** Where notes live (main/notes.ts) and how that was decided. */
 /** What the menu-bar icon asks the app window to do (sent to the Mac's own window only, never to paired phones). */
-export type AppCommand = { kind: 'connect'; key: string } | { kind: 'switcher' } | { kind: 'scan' }
+/**
+ * What the menu-bar icon (main/tray.ts) and the launcher (src/renderer/launcher) ask the app's window to do: connect
+ * to a host, find one, rescan; show a rail section, a host's details, a folder in the Finder tab or a new Terminal
+ * tab, a page in the Browser (a tab or space of its own), an account's AWS console (signed in), a question for Claude or
+ * ChatGPT, a note, today's note; or a host's files, Run Command, a port forward, or starting or stopping it.
+ */
+export type AppCommand =
+  | { kind: 'connect'; key: string }
+  | { kind: 'switcher' }
+  | { kind: 'scan' }
+  | { kind: 'section'; section: RailSection }
+  | { kind: 'reveal'; key: string }
+  | { kind: 'finder'; path: string }
+  | { kind: 'terminal'; cwd?: string; profile?: string }
+  | { kind: 'workspace'; id: string }
+  | { kind: 'portForward'; id: string }
+  | { kind: 'browse'; url: string; space?: string; tab?: string }
+  | { kind: 'note'; path: string }
+  | { kind: 'files'; key: string }
+  | { kind: 'run'; key: string }
+  | { kind: 'forward'; key: string }
+  | { kind: 'power'; key: string; action: 'start' | 'stop' }
+  | { kind: 'console'; profile: string; url?: string }
+  | { kind: 'ask'; app: 'claude' | 'chatgpt'; text: string }
+  | { kind: 'today' }
 
 /* ---------- Run Command (SSM SendCommand on many hosts) ---------- */
 

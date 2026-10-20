@@ -1,5 +1,5 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
-import type { RailSection } from '@shared/keyCombos'
+import { formatCombo, type RailSection } from '@shared/keyCombos'
 import { isSession, TOOL_NAMES, useStore, type Tab, type ToolKind } from '../store'
 import { hasBrowser } from '../quickConnect'
 import { openKeyboardSettings, sectionKeyLabel } from '../shortcuts'
@@ -22,6 +22,7 @@ export default function AppRail(): ReactElement {
   const theme = useStore((s) => s.settings?.theme ?? 'system')
   const colorTheme = useStore((s) => s.settings?.colorTheme ?? '')
   const shortcuts = useStore((s) => s.settings?.shortcuts)
+  const launcherKey = useStore((s) => s.settings?.launcherKey ?? '')
   const [themeMenu, setThemeMenu] = useState<HTMLElement | null>(null)
   const [menu, setMenu] = useState<{ kind: RailSection; anchor: HTMLElement } | null>(null)
   const st = useStore.getState
@@ -105,6 +106,13 @@ export default function AppRail(): ReactElement {
       {tool('claude', <Icon.claude />, hasBrowser() ? 'Claude: chat beside your sessions, signed in on its own' : 'Claude: opens claude.ai in a new tab')}
       {tool('chatgpt', <Icon.chatgpt />, hasBrowser() ? 'ChatGPT: chat beside your sessions, signed in on its own' : 'ChatGPT: opens chatgpt.com in a new tab')}
       <span className="rail-spacer" />
+      {hasBrowser() && item({
+        label: 'Launcher',
+        icon: <Icon.launcher />,
+        on: false,
+        title: `Launcher: search apps, files, hosts and notes${launcherKey ? ` (${formatCombo(launcherKey)}, from any app)` : ' (give it a key in Settings → Keyboard)'}`,
+        onClick: () => void window.api.invoke('launcher:show')
+      })}
       {item({ label: 'Shortcuts', icon: <Icon.keyboard />, on: false, title: 'Keyboard shortcuts (⌘/)', onClick: () => st().set({ shortcutsOpen: true }) })}
       <button
         type="button"

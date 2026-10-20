@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cloudName, favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, placeKind, sortEntries } from '../src/shared/finder.ts'
+import { cloudName, displayPath, favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, placeKind, sortEntries } from '../src/shared/finder.ts'
 
 const e = (name: string, type: 'file' | 'dir' = 'file', size = 0, mtime = 0) => ({ name, path: `/x/${name}`, type, size, mtime, mode: 0 })
 
@@ -58,4 +58,16 @@ test('favorites: adding shows a hidden one again; removing a Finder favorite onl
   assert.deepEqual(favoritePatch({ finderExtra: ['/a'], finderHidden: [] }, '/a', true), { finderExtra: ['/a'], finderHidden: [] }, 'no duplicates')
   assert.deepEqual(favoritePatch({ finderExtra: ['/a'], finderHidden: [] }, '/a', false), { finderExtra: [], finderHidden: ['/a'] })
   assert.deepEqual(favoritePatch({}, '/b', false), { finderExtra: [], finderHidden: ['/b'] })
+})
+
+test('folders read short in the launcher: cloud drives by name, home as ~, long paths cut in the middle', () => {
+  const home = '/Users/me'
+  assert.equal(displayPath('/Users/me/Library/CloudStorage/GoogleDrive-me@example.com/Shared drives/Quality (Shared)', home), 'Google Drive/Shared drives/Quality (Shared)')
+  assert.equal(displayPath('/Users/me/Library/CloudStorage/OneDrive-Contoso/Docs', home), 'OneDrive/Docs')
+  assert.equal(displayPath('/Users/me/Library/Mobile Documents/com~apple~CloudDocs/Taxes', home), 'iCloud Drive/Taxes')
+  assert.equal(displayPath('/Users/me/Documents', home), '~/Documents')
+  assert.equal(displayPath('/Applications', home), '/Applications')
+  const long = displayPath('/Users/me/Documents/Surendra-Personal/codebase/Mainspring/remote-access-tool/src/renderer/launcher', home, 40)
+  assert.ok(long.length <= 40, long)
+  assert.ok(long.startsWith('~/…/') && long.endsWith('/renderer/launcher'), long)
 })

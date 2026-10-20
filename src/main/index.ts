@@ -16,6 +16,8 @@ import { setupAutoUpdate } from './updater'
 import { startPhoneAccess, stopPhoneAccess } from './phoneAccess'
 import { initLog } from './log'
 import { initWebviews } from './webviews'
+import { mainWindow, setMainWindow } from './windows'
+import { closeLauncher, updateLauncherKey } from './launcherWindow'
 
 setHost(electronHost)
 
@@ -64,6 +66,9 @@ function createWindow(): void {
       webviewTag: true
     }
   })
+  setMainWindow(win)
+  // The launcher's hidden window would otherwise keep the app running with no window to show.
+  win.on('closed', closeLauncher)
   initWebviews(win)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.webContents.on('console-message', (ev) => {
@@ -82,14 +87,21 @@ app.whenReady().then(() => {
   initLog(electronHost.logsDir())
   console.log(`[app] EC2 Remote Access ${app.getVersion()} starting (packaged=${app.isPackaged})`)
   nativeTheme.themeSource = getSettings().theme
-  registerIpc(updateTray)
+  registerIpc(() => {
+    updateTray()
+    updateLauncherKey()
+  })
   setMenu()
   createWindow()
   updateTray()
+  updateLauncherKey()
   if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!mainWindow()) {
+      createWindow()
+      updateLauncherKey()
+    }
   })
 })
 

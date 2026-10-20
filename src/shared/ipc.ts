@@ -7,6 +7,7 @@ import type {
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
+import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -151,6 +152,32 @@ export interface IpcApi {
   'browser:paneTargets': (targets: { id: string; title: string }[]) => Promise<void>
   /** The macOS emoji picker, for the text field that has the keyboard (the Mac app only). */
   'app:emojiPanel': () => Promise<void>
+  /** The launcher, a search bar over any app (Mac app only; main/launcherWindow.ts): the apps on this Mac. */
+  'launcher:apps': () => Promise<LauncherApp[]>
+  /** What the launcher opened, how often and how lately, by result id. */
+  'launcher:usage': () => Promise<LauncherUsage>
+  /** File and app icons as data URLs, by path (missing where macOS has none). */
+  'launcher:icons': (paths: string[]) => Promise<Record<string, string>>
+  /** Opens an app or file with its default app, counting a use of `id`, and puts the launcher away. */
+  'launcher:open': (path: string, id: string) => Promise<void>
+  /** Files and folders anywhere on the Mac whose names hold every typed word (Spotlight), recently opened first. */
+  'launcher:files': (query: string) => Promise<RecentFile[]>
+  /** The side pane's thumbnail and details for a file, folder or app. */
+  'launcher:preview': (path: string) => Promise<LauncherPreview>
+  /** A Mac command (Sleep, Lock Screen, Empty Trash…); the ones that cannot be undone ask first. */
+  'launcher:system': (action: SystemAction) => Promise<void>
+  /** Quick Look over the launcher. */
+  'launcher:quickLook': (path: string) => Promise<void>
+  /** Counts a use of a result the launcher acted on some other way. */
+  'launcher:used': (id: string) => Promise<void>
+  /** Puts the launcher away and has the app's window carry out a command, bringing it to the front. */
+  'launcher:command': (c: AppCommand) => Promise<void>
+  'launcher:show': () => Promise<void>
+  'launcher:hide': () => Promise<void>
+  /** Lets go of the launcher's key while Settings records a new one (true), or takes it again (false). */
+  'launcher:pause': (paused: boolean) => Promise<void>
+  /** The launcher's key, and whether macOS gave it to the app (another app may hold it). */
+  'launcher:status': () => Promise<{ key: string; registered: boolean }>
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
@@ -190,6 +217,8 @@ export interface IpcApi {
 /** Push channels (main -> renderer) */
 export interface IpcEvents {
   'app:command': AppCommand
+  /** Sent to the launcher's own window each time it appears. */
+  'launcher:shown': { at: number }
   'scan:progress': ScanProgress
   'ssh:event': SshEvent
   'sftp:transfer': SftpTransfer

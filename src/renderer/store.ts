@@ -7,7 +7,7 @@ import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
 import { applySectionZoom, type ZoomSection } from './sectionZoom'
 import { arrange, insertPane, paneIds, removePane, swapPanes, type Arrangement, type Direction } from './termLayout'
-import { isWebApp, WEB_APPS } from './webApps'
+import { askUrl, isWebApp, WEB_APPS, type WebAppKind } from './webApps'
 
 export interface RdpTabRequest {
   user: string
@@ -45,6 +45,13 @@ export interface Tab {
   transient?: boolean
   /** Notes tab: the note it shows (relative to the notes folder). */
   notesPath?: string
+}
+
+export interface BrowserRequest {
+  url?: string
+  profile?: string
+  space?: string
+  tab?: string
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
@@ -142,6 +149,10 @@ interface State {
   toolTab: (kind: ToolKind) => string
   /** Shows a tool, as its rail button does. Off the Mac app, Claude and ChatGPT open in a new browser tab instead. */
   openTool: (kind: ToolKind) => void
+  /** Opens Claude or ChatGPT on a new chat that asks `text` (the launcher's Ask). */
+  askAssistant: (kind: WebAppKind, text: string) => void
+  /** The latest page a chat tab is asked to load (nonce makes repeats distinct). */
+  webAppRequest: { kind: WebAppKind; url: string; nonce: number } | null
   moveTab: (id: string, beforeId: string | null) => void
   /** Opens another session with the same parameters; `split` shows it next to the original. */
   duplicateTab: (id: string, split?: boolean) => void
@@ -149,10 +160,13 @@ interface State {
   openShellTab: (fromId: string, shell: HostShell) => void
   /** Shows the Notes tab (there is one), on `path` when given; `beside` shows it next to that tab in a split. */
   openNotes: (path?: string, opts?: { beside?: string }) => void
-  /** Shows the Browser tab (there is one), opening `url` in a new web tab when given: in the AWS account space of `profile`. */
-  openBrowser: (req?: { url?: string; profile?: string }) => void
+  /**
+   * Shows the Browser tab (there is one), opening `url` in a new web tab when given: in the AWS account space of
+   * `profile`, or in `space`; `tab` shows that tab (a favorite) in its own space.
+   */
+  openBrowser: (req?: BrowserRequest) => void
   /** The latest open request for the Browser tab to carry out (nonce makes repeats distinct). */
-  browserRequest: { url?: string; profile?: string; nonce: number } | null
+  browserRequest: (BrowserRequest & { nonce: number }) | null
   /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
   openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
   terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; nonce: number } | null
@@ -350,6 +364,15 @@ export const useStore = create<State>((set, get) => ({
     else if (inElectron) s.setActive(s.toolTab(kind))
     else void window.api.invoke('shell:open', WEB_APPS[kind].home)
   },
+  webAppRequest: null,
+  askAssistant: (kind, text) => {
+    if (!inElectron) {
+      void window.api.invoke('shell:open', askUrl(kind, text))
+      return
+    }
+    set({ webAppRequest: { kind, url: askUrl(kind, text), nonce: Date.now() + Math.random() } })
+    get().openTool(kind)
+  },
   moveTab: (id, beforeId) => set((s) => {
     const tab = s.tabs.find((t) => t.id === id)
     if (!tab || id === beforeId) return {}
@@ -374,7 +397,7 @@ export const useStore = create<State>((set, get) => ({
   browserRequest: null,
   openBrowser: (req) => {
     const id = get().toolTab('browser')
-    if (req?.url || req?.profile) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
+    if (req?.url || req?.profile || req?.space || req?.tab) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
     get().setActive(id)
   },
   openNotes: (path, opts) => {

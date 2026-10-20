@@ -22,9 +22,13 @@ export default function ShortcutsDialog(): ReactElement {
   const set = useStore((s) => s.set)
   const dictationKey = useStore((s) => s.settings?.dictationKey)
   const saved = useStore((s) => s.settings?.shortcuts)
+  const launcherKey = useStore((s) => s.settings?.launcherKey ?? '')
   const keys = sectionKeys(saved)
   // The rail's sections with the keys set for them in Settings → Keyboard (Hosts is also ⌘1, below).
-  const sections = RAIL_SECTIONS.filter((x) => keys[x] && (hasBrowser() || (x !== 'local' && x !== 'finder'))).map((x) => ({ keys: formatCombo(keys[x]), label: SECTION_NAMES[x] }))
+  const sections = [
+    ...(launcherKey && hasBrowser() ? [{ keys: formatCombo(launcherKey), label: 'Launcher, from any app (apps, files, hosts, sums)' }] : []),
+    ...RAIL_SECTIONS.filter((x) => keys[x] && (hasBrowser() || (x !== 'local' && x !== 'finder'))).map((x) => ({ keys: formatCombo(keys[x]), label: SECTION_NAMES[x] }))
+  ]
   return (
     <Modal title="Keyboard shortcuts" onClose={() => set({ shortcutsOpen: false })}>
       <div className="mb-2 flex items-center gap-2">

@@ -34,6 +34,26 @@ export function cloudName(dir: string): string {
   return dash < 0 ? label : `${label} - ${dir.slice(dash + 1)}`
 }
 
+/**
+ * A folder as the launcher shows it under a file's name: cloud drives by their name ("Google Drive/Shared drives/Ops"),
+ * iCloud Drive and the home folder (~) shortened, and a long path cut in the middle so its last folders stay.
+ */
+export function displayPath(dir: string, home: string, max = 48): string {
+  let p = dir
+  const cloud = `${home}/Library/CloudStorage/`
+  const icloud = `${home}/Library/Mobile Documents/com~apple~CloudDocs`
+  if (p.startsWith(cloud)) {
+    const [drive, ...rest] = p.slice(cloud.length).split('/')
+    p = [cloudName(drive).replace(/ - .*$/, ''), ...rest].join('/')
+  } else if (p === icloud || p.startsWith(`${icloud}/`)) p = `iCloud Drive${p.slice(icloud.length)}`
+  else if (home && (p === home || p.startsWith(`${home}/`))) p = `~${p.slice(home.length)}`
+  if (p.length <= max) return p
+  const parts = p.split('/')
+  let tail = parts[parts.length - 1]
+  for (let i = parts.length - 2; i > 0 && parts[0].length + tail.length + parts[i].length + 3 <= max; i--) tail = `${parts[i]}/${tail}`
+  return `${parts[0]}/…/${tail}`
+}
+
 /** The kind of a well-known folder, for its sidebar icon. */
 export function placeKind(path: string, home: string): FinderPlace['kind'] {
   if (path === home) return 'home'
