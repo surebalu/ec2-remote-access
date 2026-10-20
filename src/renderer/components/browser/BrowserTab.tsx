@@ -44,10 +44,10 @@ const CHROME_ZOOM = { min: 0.5, max: 1.75 }
 /** What the sidebar calls a tab: the name the user gave it, else the page title, else its site. */
 const tabLabel = (t: WebTab): string => t.name || t.title || hostOf(t.url || t.homeUrl || '') || 'New Tab'
 
-/** The sidebar's order, which ⌃Tab follows: Favorites, then the space's Pinned, then its Today. */
+/** The sidebar's order, which ⌃Tab follows: the space's Favorites, then its Pinned, then its Today. */
 function sidebarOrder(s: BrowserState): WebTab[] {
-  const mine = s.tabs.filter((t) => t.spaceId === s.activeSpace && !t.favorite)
-  return [...s.tabs.filter((t) => t.favorite), ...mine.filter((t) => t.pinned), ...mine.filter((t) => !t.pinned)]
+  const mine = s.tabs.filter((t) => t.spaceId === s.activeSpace)
+  return [...mine.filter((t) => t.favorite), ...mine.filter((t) => t.pinned && !t.favorite), ...mine.filter((t) => !t.pinned && !t.favorite)]
 }
 
 const newId = (): string => `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
@@ -105,11 +105,16 @@ const sameHosts = (a: PageHost[], b: PageHost[]): boolean => a.length === b.leng
 
 function initialState(saved: BrowserState | null): BrowserState {
   const s = saved ?? { spaces: [GENERAL], tabs: [], activeSpace: GENERAL.id, activeTab: {}, history: [] }
+  const tabs = (s.tabs ?? []).map((t) => ({ ...t, url: restorableUrl(t.url) }))
+  // Favorites used to show in every space, so a space may still have another space's favorite selected; it gets its
+  // own most recent tab instead.
+  const recent = (sid: string): string => tabs.filter((t) => t.spaceId === sid).sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0))[0]?.id ?? ''
+  const activeTab = Object.fromEntries(Object.entries(s.activeTab ?? {}).map(([sid, id]) => [sid, tabs.some((t) => t.id === id && t.spaceId === sid) ? id : recent(sid)]))
   return {
     ...s,
     spaces: s.spaces?.length ? s.spaces : [GENERAL],
-    tabs: (s.tabs ?? []).map((t) => ({ ...t, url: restorableUrl(t.url) })),
-    activeTab: s.activeTab ?? {},
+    tabs,
+    activeTab,
     history: s.history ?? [],
     // A download cannot outlive the app run that started it.
     downloads: (s.downloads ?? []).map((d) => (d.state === 'progressing' ? { ...d, state: 'interrupted' as const } : d)),
@@ -199,11 +204,13 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     }), [profiles, settings, statuses, st?.spaceLooks])
   const spaces = useMemo<Space[]>(() => [...(st?.spaces ?? [GENERAL]), ...awsSpaces], [st?.spaces, awsSpaces])
   const space = spaces.find((x) => x.id === st?.activeSpace) ?? spaces[0]
-  const favorites = st ? st.tabs.filter((t) => t.favorite) : []
+  // Each space has its own favorites, as Arc gives each profile its own: they use the space's logins, so one space's
+  // Gmail favorite never shows (signed in as that account) in another.
+  const favorites = st ? st.tabs.filter((t) => t.favorite && t.spaceId === space.id) : []
   const spaceTabs = st ? st.tabs.filter((t) => t.spaceId === space.id && !t.favorite) : []
   const pinned = spaceTabs.filter((t) => t.pinned)
   const today = spaceTabs.filter((t) => !t.pinned)
-  // The tab on screen: one of this space's, or a favorite (favorites open in whichever space is showing).
+  // The tab on screen: one of this space's, its favorites included.
   const current = st ? [...spaceTabs, ...favorites].find((t) => t.id === st.activeTab[space.id]) : undefined
   const cur = current ? rt[current.id] ?? {} : {}
   const showStart = !current || (!current.url && !cur.signingIn && !cur.auth)
@@ -327,8 +334,8 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const activate = (id: string): void => {
     const t = findTab(id)
     if (!t) return
-    // A favorite opens in the space that is showing; any other tab takes you to its space.
-    const sid = t.favorite ? stRef.current!.activeSpace : t.spaceId
+    // A tab (favorites too) takes you to its space.
+    const sid = t.spaceId
     update((s) => ({ ...s, activeSpace: sid, activeTab: { ...s.activeTab, [sid]: id }, tabs: s.tabs.map((x) => (x.id === id ? { ...x, lastActive: Date.now() } : x)) }))
     setFind(null)
   }
@@ -398,7 +405,6 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     if (!s || !t) return
     const next = s.activeTab[s.activeSpace] === id ? nextAfter(s, id) : s.activeTab[s.activeSpace]
     forget(id)
-    // Other spaces showing it keep it selected; it loads again there when they are next shown.
     update((x) => ({ ...x, tabs: x.tabs.map((y) => (y.id === id ? { ...y, url: y.homeUrl || y.url } : y)), activeTab: { ...x.activeTab, [x.activeSpace]: next } }))
   }
   const closeOrUnload = (id: string): void => {
@@ -430,7 +436,8 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     if (!t || t.spaceId === spaceId) return
     update((s) => ({
       ...s,
-      tabs: s.tabs.map((x) => (x.id === id ? { ...x, spaceId, pinned: false, favorite: false, homeUrl: undefined } : x)),
+      // A favorite stays a favorite, now among the other space's; any other tab joins its Today.
+      tabs: s.tabs.map((x) => (x.id === id ? { ...x, spaceId, pinned: false, favorite: !!x.favorite, homeUrl: x.favorite ? x.homeUrl : undefined } : x)),
       activeTab: { ...s.activeTab, ...(s.activeTab[t.spaceId] === id ? { [t.spaceId]: '' } : {}) }
     }))
     toast('info', `Moved to ${spaceOf(spaceId)?.name ?? 'the space'}; it uses that space's logins.`)
@@ -443,7 +450,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     const t = findTab(id)
     const sid = stRef.current?.activeSpace
     if (id === targetId || !t || !sid) return
-    const spaceId = zone === 'favorite' ? t.spaceId : sid
+    const spaceId = sid
     if (spaceId !== t.spaceId) toast('info', `Moved to ${spaceOf(spaceId)?.name ?? 'this space'}; it uses this space's logins.`)
     const keeps = zone !== 'today'
     const moved: WebTab = { ...t, spaceId, favorite: zone === 'favorite', pinned: zone === 'pinned', homeUrl: keeps ? (t.pinned || t.favorite ? t.homeUrl : undefined) ?? t.url : undefined }
@@ -453,7 +460,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
       if (at < 0) at = tabs.length
       else if (where === 'after') at++
       tabs.splice(at, 0, moved)
-      return { ...s, tabs, activeTab: zone === 'favorite' || spaceId === t.spaceId ? s.activeTab : deselect(s.activeTab, id, sid, s.activeTab[sid] === id ? id : s.activeTab[sid]) }
+      return { ...s, tabs, activeTab: spaceId === t.spaceId ? s.activeTab : deselect(s.activeTab, id, sid, s.activeTab[sid] === id ? id : s.activeTab[sid]) }
     })
   }
 
@@ -513,9 +520,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     if (!t) return
     if (t.pinned) patchTab(id, { pinned: false, homeUrl: undefined })
     else {
-      // A favorite pinned goes to its own space's list (the space whose logins it uses).
       patchTab(id, { pinned: true, favorite: false, homeUrl: t.favorite ? t.homeUrl : t.url })
-      if (t.favorite) setTimeout(() => activate(id), 0)
     }
   }
   const toggleFavorite = (id: string): void => {
@@ -523,7 +528,6 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     if (!t) return
     if (t.favorite) {
       patchTab(id, { favorite: false, homeUrl: undefined })
-      if (t.spaceId !== stRef.current?.activeSpace) setTimeout(() => activate(id), 0)
       toast('info', `Removed from Favorites; it is back in ${spaceOf(t.spaceId)?.name ?? 'its space'}'s tabs.`)
       return
     }
@@ -1062,20 +1066,18 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
 
       <div className={`web-favs ${favorites.length ? '' : 'empty'} ${dropCls('favs')}`} aria-label="Favorites" {...zoneProps('favs', (id) => placeTab(id, null, 'after', 'favorite'))}>
         {favorites.map((t) => {
-          const home = spaceOf(t.spaceId)
           return (
             <button
               key={t.id}
               type="button"
               className={`web-fav ${t.id === current?.id ? 'on' : ''} ${live.includes(t.id) ? '' : 'asleep'} ${dropCls(t.id)}`}
-              title={`${tabLabel(t)}\n${t.url || t.homeUrl}${home && home.id !== space.id ? `\nUses the logins of ${home.name}` : ''}`}
+              title={`${tabLabel(t)}\n${t.url || t.homeUrl}`}
               aria-label={`Favorite ${tabLabel(t)}`}
               onClick={() => activate(t.id)}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'tab', id: t.id, anchor: e.currentTarget }) }}
               {...dragProps(t, 'favorite')}
             >
               {rt[t.id]?.loading ? <span className="web-spinner" /> : <Favicon src={t.favicon} url={t.url || t.homeUrl || ''} size={18} />}
-              {home && home.id !== space.id && <span className="web-fav-dot" data-accent={home.color} style={spaceVars(home)} />}
             </button>
           )
         })}
@@ -1299,10 +1301,10 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
           <MenuItem disabled={!tabMenuFor.url} onClick={() => { setMenu(null); addToNote(tabMenuFor.url, tabMenuFor.title) }}>Add to today's note</MenuItem>
           <MenuItem disabled={!views.current.has(tabMenuFor.id)} onClick={() => { setMenu(null); act((v) => v.reload(), tabMenuFor.id) }}>Reload</MenuItem>
           <MenuSep />
-          {/* A favorite stays a favorite and only changes whose logins it uses; other tabs move to that space. */}
-          <MenuLabel>{tabMenuFor.favorite ? 'Use the logins of' : 'Move to space'}</MenuLabel>
+          {/* The tab moves to that space and uses its logins; a favorite stays a favorite there. */}
+          <MenuLabel>Move to space</MenuLabel>
           {spaces.filter((x) => x.id !== tabMenuFor.spaceId).map((x) => (
-            <MenuItem key={x.id} onClick={() => { setMenu(null); if (tabMenuFor.favorite) patchTab(tabMenuFor.id, { spaceId: x.id }); else moveToSpace(tabMenuFor.id, x.id) }}>
+            <MenuItem key={x.id} onClick={() => { setMenu(null); moveToSpace(tabMenuFor.id, x.id) }}>
               <span className="inline-flex items-center gap-2"><SpaceAvatar space={x} size={14} />{x.name}</span>
             </MenuItem>
           ))}

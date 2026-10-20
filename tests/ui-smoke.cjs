@@ -1167,28 +1167,41 @@ app.whenReady().then(async () => {
     await bjs(`document.querySelector('button[aria-label="Browser"]').click()`)
     await buntil(`document.querySelector('.browser').getClientRects().length > 0`)
     assert.ok(guestAt('/two') && guestAt('/two').id === before, 'page survives switching app tabs')
-    // Favorites: page one becomes a favorite, shown in every space and keeping General's logins; ⌘W only unloads it.
+    // Favorites belong to their space (its logins): page one becomes a favorite of General and is not shown in sandbox;
+    // ⌘W only unloads it; Move to space takes it to another space, still a favorite.
     await bjs(`[...document.querySelectorAll('.web-tabs .web-tab')].find((t) => t.textContent.includes('Fixture page one')).click()`)
     await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page one'`, 'page one selected')
-    const oneId = guestAt('/one').id
     await bkey('d', { shiftKey: true })
     await buntil(`document.querySelectorAll('.web-fav').length === 1 && !document.querySelector('.web-tabs .web-tab') && !!document.querySelector('.web-fav.on')`, 'favorited')
-    await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
-    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox' && !!document.querySelector('.web-fav .web-fav-dot')`, 'favorite shown in another space')
-    await bjs(`document.querySelector('.web-fav').click()`)
-    await buntil(`!!document.querySelector('.web-fav.on') && document.querySelector('.web-space-name')?.textContent === 'sandbox' && document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`, 'favorite opens in the showing space')
-    assert.equal(guestAt('/one')?.id, oneId, 'the favorite is the same page, not reloaded')
     await bshot('browser-favorites.png')
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space sandbox"]').click()`)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'sandbox' && !document.querySelector('.web-fav') && !!document.querySelector('.web-favs.empty')`, "another space shows only its own favorites")
+    await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
+    await buntil(`document.querySelector('.web-space-name')?.textContent === 'General' && !!document.querySelector('.web-fav.on')`, 'the favorite is still selected in its space')
     await bkey('w')
-    await buntil(`!!document.querySelector('.web-fav.asleep') && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'AWS Console fixture'`, '⌘W unloads the favorite')
+    await buntil(`!!document.querySelector('.web-fav.asleep') && !document.querySelector('.web-fav.on')`, '⌘W unloads the favorite')
     for (let n = 0; n < 50 && guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
     assert.equal(guestAt('/one'), undefined, 'unloaded favorite releases its page')
-    // General was showing the favorite: it loads again there (unloading is not closing).
-    await bjs(`document.querySelector('.web-space-dot[aria-label="Space General"]').click()`)
-    await buntil(`!!document.querySelector('.web-fav.on:not(.asleep)') && document.querySelector('.web-space-name')?.textContent === 'General'`, 'back in General')
-    await buntil(`document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`)
+    await bjs(`document.querySelector('.web-fav').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on:not(.asleep)') && document.querySelector('.web-url-host')?.textContent.startsWith('127.0.0.1')`, 'the favorite loads again')
     for (let n = 0; n < 60 && !guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
-    assert.ok(guestAt('/one'), 'the favorite loads again where it was showing')
+    assert.ok(guestAt('/one'), 'the favorite loads again when opened')
+    const moveFavTo = async (name) => {
+      await bjs(`document.querySelector('.web-fav').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+      // A space's item is its avatar then its name.
+      await buntil(`[...document.querySelectorAll('.popover .menu-item')].some((b) => b.textContent.endsWith(${JSON.stringify(name)}))`, `move to ${name}`)
+      await bjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.endsWith(${JSON.stringify(name)})).click()`)
+      await buntil(`!document.querySelector('.web-fav')`, `the favorite leaves for ${name}`)
+      await bjs(`document.querySelector('.web-space-dot[aria-label="Space ${name}"]').click()`)
+      await buntil(`document.querySelector('.web-space-name')?.textContent === ${JSON.stringify(name)} && document.querySelectorAll('.web-fav').length === 1`, `a favorite of ${name}`)
+    }
+    await moveFavTo('sandbox')
+    await moveFavTo('General')
+    await bjs(`document.querySelector('.web-fav').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on')`, 'favorite selected again')
+    // Moving between spaces changes its logins, so the page loads again in General's partition.
+    for (let n = 0; n < 100 && !guestAt('/one'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(guestAt('/one'), `the moved favorite loads in its space (pages: ${guests().map((g) => g.getURL()).join(', ')})`)
     // ⌘1…⌘9 switch spaces in the order of the avatars (General, Jira, sandbox); ⌘9 is the last one.
     await bkey('2')
     await buntil(`document.querySelector('.web-space-name')?.textContent === 'Jira'`, '⌘2 shows the second space')

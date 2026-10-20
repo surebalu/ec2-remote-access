@@ -345,8 +345,8 @@ export interface WebTab {
   /** Pinned tabs sit at the top of their space's list and survive Clear; ⌘W unloads them instead of closing. */
   pinned?: boolean
   /**
-   * Favorites are shown in every space (the icon grid at the top), like Arc's. A favorite keeps the logins of its own
-   * space (`spaceId`), so a favorite from an AWS account space stays signed in to that account wherever it is opened.
+   * Favorites are the icon grid at the top of their own space (`spaceId`), as Arc gives each profile its own: they use
+   * that space's logins, so they are not shown in other spaces (a Work Gmail favorite would sign Personal in as Work).
    */
   favorite?: boolean
   /** The page a pinned tab or favorite goes back to when it is unloaded (⌘W) or reset. */

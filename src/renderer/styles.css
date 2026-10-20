@@ -900,7 +900,6 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .web-fav.drop-before { box-shadow: inset 2px 0 0 var(--c); }
 .web-fav.drop-after { box-shadow: inset -2px 0 0 var(--c); }
 /* Whose logins a favorite uses, when that is another space. */
-.web-fav-dot { position: absolute; right: 6px; bottom: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1.5px var(--bg-elev); }
 
 .web-pinned { display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; border-radius: 10px; }
 .web-pinned.drop-on { background: var(--glass-hover); }

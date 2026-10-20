@@ -72,7 +72,7 @@ export const BROWSER_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌥⌘↓ / ⌥⌘↑', label: 'Next / previous space (or swipe sideways on the sidebar)' },
   { keys: '⌘⇧[ / ⌘⇧]', label: 'Leave the browser for the previous / next app tab' },
   { keys: '⌘D', label: 'Pin or unpin the tab in its space' },
-  { keys: '⌘⇧D', label: 'Add to or remove from Favorites (shown in every space)' },
+  { keys: '⌘⇧D', label: 'Add to or remove from the space’s Favorites' },
   { keys: '⌘S', label: 'Show / hide the browser sidebar' },
   { keys: '⌘F', label: 'Find in page' },
   { keys: '⌘⇧C', label: 'Copy the page address' },
