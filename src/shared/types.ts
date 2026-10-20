@@ -208,6 +208,11 @@ export interface Settings {
   dictationKey?: DictationKey
   /** Dictation language as a BCP 47 tag (en-US); '' follows the macOS language. */
   dictationLocale?: string
+  /**
+   * Keyboard shortcuts for the app rail's sections (Settings → Keyboard): section → combination such as 'ctrl+cmd+c'
+   * (src/shared/keyCombos.ts). Sections left out keep their default; '' turns one off.
+   */
+  shortcuts?: Record<string, string>
 }
 
 export interface Snippet {

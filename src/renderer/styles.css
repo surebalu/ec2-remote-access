@@ -1312,6 +1312,17 @@ html[data-tabs-crowded] .search-pill-text { display: none; }
 .set-list li { display: flex; gap: 8px; }
 .set-list svg { flex-shrink: 0; width: 15px; height: 15px; margin-top: 1px; color: var(--ok); }
 
+/* Settings → Keyboard: a field that records a shortcut once clicked. */
+.key-field { display: inline-flex; align-items: center; justify-content: center; min-width: 116px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; transition: border-color .12s, box-shadow .12s; }
+.key-field:hover { border-color: var(--border-strong); }
+.key-field .kbd { font-size: 11.5px; }
+.key-field.empty { color: var(--muted); }
+.key-field.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); color: var(--accent); animation: key-rec 1.4s var(--ease) infinite; }
+@keyframes key-rec { 50% { box-shadow: 0 0 0 5px var(--accent-soft); } }
+.set-key-icon { flex-shrink: 0; width: 15px; height: 15px; color: var(--text-2); }
+.set-key-error { color: var(--err); }
+.set-key-note { color: var(--accent); }
+
 /* A switch for on/off settings (a checkbox underneath, so forms and tests treat it as one). */
 .switch { position: relative; display: inline-flex; flex-shrink: 0; cursor: pointer; }
 .switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
@@ -1700,3 +1711,16 @@ html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 .fi-sep { margin: 0 2px; color: var(--muted); }
 .fi-menu-anchor { pointer-events: none; }
 @media (max-width: 1100px) { .finder { --fi-cols: minmax(180px, 1fr) 170px 80px 0; } .fi-th.kind, .fi-cell.kind { display: none; } }
+
+/* Claude and ChatGPT (components/webapp/WebAppTab.tsx): a slim bar over the site. */
+.webapp { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }
+.webapp-bar { display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: 42px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+.webapp-title { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; margin-left: 4px; font-size: 12.5px; white-space: nowrap; }
+.webapp-title b { flex-shrink: 0; font-weight: 650; }
+.webapp-logo { flex-shrink: 0; width: 16px; height: 16px; }
+.webapp[data-webapp="claude"] .webapp-logo { color: #d97757; }
+.webapp-new { flex-shrink: 0; }
+@container (max-width: 420px) { .webapp-new-label { display: none; } }
+.webapp-page { position: relative; flex: 1; min-height: 0; }
+.webapp-error { position: absolute; z-index: 2; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: var(--bg); text-align: center; }
+.webapp-error-logo { width: 34px; height: 34px; margin-bottom: 4px; color: var(--muted); }

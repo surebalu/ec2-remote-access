@@ -7,6 +7,7 @@ import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
 import { applySectionZoom, type ZoomSection } from './sectionZoom'
 import { arrange, insertPane, paneIds, removePane, swapPanes, type Arrangement, type Direction } from './termLayout'
+import { isWebApp, WEB_APPS } from './webApps'
 
 export interface RdpTabRequest {
   user: string
@@ -18,7 +19,7 @@ export interface RdpTabRequest {
 
 export interface Tab {
   id: string
-  kind: 'ssh' | 'rdp' | 'sftp' | 'notes' | 'browser' | 'local' | 'board' | 'finder'
+  kind: 'ssh' | 'rdp' | 'sftp' | ToolKind
   instanceKey: string
   title: string
   route?: Route
@@ -47,8 +48,11 @@ export interface Tab {
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
-export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder'
-export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder' }
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt'
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT' }
+/** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
+export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'claude', 'chatgpt']
+const inElectron = /\bElectron\//.test(navigator.userAgent)
 
 /** How many tabs the side-by-side view shows at once. */
 export const MAX_SPLIT = 6
@@ -136,6 +140,8 @@ interface State {
   dockDrag: { tabId?: string; tool?: ToolKind } | null
   /** The tab of a tool, opened in the background when it is not open yet. */
   toolTab: (kind: ToolKind) => string
+  /** Shows a tool, as its rail button does. Off the Mac app, Claude and ChatGPT open in a new browser tab instead. */
+  openTool: (kind: ToolKind) => void
   moveTab: (id: string, beforeId: string | null) => void
   /** Opens another session with the same parameters; `split` shows it next to the original. */
   duplicateTab: (id: string, split?: boolean) => void
@@ -333,6 +339,16 @@ export const useStore = create<State>((set, get) => ({
     const tab: Tab = { id: `${kind}-${Date.now().toString(36)}`, kind, instanceKey: '', title: TOOL_NAMES[kind], status: 'connected' }
     set((s) => ({ tabs: [...s.tabs, tab] }))
     return tab.id
+  },
+  openTool: (kind) => {
+    const s = get()
+    if (kind === 'local') s.openTerminal()
+    else if (kind === 'browser') s.openBrowser()
+    else if (kind === 'notes') s.openNotes()
+    else if (kind === 'finder') s.openFinder()
+    else if (kind === 'board') s.openBoard()
+    else if (inElectron) s.setActive(s.toolTab(kind))
+    else void window.api.invoke('shell:open', WEB_APPS[kind].home)
   },
   moveTab: (id, beforeId) => set((s) => {
     const tab = s.tabs.find((t) => t.id === id)
@@ -814,7 +830,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder') { /* nothing in main to close: they save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || (tab && isWebApp(tab.kind))) { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
@@ -845,9 +861,9 @@ export const useStore = create<State>((set, get) => ({
 }))
 
 
-/** Remote sessions, as opposed to the Notes, Browser, Terminal and Whiteboard tabs: only sessions are tiles, counted, or saved in workspaces. */
+/** Remote sessions, as opposed to the tools' tabs (Notes, Browser, Terminal…): only sessions are tiles, counted, or saved in workspaces. */
 export function isSession(t: Tab): boolean {
-  return t.kind !== 'notes' && t.kind !== 'browser' && t.kind !== 'local' && t.kind !== 'board' && t.kind !== 'finder'
+  return t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp'
 }
 
 /** The split fields for a layout tree: a tree of one pane (or none) is no split. */

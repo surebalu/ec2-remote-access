@@ -54,7 +54,7 @@ const awsProfile = { name: 'sandbox', region: 'us-west-2', kind: 'sso', enabled:
 const webServer = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1')
   if (u.pathname === '/fed') { res.writeHead(302, { Location: u.searchParams.get('d') }); res.end(); return }
-  const title = u.pathname.startsWith('/console') ? 'AWS Console fixture' : { '/one': 'Fixture page one', '/two': 'Fixture page two' }[u.pathname] ?? 'Fixture'
+  const title = u.pathname.startsWith('/console') ? 'AWS Console fixture' : u.pathname.startsWith('/chat/') ? 'Debug nginx 502s - Claude' : { '/one': 'Fixture page one', '/two': 'Fixture page two' }[u.pathname] ?? 'Fixture'
   if (u.pathname === '/ticket') {
     // A Jira-like ticket naming two hosts (one running, one stopped) and a config value to compare.
     res.writeHead(200, { 'content-type': 'text/html' })
@@ -70,6 +70,8 @@ app.on('session-created', (ses) => {
     const u = new URL(details.url)
     if (u.hostname === '127.0.0.1') return callback({})
     if (/(^|\.)console\.aws\.amazon\.com$/.test(u.hostname)) return callback({ redirectURL: `http://127.0.0.1:${webPort}/console${u.pathname}${u.search}` })
+    // Claude and ChatGPT tabs get a fixture page instead of the real sites.
+    if (/^(claude\.ai|chatgpt\.com)$/.test(u.hostname)) return callback({ redirectURL: `http://127.0.0.1:${webPort}/chat/${u.hostname}${u.pathname}` })
     callback({ cancel: /^(https?|wss?):/.test(details.url) })
   })
 })
@@ -1089,7 +1091,7 @@ app.whenReady().then(async () => {
     bwin.webContents.send('web:window', { webContentsId: g1.id, url: page('/two'), background: false })
     await buntil(`document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page two'`, 'popup becomes a tab')
     assert.deepEqual(await tabTitles(), ['Fixture page one', 'Fixture page two'])
-    bwin.webContents.send('web:shortcut', { webContentsId: guestAt('/two').id, key: 'w', shift: false, alt: false })
+    bwin.webContents.send('web:shortcut', { webContentsId: guestAt('/two').id, key: 'w', code: 'KeyW', meta: true, ctrl: false, shift: false, alt: false })
     await buntil(`document.querySelectorAll('.web-tab').length === 1`, 'shortcut from the page closes the tab')
     await bkey('t', { shiftKey: true })
     await buntil(`document.querySelectorAll('.web-tab').length === 2 && document.querySelector('.web-tab.on .web-tab-title')?.textContent === 'Fixture page two'`, 'reopen closed tab')
@@ -1394,6 +1396,63 @@ app.whenReady().then(async () => {
     await buntil(`!!document.querySelector('.split-bar')`, 'back to the split')
     await bjs(`[...document.querySelectorAll('.split-bar button')].find((b) => b.textContent.trim() === 'Done').click()`)
     await buntil(`!document.querySelector('.split-bar') && document.querySelectorAll('.session-panes > .session-pane:not(.hidden)').length === 1`, 'split done')
+
+    // Claude on the rail: its own page (a fixture here) in its own partition with the app's own user agent (Google's
+    // sign-in rejects one claiming to be Chrome), links to other sites going to the Browser.
+    await bjs(`document.querySelector('button[aria-label="Claude"]').click()`)
+    await buntil(`document.querySelector('.webapp[data-webapp="claude"] .webapp-title')?.textContent.includes('Debug nginx 502s')`, 'claude page loads')
+    const claudeGuest = () => guests().find((g) => g.getURL().includes('/chat/claude.ai/'))
+    assert.ok(claudeGuest(), 'claude page in a webview')
+    assert.ok(/Electron\//.test(claudeGuest().getUserAgent()), 'chat pages keep the app user agent')
+    assert.equal(await bjs(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
+    assert.equal(await bjs(`document.querySelector('button[aria-label="Claude"]').classList.contains('on')`), true)
+    await bshot('claude.png')
+    bwin.webContents.send('web:window', { webContentsId: claudeGuest().id, url: page('/one'), background: false })
+    await buntil(`document.querySelector('button[aria-label="Browser"]').classList.contains('on')`, 'a link to another site opens in the Browser')
+
+    // Settings → Keyboard: record ⌃⌘C for Claude (⌘C is refused), take ⇧⌘N from Notes for ChatGPT, restore defaults.
+    await bkey(',')
+    await buntil(`!!document.querySelector('.settings-nav-item[data-section="keyboard"]')`, 'settings')
+    await bjs(`document.querySelector('.settings-nav-item[data-section="keyboard"]').click()`)
+    await buntil(`!!document.querySelector('[aria-label="Shortcut for Claude"]')`, 'keyboard section')
+    assert.equal(await bjs(`document.querySelector('[aria-label="Shortcut for Notes"]').textContent`), '⇧⌘N')
+    // Real keys go to the focused element, so the recorder's window capture runs before the window's own listeners.
+    const press = (k, code, mods) => bjs(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, code: ${JSON.stringify(code)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    await bjs(`document.querySelector('[aria-label="Shortcut for Claude"]').click()`)
+    await buntil(`document.querySelector('[aria-label="Shortcut for Claude"]').classList.contains('recording')`, 'recording')
+    await press('c', 'KeyC', { metaKey: true })
+    await buntil(`document.querySelector('[data-shortcut-row="claude"]').closest('.set-row').querySelector('.set-key-error')?.textContent.includes('Copy')`, '⌘C is refused')
+    await press('c', 'KeyC', { metaKey: true, ctrlKey: true })
+    await buntil(`document.querySelector('[aria-label="Shortcut for Claude"]').textContent === '⌃⌘C'`, 'recorded')
+    assert.deepEqual(settings.shortcuts, { claude: 'ctrl+cmd+c' }, 'saved at once')
+    await bjs(`document.querySelector('[aria-label="Shortcut for ChatGPT"]').click()`)
+    await press('N', 'KeyN', { metaKey: true, shiftKey: true })
+    await buntil(`document.querySelector('[aria-label="Shortcut for ChatGPT"]').textContent === '⇧⌘N' && document.querySelector('[aria-label="Shortcut for Notes"]').textContent === 'None'`, 'moved from notes')
+    assert.match(await bjs(`document.querySelector('.set-key-note').textContent`), /Moved from Notes.*In Finder, ⇧⌘N stays New folder/)
+    assert.deepEqual(settings.shortcuts, { claude: 'ctrl+cmd+c', chatgpt: 'shift+cmd+n', notes: '' })
+    await bshot('settings-keyboard.png')
+    await bjs(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Restore defaults').click()`)
+    await buntil(`document.querySelector('[aria-label="Shortcut for Notes"]').textContent === '⇧⌘N' && document.querySelector('[aria-label="Shortcut for Claude"]').textContent === 'None'`, 'defaults')
+    assert.deepEqual(settings.shortcuts, {})
+    await bjs(`document.querySelector('[aria-label="Shortcut for Claude"]').click()`)
+    await press('c', 'KeyC', { metaKey: true, ctrlKey: true })
+    await buntil(`document.querySelector('[aria-label="Shortcut for Claude"]').textContent === '⌃⌘C'`, 'recorded again')
+    await bjs(`document.querySelector('.settings button[aria-label="Close dialog"]').click()`)
+    await buntil(`!document.querySelector('.modal-backdrop')`, 'settings closed')
+    assert.match(await bjs(`document.querySelector('button[aria-label="Claude"]').title`), /\(⌃⌘C\)$/, 'the rail shows the key')
+
+    // The key brings Claude up from anywhere and, pressed again (here from inside its page), goes back.
+    await bjs(`document.querySelector('button[aria-label="Hosts"]').click()`)
+    await buntil(`!!document.querySelector('[data-host-key]')`, 'hosts')
+    await bkey('c', { ctrlKey: true, code: 'KeyC' })
+    await buntil(`document.querySelector('button[aria-label="Claude"]').classList.contains('on')`, 'shortcut shows claude')
+    bwin.webContents.send('web:shortcut', { webContentsId: claudeGuest().id, key: 'c', code: 'KeyC', meta: true, ctrl: true, shift: false, alt: false })
+    await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'pressed again from the page: back to hosts')
+    // ⌘/ lists it under App sections.
+    await bkey('/')
+    await buntil(`[...document.querySelectorAll('.modal dl')][0]?.textContent.includes('⌃⌘CClaude')`, 'shortcuts dialog lists it')
+    await bjs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+    await buntil(`!document.querySelector('.modal-backdrop')`, 'shortcuts closed')
     browserScenario = false
     bwin.destroy()
     webServer.close()

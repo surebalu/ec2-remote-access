@@ -9,13 +9,22 @@ import { basename, extname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, Menu, shell, webContents, type DownloadItem, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
 import { isWebUrl, loginMatches } from '@shared/browser'
 import { isDictationKey } from '@shared/dictation'
+import { comboOf, sectionFor } from '@shared/keyCombos'
 import type { WebDownload } from '@shared/types'
 import { getSettings } from './store'
 import { isDictating } from './voice'
 import { getPaneTargets } from './browser'
 
-/** Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them); ⌘\ opens beside. */
+/**
+ * Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them); ⌘\ opens beside. The
+ * rail sections' own shortcuts (Settings → Keyboard) are passed on too.
+ */
 const FORWARDED = new Set(['t', 'w', 'l', 'r', '[', ']', '{', '}', 'f', 'k', 's', 'd', '=', '+', '-', '0', 'n', 'b', 'c', '\\'])
+/**
+ * Claude's and ChatGPT's pages (their own partitions, persist:web-app-*) keep their own shortcuts (⌘⇧C copies the
+ * last code block, ⌘⇧S folds the sidebar…); only the app's tab and pane keys leave them.
+ */
+const CHAT_FORWARDED = new Set(['t', 'w', 'r', '[', ']', '{', '}', 'n', 'k', '\\', ','])
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen'])
 
 export function initWebviews(win: BrowserWindow): void {
@@ -156,17 +165,19 @@ app.on('web-contents-created', (_e, contents) => {
       host()?.send('voice:key', { key: 'escape', down: true })
     } else if (down && dictationHeld) host()?.send('voice:key', { key: 'other', down: true })
   })
+  const forwarded = /[/\\]web-app-[^/\\]*$/.test(contents.session.storagePath ?? '') ? CHAT_FORWARDED : FORWARDED
   contents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return
     const key = input.key.toLowerCase()
     // ⌥⌘↑/↓ switch spaces and ⌥⌘←/→ move between the panes of a split; plain ⌘ arrows stay with the page (top /
     // bottom of a field or the page). ⌘⇧↩ shows the split's focused pane alone.
     const arrow = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright'
-    const forward = (input.control && key === 'tab') || (input.meta && (FORWARDED.has(key) || /^[1-9]$/.test(key) || (input.alt && arrow) || (input.shift && key === 'enter')))
+    const section = !input.isAutoRepeat && !!sectionFor(getSettings().shortcuts, comboOf({ code: input.code, key: input.key, meta: input.meta, ctrl: input.control, alt: input.alt, shift: input.shift }))
+    const forward = section || (input.control && key === 'tab') || (input.meta && (forwarded.has(key) || /^[1-9]$/.test(key) || (input.alt && arrow) || (input.shift && key === 'enter')))
     // The page keeps its editing keys (copy, paste, select all, undo); ⌘⇧C (copy the address) is the browser's.
     if (!forward || (input.meta && !input.shift && ['c', 'v', 'x', 'a', 'z'].includes(key))) return
     e.preventDefault()
-    host()?.send('web:shortcut', { webContentsId: contents.id, key, shift: input.shift, alt: input.alt })
+    host()?.send('web:shortcut', { webContentsId: contents.id, key, code: input.code, meta: input.meta, ctrl: input.control, shift: input.shift, alt: input.alt })
   })
 
   contents.on('context-menu', (_e, p) => {

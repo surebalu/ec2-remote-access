@@ -67,7 +67,8 @@ export const defaultSettings: Settings = {
   finderExtra: [],
   finderHidden: [],
   dictationKey: 'AltRight',
-  dictationLocale: ''
+  dictationLocale: '',
+  shortcuts: {}
 }
 
 interface Schema {

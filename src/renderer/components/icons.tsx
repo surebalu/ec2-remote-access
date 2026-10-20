@@ -392,6 +392,18 @@ export const Icon = {
       {p.filled && <rect x="15" y="5" width="6" height="14" rx="1" fill="currentColor" stroke="none" />}
     </svg>
   ),
+  /** Claude's spark: the Claude tool on the rail. */
+  claude: (p: { className?: string }): ReactElement => (
+    <svg {...base} strokeWidth={2.1} className={p.className}>
+      <path d="M12.19 10.41L13.15 2.67M13.02 10.77L17.11 5.85M13.53 11.52L20.58 9.29M13.54 12.42L19.14 13.94M13.07 13.19L18.43 19.12M12.26 13.58L13.33 20.09M11.37 13.47L8.51 20.08M10.67 12.89L5.69 16.24M10.40 12.03L2.80 12.19M10.64 11.16L5.18 7.81M11.31 10.56L8.27 4.25" />
+    </svg>
+  ),
+  /** The ChatGPT knot: six links turned about the middle. */
+  chatgpt: (p: { className?: string }): ReactElement => (
+    <svg {...base} strokeWidth={1.4} className={p.className}>
+      {[0, 60, 120, 180, 240, 300].map((a) => <rect key={a} x="9.1" y="3" width="5.8" height="10.4" rx="2.9" transform={`rotate(${a} 12 12) translate(-1.6 0)`} />)}
+    </svg>
+  ),
   /** Finder's face: show a folder in Finder. */
   finder: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

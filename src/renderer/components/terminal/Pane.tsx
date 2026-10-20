@@ -18,6 +18,7 @@ import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../../mobile'
 import { registerDictationTarget, xtermTarget } from '../../voice'
 import { applyStickyMods, keySequence, type StickyMods } from '../../terminalKeys'
 import { addHistory, loadHistory } from './history'
+import { sectionOfKey } from '../../shortcuts'
 
 /** What a pane tells the Terminal tab: for titles, new tabs in the same folder, and the layout it saves. */
 export interface PaneInfo {
@@ -153,8 +154,9 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     term.loadAddon(new WebLinksAddon((_e, uri) => useStore.getState().openBrowser({ url: uri })))
     term.open(el)
     registerDictationTarget(el, xtermTarget(term))
-    // ⌘ combinations are the app's (tabs, panes, blocks), as is ⌃Tab; none of them are for the shell.
-    term.attachCustomKeyEventHandler((e) => !(e.metaKey || (e.ctrlKey && (e.key === 'Tab' || e.code === 'Backquote'))))
+    // ⌘ combinations are the app's (tabs, panes, blocks), as are ⌃Tab and the rail sections' shortcuts (⌃` for this
+    // tab); none of them are for the shell.
+    term.attachCustomKeyEventHandler((e) => !(e.metaKey || (e.ctrlKey && e.key === 'Tab') || sectionOfKey(e)))
     termRef.current = term
     fitRef.current = fit
     searchRef.current = search

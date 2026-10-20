@@ -26,7 +26,7 @@ import ShortcutsDialog from './components/ShortcutsDialog'
 import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
-import { openDefaultFor } from './quickConnect'
+import { hasBrowser, openDefaultFor } from './quickConnect'
 import { ZoomBadge, zoomSection } from './components/ZoomControls'
 import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
@@ -37,14 +37,20 @@ export default function App(): ReactElement {
   const init = useStore((s) => s.init)
   const activeTab = useStore((s) => s.activeTab)
   const gridView = useStore((s) => s.gridView)
-  // The tools (Browser, Terminal, Whiteboard, Notes, Finder) bring their own side lists; the hosts sidebar steps aside
-  // while one is in front, alone or as a pane of a side-by-side view. A host's note open beside its session keeps it.
+  // The tools (Browser, Terminal, Whiteboard, Notes, Finder, the chats) bring their own side lists or fill the page;
+  // the hosts sidebar steps aside while one is in front, alone or as a pane of a side-by-side view. A host's note open
+  // beside its session keeps it.
   const browserInFront = useStore((s) => {
     if (s.gridView) return false
     const kindOf = (id: string): Tab['kind'] | undefined => s.tabs.find((t) => t.id === id)?.kind
-    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder'].includes(kindOf(id) ?? ''))
-    return ['browser', 'local', 'board', 'notes', 'finder'].includes(kindOf(s.activeTab) ?? '')
+    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder', 'claude', 'chatgpt'].includes(kindOf(id) ?? ''))
+    return ['browser', 'local', 'board', 'notes', 'finder', 'claude', 'chatgpt'].includes(kindOf(s.activeTab) ?? '')
   })
+  // The terminals beside a web page (the Browser, Claude, ChatGPT) in a split, for the page's context menu "Paste
+  // into …", which main builds.
+  const paneTargets = useStore((s) => (s.splitGroup.some((id) => ['browser', 'claude', 'chatgpt'].includes(s.tabs.find((t) => t.id === id)?.kind ?? ''))
+    ? s.splitGroup.map((id) => s.tabs.find((t) => t.id === id)).filter((t): t is Tab => t?.kind === 'ssh').map((t) => `${t.id}\t${t.title}${t.shellLabel ? ` (${t.shellLabel})` : ''}`).join('\n')
+    : ''))
   const connectFor = useStore((s) => s.connectFor)
   const passwordFor = useStore((s) => s.passwordFor)
   const settingsOpen = useStore((s) => s.settingsOpen)
@@ -67,6 +73,12 @@ export default function App(): ReactElement {
   useEffect(() => {
     void init()
   }, [init])
+
+  useEffect(() => {
+    if (!hasBrowser()) return
+    const targets = paneTargets ? paneTargets.split('\n').map((line) => { const [id, title] = line.split('\t'); return { id, title } }) : []
+    void window.api.invoke('browser:paneTargets', targets).catch(() => undefined)
+  }, [paneTargets])
 
   // Voice dictation: the hold key, mic buttons and the HUD (Mac app only; a no-op elsewhere).
   useEffect(() => installVoice(), [])

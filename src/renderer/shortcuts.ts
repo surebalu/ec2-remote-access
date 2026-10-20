@@ -3,6 +3,7 @@
  * window-level key capture, and so a focused terminal still sees them bubble up; TerminalTab tells xterm to ignore
  * the same combinations through isAppShortcut.
  */
+import { comboOf, formatCombo, sectionFor, sectionKeys, toolOwns, type RailSection } from '@shared/keyCombos'
 import { isSession, useStore } from './store'
 import { neighbor, type Direction } from './termLayout'
 
@@ -15,9 +16,7 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘K', label: 'Quick switcher (hosts, sessions, commands)' },
   { keys: '⌘T', label: 'New session (pick a host)' },
   { keys: '⌘⇧P', label: 'Command list' },
-  { keys: '⌘0', label: 'All sessions on one page' },
   { keys: '⌘1', label: 'Hosts' },
-  { keys: '⌘⇧N', label: 'Notes' },
   { keys: '⌘2 … ⌘8', label: 'Session tab 1 … 7' },
   { keys: '⌘9', label: 'Last session tab' },
   { keys: '⌘⇧] / ⌘⇧[', label: 'Next / previous tab' },
@@ -44,9 +43,8 @@ export const NOTES_SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘-click', label: 'Open a link or [[note]]' }
 ]
 
-/** Shortcuts of the Terminal tab (local shells) while it is the active tab; ⌃` opens it from anywhere. */
+/** Shortcuts of the Terminal tab (local shells) while it is the active tab (its own key to open it is under App sections). */
 export const TERMINAL_SHORTCUTS: ShortcutInfo[] = [
-  { keys: '⌃`', label: 'Open the Terminal tab (from anywhere)' },
   { keys: '⌘T / ⌘⇧T', label: 'New terminal tab (same folder) / reopen the last closed one' },
   { keys: '⌘1 … ⌘8 / ⌘9', label: 'Terminal tab 1 … 8 / the last one (top to bottom in the side list)' },
   { keys: '⌃Tab / ⌃⇧Tab', label: 'Next / previous terminal tab' },
@@ -129,8 +127,8 @@ export interface TabKey {
 
 export type BrowserKey = TabKey
 
-/** The Browser, Terminal and Whiteboard tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
-type KeyedKind = 'browser' | 'local' | 'board' | 'finder'
+/** The Browser, Terminal, Whiteboard, Finder and chat tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
+type KeyedKind = 'browser' | 'local' | 'board' | 'finder' | 'claude' | 'chatgpt'
 const tabKeys: Partial<Record<KeyedKind, (k: TabKey) => boolean>> = {}
 
 /** Registers (or with null removes) the key handler of an app tab kind; it returns whether it used the key. */
@@ -169,10 +167,69 @@ const inSplit = (): boolean => {
   return !st.gridView && st.splitGroup.includes(st.activeTab)
 }
 
+const comboOfEvent = (e: KeyboardEvent): string | null => comboOf({ code: e.code, key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey })
+
+/** The rail section whose shortcut (Settings → Keyboard) this key press is, if any. */
+export function sectionOfKey(e: KeyboardEvent): RailSection | null {
+  return sectionFor(useStore.getState().settings?.shortcuts, comboOfEvent(e))
+}
+
+/** A key a web page passed on (web:shortcut). */
+interface PageKey { key: string; code: string; meta: boolean; ctrl: boolean; shift: boolean; alt: boolean }
+
+/** Whether a key a page passed on is a section's shortcut the tool `kind` does not use itself: the app's, first. */
+export function isSectionKeyFor(kind: string, d: PageKey): boolean {
+  const combo = comboOf(d)
+  return !!sectionFor(useStore.getState().settings?.shortcuts, combo) && !toolOwns(kind, combo)
+}
+
+/** Hands a key a page swallowed to the app's shortcuts, as the keydown the app would have seen. */
+export function replayPageKey(d: PageKey): void {
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: d.key, code: d.code, metaKey: d.meta, ctrlKey: d.ctrl, shiftKey: d.shift, altKey: d.alt, bubbles: true, cancelable: true }))
+}
+
+/** A section's shortcut as menus show it ('⌃⌘C'), or '' when it has none. */
+export function sectionKeyLabel(section: RailSection, saved: Partial<Record<string, string>> | undefined): string {
+  return formatCombo(sectionKeys(saved)[section])
+}
+
+/** Opens Settings on Keyboard, where the sections' shortcuts are recorded. */
+export function openKeyboardSettings(): void {
+  try { localStorage.setItem('ui.settingsSection', 'keyboard') } catch { /* storage off: Settings opens where it was */ }
+  useStore.getState().set({ settingsOpen: true, shortcutsOpen: false })
+}
+
+/** Where a section's shortcut took you from, so pressing it again goes back there (null tab: the all-sessions page). */
+let cameFrom: { section: RailSection; tab: string | null } | null = null
+
+/**
+ * Shows a section, as its rail button does. Pressed again while that section is in front it goes back to the tab
+ * the shortcut came from, so a key can flip between, say, a session and Claude.
+ */
+export function runSection(section: RailSection): void {
+  const st = useStore.getState()
+  if (section === 'overview') {
+    st.showGrid(!st.gridView)
+    return
+  }
+  const front = st.gridView ? null : st.activeTab
+  const showing = section === 'hosts' ? front === 'hosts' : st.tabs.find((t) => t.id === front)?.kind === section
+  if (showing) {
+    const back = cameFrom?.section === section ? cameFrom : null
+    cameFrom = null
+    if (back?.tab === null) st.showGrid(true)
+    else if (back && (back.tab === 'hosts' || st.tabs.some((t) => t.id === back.tab))) st.setActive(back.tab)
+    return
+  }
+  cameFrom = { section, tab: front }
+  if (section === 'hosts') st.setActive('hosts')
+  else st.openTool(section)
+}
+
 /** Combinations the app owns while a terminal has focus (Cmd on macOS; Ctrl+K kept for the switcher). */
 export function isAppShortcut(e: KeyboardEvent): boolean {
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') return true
-  if (e.ctrlKey && !e.metaKey && (e.key === '`' || e.code === 'Backquote')) return true
+  if (sectionOfKey(e)) return true
   // In a split, ⌥⌘ arrows and ⌘⇧↩ move between and zoom panes; elsewhere they stay the shell's.
   if (e.metaKey && !e.ctrlKey && ((e.altKey && e.key.startsWith('Arrow')) || (e.shiftKey && e.key === 'Enter')) && inSplit()) return true
   if (!e.metaKey || e.altKey || e.ctrlKey) return false
@@ -185,15 +242,17 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   // A focused editor that used the key (formatting in Notes) keeps it.
   if (e.defaultPrevented) return false
   const st = useStore.getState()
-  // ⌃` anywhere: the Terminal tab (local shells), as in editors.
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '`' || e.code === 'Backquote') && !modalOpen()) {
+  const inFront = st.gridView ? undefined : st.tabs.find((t) => t.id === st.activeTab)
+  // A section's own shortcut (Settings → Keyboard; ⌃` for the Terminal…) from anywhere, except a key the tool in
+  // front uses itself (⌘0 is the Browser's zoom while it is in front).
+  const section = e.repeat || modalOpen() ? null : sectionOfKey(e)
+  if (section && !toolOwns(inFront?.kind, comboOfEvent(e))) {
     e.preventDefault()
     e.stopPropagation()
-    st.openTerminal()
+    runSection(section)
     return true
   }
-  const inFront = st.gridView ? undefined : st.tabs.find((t) => t.id === st.activeTab)
-  const tabHandler = inFront && (inFront.kind === 'browser' || inFront.kind === 'local' || inFront.kind === 'board' || inFront.kind === 'finder') ? tabKeys[inFront.kind] : undefined
+  const tabHandler = inFront && !isSession(inFront) ? tabKeys[inFront.kind as KeyedKind] : undefined
   const tabCombo = (e.metaKey && !e.ctrlKey) || (e.ctrlKey && !e.metaKey && e.key === 'Tab')
   if (tabHandler && tabCombo && !e.repeat && !modalOpen() && tabHandler({ key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey })) {
     e.preventDefault()
@@ -221,8 +280,6 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   }
   if (modalOpen()) return false
   const order = ['hosts', ...st.tabs.filter((t) => !t.transient).map((t) => t.id)]
-  if (k === '0' && !e.shiftKey) return go(() => st.showGrid(!st.gridView))
-  if (k === 'n' && e.shiftKey) return go(() => st.openNotes())
   if (/^[1-9]$/.test(k) && !e.shiftKey) {
     const n = Number(k)
     const target = n === 9 ? order.at(-1) : order[n - 1]
