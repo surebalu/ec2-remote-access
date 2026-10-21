@@ -619,8 +619,24 @@ app.whenReady().then(async () => {
     await radialKey()
     await until(`!!document.querySelector('.radial')`)
     await keyUp()
+    await new Promise((r) => setTimeout(r, 350)) // a press right as it opens never chooses
     await js(`document.querySelector('[data-radial="hosts"]').dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }))`)
     await until(`!document.querySelector('.radial') && document.querySelector('.rail-item[aria-label="Hosts"]').getAttribute('aria-current') === 'page'`)
+    // Pointing only highlights: a bubble pointed at while the keys are still down does not open when they are let go
+    // (a mouse button lets go at once, and Chromium reports a pointer move as the ring appears). Only a click chooses.
+    await radialKey()
+    await until(`!!document.querySelector('.radial')`)
+    await new Promise((r) => setTimeout(r, 400))
+    await js(`(() => { const b = document.querySelector('[data-radial="health"]').getBoundingClientRect(); document.querySelector('.radial').dispatchEvent(new PointerEvent('pointermove', { clientX: b.left + b.width / 2, clientY: b.top + b.height / 2, bubbles: true, metaKey: true, shiftKey: true })) })()`)
+    await until(`document.querySelector('.radial-item.on')?.dataset.radial === 'health'`)
+    await keyUp()
+    await new Promise((r) => setTimeout(r, 300))
+    assert.equal(await js(`!!document.querySelector('.radial') && !document.querySelector('.hl')`), true, 'letting go after pointing chooses nothing')
+    // A click in the middle, or with another mouse button, chooses nothing either.
+    await js(`(() => { const r = document.querySelector('.radial-ring').getBoundingClientRect(); const root = document.querySelector('.radial'); root.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, button: 0 })); root.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 10, clientY: r.top + r.height / 2, bubbles: true, button: 3 })) })()`)
+    assert.equal(await js(`!!document.querySelector('.radial') && !document.querySelector('.hl')`), true, 'the middle and side buttons choose nothing')
+    await key('Escape')
+    await until(`!document.querySelector('.radial')`)
     // A mouse button that sends the shortcut (Razer Synapse) presses and lets go at once, before the ring is drawn: it
     // opens where the pointer really is (app:pointer), stays open, and the mouse points and clicks.
     await radialKey(); await keyUp()

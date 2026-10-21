@@ -6,11 +6,12 @@ import { Icon } from './icons'
 
 /**
  * The radial menu: every section of the app rail as a small ring of coloured bubbles around the pointer, opened by
- * its own shortcut (Settings → Keyboard, ⇧⌘Space by default; shortcuts.ts dispatches `ec2ra:radial`). Like ⌘Tab: hold
- * the modifiers and tap the key again to step round, or point in a direction, and let go to switch. Tapped and released
- * at once (or sent by a mouse button, which presses and releases the keys together) it stays open for the mouse to
- * point and click, or the arrow keys, a number or a first letter. Esc, a click outside or the shortcut again closes
- * it. The middle names the bubble pointed at; the bubbles carry no labels at this size.
+ * its own shortcut (Settings → Keyboard, ⇧⌘Space by default; shortcuts.ts dispatches `ec2ra:radial`). It stays open
+ * until something is chosen: a click on a bubble (pointing only highlights), or the keyboard: ⌘Tab-style, hold the
+ * modifiers and tap the key again (or an arrow) to step, and let go to open the one stepped to; or the arrow keys and
+ * ↩, a number or a first letter. A mouse button that sends the shortcut (Razer Synapse) presses and releases the keys
+ * together and may move the pointer: neither ever chooses. Esc, a right-click, a click outside or the shortcut again
+ * closes it. The middle names the bubble pointed at; the bubbles carry no labels at this size.
  */
 
 interface Item {
@@ -60,8 +61,11 @@ export default function RadialMenu(): ReactElement | null {
   const [held, setHeldState] = useState(false)
   const heldRef = useRef(false)
   const setHeld = (v: boolean): void => { heldRef.current = v; setHeldState(v) }
-  // The highlight was moved by stepping or pointing, so letting go of the modifiers opens it.
-  const moved = useRef(false)
+  // The highlight was stepped to with the keys held, so letting go of them opens it. Pointing never sets it: Chromium
+  // reports a pointer move as soon as the ring appears under the pointer, and a mouse button lets go of its keys at once.
+  const stepped = useRef(false)
+  // When the ring opened: the press that opened it (a mouse button can send a click too) never chooses.
+  const openedAt = useRef(0)
   const pointer = useRef<{ x: number; y: number } | null>(null)
   const opening = useRef(false)
   const before = useRef<HTMLElement | null>(null)
@@ -104,7 +108,7 @@ export default function RadialMenu(): ReactElement | null {
     setAt(null)
     setHi(null)
     setHeld(false)
-    moved.current = false
+    stepped.current = false
     if (restore) before.current?.focus?.({ preventScroll: true })
     before.current = null
   }
@@ -123,7 +127,7 @@ export default function RadialMenu(): ReactElement | null {
       if (!list[i].disabled) break
     }
     setHi(i)
-    moved.current = true
+    stepped.current = true
   }
 
   // Where the pointer last was, so the ring opens under it.
@@ -147,7 +151,7 @@ export default function RadialMenu(): ReactElement | null {
       if (opening.current) return
       opening.current = true
       before.current = document.activeElement as HTMLElement | null
-      moved.current = false
+      stepped.current = false
       setHeld(wantsHold)
       const here = itemsRef.current.findIndex((x) => x.here)
       setHi(here >= 0 ? here : null)
@@ -159,6 +163,7 @@ export default function RadialMenu(): ReactElement | null {
         const h = window.innerHeight
         const p = real ?? pointer.current ?? { x: w / 2, y: h / 2 }
         const clamp = (v: number, lo: number, hi: number): number => (hi < lo ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)))
+        openedAt.current = Date.now()
         setAt({ x: clamp(p.x, REACH_X + 8, w - REACH_X - 8), y: clamp(p.y, REACH_Y + 8, h - REACH_Y - 8) })
       })
     }
@@ -202,9 +207,9 @@ export default function RadialMenu(): ReactElement | null {
       e.preventDefault()
       e.stopImmediatePropagation()
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-      // The modifiers are up: a highlight moved while they were held opens; otherwise the ring stays for a click.
+      // The modifiers are up: the section stepped to while they were held opens; otherwise the ring stays for a click.
       setHeld(false)
-      if (moved.current) pick(hiRef.current)
+      if (stepped.current) pick(hiRef.current)
     }
     window.addEventListener('keydown', down, true)
     window.addEventListener('keyup', up, true)
@@ -226,17 +231,20 @@ export default function RadialMenu(): ReactElement | null {
     return { i: Math.round(a / step) % n, dist }
   }
   const onMove = (e: RPointerEvent): void => {
-    // A pointer moving with no modifier down means they were let go of before it moved: a click picks from here.
+    // A pointer moving with no modifier down means they were let go of: from here on a click chooses.
     if (heldRef.current && !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey)) setHeld(false)
     const { i } = fromPointer(e)
-    if (i !== null && i !== hi && !items[i].disabled) { setHi(i); moved.current = true }
+    if (i !== null && i !== hi && !items[i].disabled) { setHi(i); stepped.current = false }
   }
+  /** A click that may choose: the left button, not the press that opened the ring. */
+  const chooses = (e: RPointerEvent): boolean => e.button === 0 && Date.now() - openedAt.current > 300
   const onDown = (e: RPointerEvent): void => {
-    if (e.button !== 0) return close()
+    if (e.button === 2) return close()
+    if (!chooses(e)) return
     const { i, dist } = fromPointer(e)
     if (dist > R + BALL) return close()
-    if (i === null) return hi === null ? close() : pick(hi)
-    pick(i)
+    // The middle (where the pointer was when it opened) chooses nothing.
+    if (i !== null) pick(i)
   }
 
   const cur = hi === null ? null : items[hi]
@@ -275,8 +283,8 @@ export default function RadialMenu(): ReactElement | null {
           return (
             <button key={it.id} type="button" role="menuitem" className={`radial-item ${i === hi ? 'on' : ''} ${it.here ? 'here' : ''} ${it.disabled ? 'off' : ''}`} style={style}
               aria-label={`${it.label}${it.keys ? ` (${it.keys})` : ''}`} title={it.label} aria-disabled={it.disabled || undefined} tabIndex={-1} data-radial={it.id}
-              onPointerEnter={() => { if (!it.disabled) { setHi(i); moved.current = true } }}
-              onPointerDown={(e) => { e.stopPropagation(); if (e.button === 0) pick(i) }}>
+              onPointerEnter={() => { if (!it.disabled) { setHi(i); stepped.current = false } }}
+              onPointerDown={(e) => { e.stopPropagation(); if (e.button === 2) close(); else if (chooses(e)) pick(i) }}>
               <span className="radial-ball" style={ball(it)}>
                 {it.icon}
                 {it.open && !it.here && <i className="radial-dot" aria-hidden="true" />}
