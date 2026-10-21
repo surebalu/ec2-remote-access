@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkNote, envOf, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkNote, envOf, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -164,4 +164,32 @@ test('checks that only load a page are told from real health endpoints', () => {
   assert.ok(checkNote('http://ip-10-0-2-217.us-west-1.compute.internal:19000'))
   assert.ok(checkNote('http://ip-10-0-2-99.us-west-1.compute.internal:80'))
   for (const u of ['https://pass-pplm.mainspring.network/3dpassport/healthcheck', 'http://ip-10-1-2-194.us-west-1.compute.internal:19010/search-api/isAlive', 'https://space-pplm.mainspring.network/3dspace/servlet/fcs/ping', 'https://dash-pplm.mainspring.network/3ddashboard/test-alive']) assert.equal(checkNote(u), null, u)
+})
+
+test('the license server check reads status, version and each server reached, and leaves out the license file', () => {
+  const block = [
+    'Dump of DSLS configuration file (/var/DassaultSystemes/Licenses/DSLicSrv.txt)', '---------------', '',
+    '1 license servers declared: ',
+    'r1-usw1-licensing.3dexperience.3ds.com:443,r1-usw1-licensing-1.3dexperience.3ds.com:443',
+    '   + status       : RUNNING', '   + type         : MANAGED', '   + version      : 6.428.3', '   + build date   : 05-Feb-2026 12:17',
+    '   + offline licenses : Enabled', '   + auth. file   : /var/DassaultSystemes/Licenses/AAAAA-BBBBB_0000_1.LIC', '   + customer id  : R123',
+    '   + r1-usw1-licensing.3dexperience.3ds.com : ', '         + IP address   : 157.250.13.209', '         + port         : 443', '         + round-trip   : 3 ms', '         + OS name      : Linux', '         + OS version   : 4.18.0',
+    '   + r1-usw1-licensing-1.3dexperience.3ds.com : ', '         + IP address   : 157.250.12.74', '         + port         : 443', '         + round-trip   : 12 ms'
+  ]
+  const l = parseLicense(block, 1000)!
+  assert.deepEqual([l.status, l.type, l.version, l.offline, l.level], ['RUNNING', 'MANAGED', '6.428.3', 'Enabled', 'ok'])
+  assert.deepEqual(l.nodes, [
+    { host: 'r1-usw1-licensing.3dexperience.3ds.com', ip: '157.250.13.209', port: '443', rttMs: 3 },
+    { host: 'r1-usw1-licensing-1.3dexperience.3ds.com', ip: '157.250.12.74', port: '443', rttMs: 12 }
+  ])
+  assert.ok(!JSON.stringify(l).includes('LIC') && !JSON.stringify(l).includes('R123'), 'no license file or customer id')
+  assert.equal(parseLicense(block.map((x) => x.replace('RUNNING', 'NOT REACHABLE')), 1)!.level, 'crit')
+  assert.equal(parseLicense(['nothing here'], 1), null)
+})
+
+test('a server whose check is not running is counted apart, never as up', () => {
+  const n = (ip: string, level: 'ok' | 'crit' | 'unknown'): ServiceNode => ({ url: ip, level, status: null, ms: null, label: ip, ip, name: ip, stopped: false })
+  assert.deepEqual(serviceLevel([], [n('a', 'ok'), n('b', 'unknown')]), { level: 'ok', summary: 'Up · 1 not checked' })
+  assert.equal(serviceLevel([], [n('a', 'crit'), n('b', 'unknown')]).level, 'crit')
+  assert.equal(serviceLevel([], [n('a', 'unknown'), n('b', 'unknown')]).summary, 'Its health check is not running')
 })

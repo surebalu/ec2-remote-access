@@ -114,6 +114,81 @@ export interface JvmHealth {
   instanceKey?: string
 }
 
+/** One 3DSpace server's ENOVIA kernel, read live from its MBeans through Jolokia (health:kernel). */
+export interface KernelServer {
+  ip: string
+  label: string
+  name: string
+  reachable: boolean
+  error?: string
+  /** Signed-in people; the kernel's own sessions and service accounts are listed apart. */
+  people: string[]
+  service: string[]
+  system: string[]
+  /** What the kernel reports as active users (its own sessions included). */
+  reported: number | null
+  /** The C++ kernel's own memory (mcs:00=memory,name=kernel): in use, held, and the peak since it started. */
+  allocatedBytes: number | null
+  reservedBytes: number | null
+  highwaterBytes: number | null
+  limitBytes: number | null
+  contexts: number | null
+  dbConnections: number | null
+  dbExceeded: number | null
+  exceptions: number | null
+  uptimeSec: number | null
+  version: string
+  /** Active users reported every five minutes over the last day (Loki), and the day's peak. */
+  usersSpark?: Spark
+  usersPeak?: number | null
+  level: Level
+}
+
+export interface LicenseStatus {
+  /** When the check ran (ms). */
+  at: number
+  status: string
+  type: string
+  version: string
+  offline: string
+  nodes: { host: string; ip: string; port: string; rttMs: number | null }[]
+  level: Level
+}
+
+export interface KernelHealth {
+  env: PlmEnvId
+  at: number
+  start: number
+  step: number
+  servers: KernelServer[]
+  license: LicenseStatus | null
+  gaps: string[]
+}
+
+/** The kernel's own sessions, never a person. */
+export const SYSTEM_USERS = new Set(['User Agent', 'ADMINISTRATION'])
+export const isServiceAccount = (u: string): boolean => /^svc[_-]/i.test(u)
+
+/**
+ * The license server check (DSCheckLS output, one block every 30 minutes): status, version and the servers it can
+ * reach. The license file's name and the customer id in the same block are left out.
+ */
+export function parseLicense(lines: string[], at: number): LicenseStatus | null {
+  const field = (k: string): string => lines.map((l) => new RegExp(`^\\s*\\+\\s*${k}\\s*:\\s*(.*?)\\s*$`, 'i').exec(l)?.[1]).find((x) => x !== undefined) ?? ''
+  const status = field('status')
+  if (!status) return null
+  const nodes: LicenseStatus['nodes'] = []
+  lines.forEach((l, i) => {
+    const m = /^\s*\+\s*([a-z0-9.-]+\.[a-z]{2,})\s*:\s*$/i.exec(l)
+    if (!m) return
+    const after = lines.slice(i + 1, i + 8)
+    const get = (k: string): string => after.map((x) => new RegExp(`^\\s*\\+\\s*${k}\\s*:\\s*(.*?)\\s*$`, 'i').exec(x)?.[1]).find((x) => x !== undefined) ?? ''
+    const rtt = /([\d.]+)\s*ms/.exec(get('round-trip'))
+    nodes.push({ host: m[1], ip: get('IP address'), port: get('port'), rttMs: rtt ? Number(rtt[1]) : null })
+  })
+  return { at, status, type: field('type'), version: field('version'), offline: field('offline licenses'), nodes, level: /^running$/i.test(status) ? 'ok' : 'crit' }
+}
+
 /** One machine's memory over a window, for the memory-by-machine grid (health:memory). */
 export interface MachineMemory {
   ip: string
@@ -360,7 +435,7 @@ export interface AlertItem {
 export interface Issue {
   level: Level
   text: string
-  section: 'services' | 'jvm' | 'db' | 'alb' | 'servers' | 'storage' | 'certs' | 'web'
+  section: 'services' | 'jvm' | 'kernel' | 'db' | 'alb' | 'servers' | 'storage' | 'certs' | 'web'
 }
 
 export interface PlmEnvHealth {
@@ -520,20 +595,22 @@ export const probeOk = (status: number | null, success: number | null): boolean 
 export function serviceLevel(fronts: Endpoint[], nodes: ServiceNode[]): { level: Level; summary: string } {
   // Servers, not checks: 3DSpace has two checks on each machine (its page and its internal one).
   const machines = (list: ServiceNode[]): number => new Set(list.map((n) => n.ip ?? n.url)).size
-  const live = nodes.filter((n) => !n.stopped)
+  // A server whose check is not running says nothing either way: counted apart, never as up.
+  const blind = nodes.filter((n) => !n.stopped && n.level === 'unknown')
+  const live = nodes.filter((n) => !n.stopped && n.level !== 'unknown')
   const down = live.filter((n) => n.level === 'crit')
   const stopped = machines(nodes.filter((n) => n.stopped))
   const nLive = machines(live)
   const nDown = machines(down)
   const frontDown = fronts.filter((f) => f.level === 'crit')
   const slow = [...fronts, ...live].filter((e) => e.level === 'warn')
-  const note = stopped ? ` · ${stopped} stopped` : ''
+  const note = `${blind.length ? ` · ${machines(blind)} not checked` : ''}${stopped ? ` · ${stopped} stopped` : ''}`
   if (frontDown.length) return { level: 'crit', summary: `Unreachable through the load balancer${nDown ? ` · ${nDown} of ${nLive} servers down` : ''}${note}` }
   if (nLive && nDown === nLive) return { level: 'crit', summary: `All ${nLive === 1 ? 'servers are' : `${nLive} servers are`} down${note}` }
   if (nDown) return { level: 'warn', summary: `${nDown} of ${nLive} servers down, still served${note}` }
   if (slow.length) return { level: 'warn', summary: `Slow to answer${note}` }
   // Checks whose probe itself failed (the blackbox exporter down, a module missing): nothing is known.
-  if ([...fronts, ...live].length && [...fronts, ...live].every((e) => e.level === 'unknown')) return { level: 'unknown', summary: 'Its health check is not running' }
+  if (([...fronts, ...live].length || blind.length) && [...fronts, ...live].every((e) => e.level === 'unknown')) return { level: 'unknown', summary: 'Its health check is not running' }
   if (!fronts.length && !live.length) return { level: stopped ? 'off' : 'unknown', summary: stopped ? 'Stopped' : 'Not checked: only its servers are monitored' }
   return { level: 'ok', summary: `${nLive > 1 ? `${nLive} servers up` : 'Up'}${note}` }
 }
@@ -552,7 +629,7 @@ export function checkNote(url: string): string | null {
   return null
 }
 
-const SECTION_WEIGHT: Record<Issue['section'], number> = { services: 0, db: 1, alb: 2, jvm: 3, web: 4, storage: 5, servers: 6, certs: 7 }
+const SECTION_WEIGHT: Record<Issue['section'], number> = { services: 0, db: 1, alb: 2, jvm: 3, kernel: 4, web: 5, storage: 6, servers: 7, certs: 8 }
 
 /** The environment's verdict and headline from its findings, worst first. */
 export function verdict(issues: Issue[], services: ServiceHealth[]): { level: Level; headline: string; issues: Issue[] } {

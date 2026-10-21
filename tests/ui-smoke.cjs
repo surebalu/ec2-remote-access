@@ -287,6 +287,15 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
         now: h.state === 'stopped' ? null : 40 + k * 9, peak: 48 + k * 9, avg: 40 + k * 9, level: h.state === 'stopped' ? 'off' : 40 + k * 9 >= 80 ? 'warn' : 'ok'
       })) }
     }
+    case 'health:kernel': {
+      if (process.env.HEALTH_KERNEL_JSON) return JSON.parse(readFileSync(process.env.HEALTH_KERNEL_JSON, 'utf8'))[args[0]]
+      const MB = 1024 ** 2
+      return { env: args[0], at: Date.now(), start: now - 86400000, step: 300, gaps: [],
+        servers: [{ ip: '10.9.0.11', label: '01', name: 'space-01', reachable: true, people: ['alex.example', 'sam.example'], service: ['svc_sync'], system: ['ADMINISTRATION', 'User Agent'], reported: 5,
+          allocatedBytes: 205 * MB, reservedBytes: 135 * MB, highwaterBytes: 663 * MB, limitBytes: 8192 * MB, contexts: 544, dbConnections: 87, dbExceeded: 0, exceptions: 527, uptimeSec: 175000, version: 'R2025x HotFix 10',
+          usersSpark: Array.from({ length: 289 }, (_, i) => 4 + Math.round(10 * Math.max(0, Math.sin((i - 100) / 46)))), usersPeak: 14, level: 'ok' }],
+        license: { at: now - 720000, status: 'RUNNING', type: 'MANAGED', version: '6.428.3', offline: 'Enabled', level: 'ok', nodes: [{ host: 'lic-1.example.com', ip: '192.0.2.1', port: '443', rttMs: 3 }, { host: 'lic-2.example.com', ip: '192.0.2.2', port: '443', rttMs: 4 }] } }
+    }
     case 'health:gc': return process.env.HEALTH_GC_JSON ? JSON.parse(readFileSync(process.env.HEALTH_GC_JSON, 'utf8'))[`${args[0]}|${args[1]}`] : gcFixture(args[0], args[1])
     case 'finder:openWithApps': return [{ name: 'TextEdit', path: '/System/Applications/TextEdit.app', isDefault: true }, { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', isDefault: false }]
     case 'finder:openWith': finderDone.push(['openWith', args[0], args[1]]); return
@@ -432,6 +441,10 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
     assert.equal(await js(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling')
     assert.ok((await js(`document.querySelector('.hl-alert.lvl-off')`)) === null, 'alerts about stopped servers start hidden')
+    // Who is signed in and the kernel's own memory, live from each 3DSpace server; the license server beside them.
+    await until(`!!document.querySelector('.hl-kernel') && document.querySelectorAll('.hl-user').length === 5 && !!document.querySelector('.hl-license')`)
+    assert.match(await js(`document.querySelector('.hl-signed-now').textContent`), /2people signed in/)
+    assert.ok(await js(`[...document.querySelectorAll('.hl-user.system')].length === 2 && [...document.querySelectorAll('.hl-user.service')].length === 1`), 'system and service accounts set apart')
     // Every machine's memory on one scale, one crosshair through them all.
     await until(`document.querySelectorAll('.hl-mem').length === 4`)
     assert.ok(await js(`[...document.querySelectorAll('.hl-sec-controls .hl-seg button')].some((b) => b.textContent.startsWith('Stopped1'))`), 'stopped machines wait behind a filter')

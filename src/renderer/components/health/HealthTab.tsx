@@ -11,6 +11,7 @@ import Popover from '../Popover'
 import { Bar, Dot, Empty, Gauge, Pill, SectionHead, Spark, StatusRing, lvl } from './parts'
 import HeapChart from './HeapChart'
 import MemoryGrid from './MemoryGrid'
+import KernelPanel from './KernelPanel'
 
 /**
  * The Health tab: the 3DEXPERIENCE platform at a glance, one environment at a time, from main/plmHealth.ts. It reads
@@ -215,6 +216,8 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
           <div className="hl-jvms">{env.jvms.map((j) => <JvmPanel key={`${j.ip}${j.label}`} j={j} active={active} />)}</div>
         </>
       )}
+
+      {env.jvms.length > 0 && <KernelPanel env={env.id} active={active} />}
 
       <MemoryGrid env={env.id} active={active} />
 
