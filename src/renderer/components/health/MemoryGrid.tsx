@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type PointerEvent, type ReactElement } from 'react'
 import { GC_RANGES, LIMITS, formatBytes, formatPct, type MachineMemory, type MemoryHistory, type PlmEnvId } from '@shared/plmHealth'
 import { Icon } from '../icons'
+import { mayPoll } from './poll'
 import { Dot, Empty, Pill, SectionHead, lvl } from './parts'
 
 /**
@@ -35,7 +36,7 @@ export default function MemoryGrid({ env, active }: { env: PlmEnvId; active: boo
       )
     }
     if (active) load()
-    const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, hours <= 1 ? 15_000 : 60_000)
+    const t = setInterval(() => { if (active && mayPoll()) load() }, hours <= 1 ? 15_000 : 60_000)
     return () => { gone = true; clearInterval(t) }
   }, [key, active]) // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (h: number): void => { setHours(h); setHover(null); try { localStorage.setItem(KEY, String(h)) } catch { /* storage off */ } }

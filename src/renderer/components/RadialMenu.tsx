@@ -1,0 +1,293 @@
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactElement, type ReactNode } from 'react'
+import { comboOf, formatCombo, sectionKeys } from '@shared/keyCombos'
+import { isDarkMode, isSession, useStore, type ToolKind } from '../store'
+import { hasBrowser } from '../quickConnect'
+import { Icon } from './icons'
+
+/**
+ * The radial menu: every section of the app rail as a ring of coloured bubbles around the pointer, opened by its own
+ * shortcut (Settings → Keyboard, ⇧⌘Space by default; shortcuts.ts dispatches `ec2ra:radial`). Like ⌘Tab: hold the
+ * modifiers and tap the key again to step round, or point in a direction, and let go to switch. Tapped and released at
+ * once it stays open for a click, the arrow keys, a number or a first letter. Esc, a click outside or the shortcut
+ * again closes it.
+ */
+
+interface Item {
+  id: string
+  label: string
+  hue: number
+  sat?: number
+  icon: ReactNode
+  keys?: string
+  /** The section in front now. */
+  here: boolean
+  /** A tool with a tab open (the rail's dot). */
+  open: boolean
+  disabled?: boolean
+  run: () => void
+}
+
+const R = 168
+const BALL = 58
+const SIZE = 2 * (R + BALL)
+const DEAD = 46
+/** How far the ring reaches from its centre with the labels outside it: keeps it inside the window. */
+const REACH_X = R + BALL / 2 + 104
+const REACH_Y = R + BALL / 2 + 36
+
+const rad = (deg: number): number => (deg * Math.PI) / 180
+
+/** A ring segment from angle a0 to a1 (degrees clockwise from the top), between radii r0 and r1, centred on 0,0. */
+function wedge(a0: number, a1: number, r0: number, r1: number): string {
+  const p = (a: number, r: number): string => `${(Math.sin(rad(a)) * r).toFixed(2)},${(-Math.cos(rad(a)) * r).toFixed(2)}`
+  const large = a1 - a0 > 180 ? 1 : 0
+  return `M${p(a0, r1)}A${r1},${r1} 0 ${large} 1 ${p(a1, r1)}L${p(a1, r0)}A${r0},${r0} 0 ${large} 0 ${p(a0, r0)}Z`
+}
+
+export default function RadialMenu(): ReactElement | null {
+  const tabs = useStore((s) => s.tabs)
+  const activeTab = useStore((s) => s.activeTab)
+  const gridView = useStore((s) => s.gridView)
+  const gridHost = useStore((s) => s.gridHost)
+  const shortcuts = useStore((s) => s.settings?.shortcuts)
+  const launcherKey = useStore((s) => s.settings?.launcherKey ?? '')
+  const theme = useStore((s) => s.settings?.theme ?? 'system')
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
+  const [hi, setHiState] = useState<number | null>(null)
+  const hiRef = useRef<number | null>(null)
+  const setHi = (i: number | null): void => { hiRef.current = i; setHiState(i) }
+  const [held, setHeldState] = useState(false)
+  const heldRef = useRef(false)
+  const setHeld = (v: boolean): void => { heldRef.current = v; setHeldState(v) }
+  // The highlight was moved by stepping or pointing, so letting go of the modifiers opens it.
+  const moved = useRef(false)
+  const pointer = useRef<{ x: number; y: number } | null>(null)
+  const before = useRef<HTMLElement | null>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const st = useStore.getState
+
+  const front = gridView ? undefined : tabs.find((t) => t.id === activeTab)
+  const sessions = tabs.filter((t) => isSession(t) && !t.transient).length
+  const keys = sectionKeys(shortcuts)
+  const items = useMemo<Item[]>(() => {
+    const k = (id: keyof typeof keys): string | undefined => formatCombo(keys[id]) || undefined
+    const tool = (kind: ToolKind, label: string, hue: number, icon: ReactNode): Item => ({
+      id: kind, label, hue, icon, keys: k(kind), here: front?.kind === kind, open: tabs.some((t) => t.kind === kind), run: () => st().openTool(kind)
+    })
+    const dark = isDarkMode()
+    const list: (Item | false)[] = [
+      { id: 'hosts', label: 'Hosts', hue: 212, icon: <Icon.server />, keys: k('hosts') ?? '⌘1', here: !gridView && activeTab === 'hosts', open: false, run: () => st().setActive('hosts') },
+      { id: 'overview', label: 'Overview', hue: 258, icon: <Icon.grid />, keys: k('overview'), here: gridView && !gridHost, open: false, disabled: sessions === 0, run: () => st().showGrid(true) },
+      tool('health', 'Health', 345, <Icon.health />),
+      hasBrowser() && tool('local', 'Terminal', 150, <Icon.console />),
+      hasBrowser() && tool('finder', 'Finder', 196, <Icon.finder />),
+      tool('browser', 'Browser', 26, <Icon.globe />),
+      tool('notes', 'Notes', 88, <Icon.note />),
+      tool('board', 'Whiteboard', 302, <Icon.board />),
+      tool('claude', 'Claude', 14, <Icon.claude />),
+      tool('chatgpt', 'ChatGPT', 168, <Icon.chatgpt />),
+      hasBrowser() && { id: 'launcher', label: 'Launcher', hue: 278, icon: <Icon.launcher />, keys: formatCombo(launcherKey) || undefined, here: false, open: false, run: () => void window.api.invoke('launcher:show') },
+      { id: 'shortcuts', label: 'Shortcuts', hue: 236, icon: <Icon.keyboard />, keys: '⌘/', here: false, open: false, run: () => st().set({ shortcutsOpen: true }) },
+      { id: 'theme', label: dark ? 'Light mode' : 'Dark mode', hue: 46, icon: dark ? <Icon.sun /> : <Icon.moon />, here: false, open: false, run: () => void st().setTheme(dark ? 'light' : 'dark') },
+      { id: 'settings', label: 'Settings', hue: 215, sat: 22, icon: <Icon.settings />, keys: '⌘,', here: false, open: false, run: () => st().set({ settingsOpen: true }) }
+    ]
+    return list.filter((x): x is Item => !!x)
+  }, [tabs, activeTab, gridView, gridHost, shortcuts, launcherKey, theme, sessions]) // eslint-disable-line react-hooks/exhaustive-deps
+  const n = items.length
+  const step = 360 / n
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+
+  const close = (restore = true): void => {
+    setAt(null)
+    setHi(null)
+    setHeld(false)
+    moved.current = false
+    if (restore) before.current?.focus?.({ preventScroll: true })
+    before.current = null
+  }
+  const pick = (i: number | null): void => {
+    const it = i === null ? null : itemsRef.current[i]
+    if (!it || it.disabled) return
+    close(false)
+    // After the ring is gone, so the section it opens takes the focus.
+    setTimeout(it.run, 0)
+  }
+  const stepBy = (d: number): void => {
+    const list = itemsRef.current
+    let i = hiRef.current ?? Math.max(0, list.findIndex((x) => x.here))
+    for (let k = 0; k < list.length; k++) {
+      i = (i + d + list.length) % list.length
+      if (!list[i].disabled) break
+    }
+    setHi(i)
+    moved.current = true
+  }
+
+  // Where the pointer last was, so the ring opens under it.
+  useEffect(() => {
+    const mv = (e: PointerEvent): void => { pointer.current = { x: e.clientX, y: e.clientY } }
+    document.addEventListener('pointermove', mv, { passive: true })
+    return () => document.removeEventListener('pointermove', mv)
+  }, [])
+
+  const atRef = useRef(at)
+  atRef.current = at
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      const wantsHold = !!(e as CustomEvent<{ held?: boolean }>).detail?.held
+      if (atRef.current) {
+        // The shortcut again: steps on while its modifiers are held, closes otherwise.
+        if (heldRef.current) stepBy(1)
+        else close()
+        return
+      }
+      const w = window.innerWidth
+      const h = window.innerHeight
+      const p = pointer.current ?? { x: w / 2, y: h / 2 }
+      const clamp = (v: number, lo: number, hi: number): number => (hi < lo ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)))
+      before.current = document.activeElement as HTMLElement | null
+      moved.current = false
+      setHeld(wantsHold)
+      const here = itemsRef.current.findIndex((x) => x.here)
+      setHi(here >= 0 ? here : null)
+      setAt({ x: clamp(p.x, REACH_X + 8, w - REACH_X - 8), y: clamp(p.y, REACH_Y + 8, h - REACH_Y - 8) })
+    }
+    window.addEventListener('ec2ra:radial', onOpen)
+    return () => window.removeEventListener('ec2ra:radial', onOpen)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Take the keyboard from whatever had it (a terminal, a web page, the remote desktop) while the ring is up.
+  useEffect(() => { if (at) root.current?.focus({ preventScroll: true }) }, [!!at]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!at) return
+    const radialKey = sectionKeys(useStore.getState().settings?.shortcuts).radial
+    const down = (e: KeyboardEvent): void => {
+      // Window capture: ahead of the app's shortcuts, dialogs and the remote desktop's own handlers.
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (e.repeat && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+      const combo = comboOf({ code: e.code, key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey })
+      if (combo && combo === radialKey) {
+        if (heldRef.current) stepBy(1)
+        else close()
+        return
+      }
+      const plain = !e.metaKey && !e.ctrlKey && !e.altKey
+      if (e.key === 'Escape') return close()
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) return stepBy(1)
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) return stepBy(-1)
+      if (e.key === 'Enter' || (e.key === ' ' && plain && !e.shiftKey)) return pick(hiRef.current)
+      if (plain && /^[0-9]$/.test(e.key)) return pick(e.key === '0' ? 9 : Number(e.key) - 1)
+      if (plain && /^[a-z]$/i.test(e.key)) {
+        // A first letter: the one item that starts with it opens; several are stepped through.
+        const list = itemsRef.current
+        const matches = list.map((x, i) => (x.label.toLowerCase().startsWith(e.key.toLowerCase()) && !x.disabled ? i : -1)).filter((i) => i >= 0)
+        if (matches.length === 1) return pick(matches[0])
+        if (matches.length > 1) setHi(matches[(matches.indexOf(hiRef.current ?? -1) + 1) % matches.length])
+      }
+    }
+    const up = (e: KeyboardEvent): void => {
+      if (!heldRef.current) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      // The modifiers are up: a highlight moved while they were held opens; otherwise the ring stays for a click.
+      setHeld(false)
+      if (moved.current) pick(hiRef.current)
+    }
+    window.addEventListener('keydown', down, true)
+    window.addEventListener('keyup', up, true)
+    return () => {
+      window.removeEventListener('keydown', down, true)
+      window.removeEventListener('keyup', up, true)
+    }
+  }, [!!at]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!at) return null
+
+  const angleOf = (i: number): number => i * step
+  const fromPointer = (e: RPointerEvent): { i: number | null; dist: number } => {
+    const dx = e.clientX - at.x
+    const dy = e.clientY - at.y
+    const dist = Math.hypot(dx, dy)
+    if (dist < DEAD) return { i: null, dist }
+    const a = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360
+    return { i: Math.round(a / step) % n, dist }
+  }
+  const onMove = (e: RPointerEvent): void => {
+    // A pointer moving with no modifier down means they were let go of before it moved: a click picks from here.
+    if (heldRef.current && !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey)) setHeld(false)
+    const { i } = fromPointer(e)
+    if (i !== null && i !== hi && !items[i].disabled) { setHi(i); moved.current = true }
+  }
+  const onDown = (e: RPointerEvent): void => {
+    if (e.button !== 0) return close()
+    const { i, dist } = fromPointer(e)
+    if (dist > R + BALL) return close()
+    if (i === null) return hi === null ? close() : pick(hi)
+    pick(i)
+  }
+
+  const cur = hi === null ? null : items[hi]
+  const key = formatCombo(keys.radial)
+  const keyLetter = key.replace(/^[⌃⌥⇧⌘]+/, '')
+  const mods = key.slice(0, key.length - keyLetter.length)
+  const colour = (it: Item, l: number, a = 1): string => `hsl(${it.hue} ${it.sat ?? 88}% ${l}% / ${a})`
+  return (
+    <div className="radial" ref={root} tabIndex={-1} role="menu" aria-label="Switch section" onPointerMove={onMove} onPointerDown={onDown} onContextMenu={(e) => { e.preventDefault(); close() }}>
+      <div className="radial-ring" style={{ left: at.x, top: at.y, width: SIZE, height: SIZE }}>
+        <svg className="radial-wedges" width={SIZE} height={SIZE} viewBox={`${-SIZE / 2} ${-SIZE / 2} ${SIZE} ${SIZE}`} aria-hidden="true">
+          <circle r={R + BALL / 2 + 16} className="radial-disc" />
+          {items.map((it, i) => (
+            <path key={it.id} d={wedge(angleOf(i) - step / 2 + 0.6, angleOf(i) + step / 2 - 0.6, R - BALL / 2 - 16, R + BALL / 2 + 14)}
+              style={{ fill: colour(it, 58, i === hi ? 0.34 : 0.11) }} className={`radial-wedge ${i === hi ? 'on' : ''}`} />
+          ))}
+        </svg>
+        <div className="radial-center" aria-live="polite">
+          {cur ? (
+            <>
+              <span className="radial-center-ball" style={{ background: `linear-gradient(140deg, ${colour(cur, 64)}, hsl(${cur.hue + 18} ${cur.sat ?? 84}% 46%))`, boxShadow: `0 12px 28px -8px ${colour(cur, 40, 0.6)}` }}>{cur.icon}</span>
+              <strong>{cur.label}</strong>
+              {cur.keys ? <kbd className="kbd">{cur.keys}</kbd> : <span className="radial-center-none">{cur.here ? 'You are here' : ' '}</span>}
+            </>
+          ) : (
+            <>
+              <span className="radial-center-ball plain"><Icon.radial /></span>
+              <strong>Switch to…</strong>
+              <span className="radial-center-none">&nbsp;</span>
+            </>
+          )}
+          <span className="radial-hint">
+            {held && key ? <>Tap {keyLetter} to step · let go of {mods || 'the keys'} to open</> : <>Click, or ← → and ↩ · Esc closes</>}
+          </span>
+        </div>
+        {items.map((it, i) => {
+          const a = rad(angleOf(i))
+          const sx = Math.sin(a)
+          const sy = -Math.cos(a)
+          const style = { '--dx': `${(sx * R).toFixed(1)}px`, '--dy': `${(sy * R).toFixed(1)}px`, '--delay': `${i * 14}ms` } as CSSProperties
+          // The label sits outside the ring, away from the centre, so neighbours never cover it.
+          const out = BALL / 2 + 9
+          const label: CSSProperties = {
+            left: `calc(50% + ${(sx * out).toFixed(1)}px)`, top: `calc(50% + ${(sy * out).toFixed(1)}px)`,
+            transform: `translate(${sx > 0.3 ? '0' : sx < -0.3 ? '-100%' : '-50%'}, ${sy < -0.3 && Math.abs(sx) <= 0.3 ? '-100%' : sy > 0.3 && Math.abs(sx) <= 0.3 ? '0' : '-50%'})`
+          }
+          return (
+            <button key={it.id} type="button" role="menuitem" className={`radial-item ${i === hi ? 'on' : ''} ${it.here ? 'here' : ''} ${it.disabled ? 'off' : ''}`} style={style}
+              aria-label={`${it.label}${it.keys ? ` (${it.keys})` : ''}`} aria-disabled={it.disabled || undefined} tabIndex={-1} data-radial={it.id}
+              onPointerEnter={() => { if (!it.disabled) { setHi(i); moved.current = true } }}
+              onPointerDown={(e) => { e.stopPropagation(); if (e.button === 0) pick(i) }}>
+              <span className="radial-ball" style={{ '--bg': `linear-gradient(140deg, ${colour(it, 66)}, hsl(${it.hue + 18} ${it.sat ?? 84}% 46%))`, '--shadow': `0 10px 22px -8px ${colour(it, 38, 0.65)}`, '--ring': colour(it, 60) } as CSSProperties}>
+                {it.icon}
+                {it.open && !it.here && <i className="radial-dot" aria-hidden="true" />}
+              </span>
+              <span className="radial-label" style={label}>{it.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

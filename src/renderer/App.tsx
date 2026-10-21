@@ -31,6 +31,7 @@ import { ZoomBadge, zoomSection } from './components/ZoomControls'
 import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
 import VoiceHud from './components/VoiceHud'
+import RadialMenu from './components/RadialMenu'
 import { installVoice } from './voice'
 
 export default function App(): ReactElement {
@@ -239,6 +240,7 @@ export default function App(): ReactElement {
         </main>
       </div>
       {dialogs}
+      <RadialMenu />
     </div>
   )
 }

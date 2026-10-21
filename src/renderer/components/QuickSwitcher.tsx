@@ -2,13 +2,14 @@ import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome } from '@shared/browser'
 import type { Instance } from '@shared/types'
-import { formatCombo, type RailSection } from '@shared/keyCombos'
+import { formatCombo, type ShortcutTarget } from '@shared/keyCombos'
 import { DESKTOP_TOOLS, filteredInstances, isSession, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind } from '../store'
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
+import { isMobile } from '../mobile'
 import { APP_THEMES } from '../appThemes'
-import { openKeyboardSettings, sectionKeyLabel, terminalAction } from '../shortcuts'
+import { openKeyboardSettings, openRadial, sectionKeyLabel, terminalAction } from '../shortcuts'
 import Modal from './Modal'
 import { Icon } from './icons'
 
@@ -40,7 +41,7 @@ function commands(): Command[] {
   const s = useStore.getState()
   const active = s.tabs.find((t) => t.id === s.activeTab)
   const inSplit = !s.gridView && s.splitGroup.includes(s.activeTab)
-  const keyOf = (section: RailSection): string | undefined => sectionKeyLabel(section, s.settings?.shortcuts) || undefined
+  const keyOf = (section: ShortcutTarget): string | undefined => sectionKeyLabel(section, s.settings?.shortcuts) || undefined
   const cmds: Command[] = [
     { id: 'rescan', title: 'Rescan inventory', keywords: 'refresh scan reload', icon: Icon.refresh, run: () => void s.scan() },
     { id: 'signin', title: 'Sign in / refresh SSO token', keywords: 'aws sso login token', icon: Icon.key, run: () => void s.refreshToken() },
@@ -68,6 +69,7 @@ function commands(): Command[] {
     { id: 'add-host', title: 'Add a server outside AWS…', keywords: 'manual host', icon: Icon.server, run: () => s.set({ manualHostEditor: 'new' }) },
     { id: 'add-account', title: 'Add AWS account…', keywords: 'sso profile', icon: Icon.cloud, run: () => s.set({ addAccountOpen: true }) },
     { id: 'shortcuts', title: 'Keyboard shortcuts', hint: '⌘/', icon: Icon.keyboard, run: () => s.set({ shortcutsOpen: true }) },
+    { id: 'radial', title: 'Open the radial menu', keywords: 'wheel circle ring pie switch sections', hint: keyOf('radial'), icon: Icon.radial, run: () => openRadial(), when: !isMobile() },
     { id: 'launcher', title: 'Open the launcher', keywords: 'raycast spotlight alfred search apps files anywhere', hint: s.settings?.launcherKey ? formatCombo(s.settings.launcherKey) : undefined, icon: Icon.launcher, run: () => void window.api.invoke('launcher:show'), when: hasBrowser() },
     { id: 'shortcuts-edit', title: 'Set keyboard shortcuts for the sections…', keywords: 'keys hotkey customize rail claude chatgpt terminal finder', icon: Icon.keyboard, run: () => openKeyboardSettings() },
     { id: 'close', title: 'Close current tab', hint: '⌘W', icon: Icon.x, run: () => void s.closeTab(active!.id), when: !!active },

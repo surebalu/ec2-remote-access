@@ -4,6 +4,7 @@ import {
   type KernelHealth, type KernelMemoryHistory, type KernelMemorySeries, type KernelServer, type PlmEnvId
 } from '@shared/plmHealth'
 import { Icon } from '../icons'
+import { mayPoll } from './poll'
 import { Bar, Dot, Empty, Pill, SectionHead, Spark, lvl } from './parts'
 import KernelChart, { type KernelLine } from './KernelChart'
 
@@ -30,7 +31,7 @@ function useKernelMemory(env: PlmEnvId, hours: number, active: boolean): KernelM
       window.api.invoke('health:kernelMemory', env, hours).then((x) => { seenMem.set(key, x); if (!gone) setD(x) }, () => undefined)
     }
     if (active) load()
-    const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, hours <= 1 ? 15_000 : 60_000)
+    const t = setInterval(() => { if (active && mayPoll()) load() }, hours <= 1 ? 15_000 : 60_000)
     return () => { gone = true; clearInterval(t) }
   }, [key, active]) // eslint-disable-line react-hooks/exhaustive-deps
   return d
@@ -50,7 +51,7 @@ export function useKernel(env: PlmEnvId, active: boolean): { d: KernelHealth | n
       )
     }
     if (active) load()
-    const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, 30_000)
+    const t = setInterval(() => { if (active && mayPoll()) load() }, 30_000)
     return () => { gone = true; clearInterval(t) }
   }, [env, active])
   return { d, error }
