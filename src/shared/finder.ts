@@ -132,8 +132,30 @@ export function pathSteps(path: string, diskName = 'Macintosh HD'): { name: stri
   return [{ name: diskName, path: '/' }, ...parts.map((name, i) => ({ name, path: `/${parts.slice(0, i + 1).join('/')}` }))]
 }
 
+/** An app that can open an item (the Finder tab's Open With). */
+export interface OpenWithApp {
+  name: string
+  path: string
+  isDefault: boolean
+}
+
 /** The parent folder ('/' stays '/'). */
 export const parentOf = (path: string): string => (path.replace(/\/+$/, '').replace(/\/[^/]*$/, '') || '/')
+
+/**
+ * The name a copied item takes in its folder, as Finder names it: beside the original "report copy.pdf", then
+ * "report copy 2.pdf" (a copy of a copy counts on rather than adding another "copy"); in another folder its own name, or
+ * "report 2.pdf" when that is taken (Finder's Keep Both). A plain folder's name is never split at a dot.
+ */
+export function copyName(name: string, plainFolder: boolean, taken: string[], beside: boolean): string {
+  const set = new Set(taken.map((t) => t.toLowerCase()))
+  if (!beside && !set.has(name.toLowerCase())) return name
+  const dot = plainFolder ? -1 : name.lastIndexOf('.')
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+  const base = beside ? `${/^(.*) copy(?: \d+)?$/.exec(stem)?.[1] ?? stem} copy` : stem
+  if (beside && !set.has(`${base}${ext}`.toLowerCase())) return `${base}${ext}`
+  for (let n = 2; ; n++) if (!set.has(`${base} ${n}${ext}`.toLowerCase())) return `${base} ${n}${ext}`
+}
 
 /** A name for a new folder that is not taken yet: "untitled folder", "untitled folder 2", … */
 export function freeName(base: string, taken: string[]): string {

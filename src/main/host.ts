@@ -49,6 +49,10 @@ export interface Host {
   showEmojiPanel?(): void
   /** Quick Look for a file (macOS). Absent where there is none. */
   quickLook?(path: string): void
+  /** Puts files on the clipboard as Finder's Copy does, so Finder and other apps paste the files themselves (macOS). */
+  copyFiles?(paths: string[]): Promise<void>
+  /** Edit → Paste in the main window, for a Paste menu item: macOS hands the page what is on the clipboard. */
+  paste?(): void
   /** Copy text to the clipboard. Returns false when the host has no clipboard (the UI then copies client-side). */
   clipboardWrite(text: string): boolean
   /** Apply the app-wide light/dark preference to native chrome; no-op without native windows. */

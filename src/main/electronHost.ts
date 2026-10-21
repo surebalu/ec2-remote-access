@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, nativeTheme, safeStorage, ShareMenu, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Host, LauncherHost, VoiceHost } from './host'
@@ -75,6 +75,16 @@ export const electronHost: Host = {
   clipboardWrite(text) {
     clipboard.writeText(text)
     return true
+  },
+  async copyFiles(paths) {
+    // One list of paths in the classic filenames type: macOS turns it into one file URL per item, as Finder writes
+    // them, and Electron 44 keeps only one clipboard item per write, so the list is the way to copy several.
+    const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><array>${paths.map((p) => `<string>${esc(p)}</string>`).join('')}</array></plist>`
+    await clipboard.write([new ClipboardItem({ 'electron application/osclipboard;format="NSFilenamesPboardType"': new Blob([plist]) })])
+  },
+  paste() {
+    mainWindow()?.webContents.paste()
   },
   setThemeSource(theme) {
     nativeTheme.themeSource = theme

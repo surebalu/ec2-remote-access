@@ -215,6 +215,27 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'finder:recents': return [{ ...fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), lastUsed: Math.max(now - 3600000, today + 2000) }, { ...fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200), lastUsed: Math.max(now - 7200000, today + 1000) }]
     case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
+    case 'finder:openWithApps': return [{ name: 'TextEdit', path: '/System/Applications/TextEdit.app', isDefault: true }, { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', isDefault: false }]
+    case 'finder:openWith': finderDone.push(['openWith', args[0], args[1]]); return
+    case 'finder:openWithOther': finderDone.push(['openWithOther', args[0]]); return
+    case 'finder:copy': finderDone.push(['copy', ...args[0]]); return
+    case 'finder:pasteCommand': finderDone.push(['pasteCommand']); return
+    case 'finder:paste': case 'finder:duplicate': {
+      // Finder's names: "x copy.ext" beside the original, the same name elsewhere.
+      const dirOf = (p) => p.replace(/\/[^/]+$/, '') || '/'
+      const made = []
+      for (const src of args[0]) {
+        const dir = channel === 'finder:paste' ? args[1] : dirOf(src)
+        const name = src.split('/').pop()
+        const dot = name.lastIndexOf('.')
+        const as = dirOf(src) === dir ? (dot > 0 ? `${name.slice(0, dot)} copy${name.slice(dot)}` : `${name} copy`) : name
+        const orig = Object.values(finderFs).flat().find((e) => e.path === src)
+        finderFs[dir].push(fsEntry(dir, as, orig?.type ?? 'file', orig?.size ?? 0, 0))
+        made.push(`${dir}/${as}`)
+      }
+      finderDone.push([channel.slice(7), ...made])
+      return made
+    }
     case 'term:history': return ['ls -la', 'git status', 'git checkout main', 'npm test']
     case 'term:loadState': return termSaved
     case 'term:saveState': termSaved = args[0]; return
@@ -1908,6 +1929,34 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelector('.fi-banner')?.textContent.startsWith('1 found') && ${row('Passport.pdf')}?.querySelector('.fi-where')?.textContent === '~/Documents/Surendra-Personal'`, 'search finds it below the folder')
     await tshot('finder.png')
     await tjs(`document.querySelector('.fi-search button[aria-label="Clear search"]').click()`)
+    await tuntil(`!!${row('notes.md')}`, 'search cleared')
+    // Open With: the item's apps (the default first) in a submenu beside the row.
+    const menuItem = (label) => `[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent.startsWith(${JSON.stringify(label)}))`
+    await tjs(`${row('notes.md')}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 600, clientY: 300 }))`)
+    await tuntil(`!!${menuItem('Open With')}`, 'file menu with Open With')
+    await tjs(`${menuItem('Open With')}.click()`)
+    await tuntil(`document.querySelectorAll('.popover').length === 2 && [...document.querySelectorAll('.popover .fi-app')].map((a) => a.textContent).join('|') === 'TextEdit (default)|Visual Studio Code'`, 'open with lists the apps')
+    assert.ok(await tjs(`(() => { const [m, s] = document.querySelectorAll('.popover'); return s.getBoundingClientRect().left >= m.getBoundingClientRect().right - 4 })()`), 'the submenu opens beside the menu')
+    await tshot('finder-open-with.png')
+    await tjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent === 'Visual Studio Code').click()`)
+    await tuntil(`!document.querySelector('.popover')`, 'menus close')
+    assert.deepEqual(finderDone.at(-1), ['openWith', ['/Users/fixture/Documents/notes.md'], '/Applications/Visual Studio Code.app'])
+    // Copy puts the files on the clipboard, ⌥⌘C the path; Duplicate copies beside; a paste of files (from Finder, say)
+    // copies them here; the Paste menu item asks for Edit → Paste.
+    await tjs(`${row('Runbook.pdf')}.click()`)
+    await tkey('c', { metaKey: true })
+    for (let n = 0; n < 40 && finderDone.at(-1)?.[0] !== 'copy'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(finderDone.at(-1), ['copy', '/Users/fixture/Documents/Runbook.pdf'], '⌘C copies the file')
+    await tkey('d', { metaKey: true })
+    await tuntil(`${row('Runbook copy.pdf')}?.classList.contains('on')`, '⌘D duplicates beside it and selects the copy')
+    await tjs(`(() => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'fixture-path|Users|fixture|Projects|main.go')); document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })) })()`)
+    await tuntil(`${row('main.go')}?.classList.contains('on')`, 'pasted files are copied into this folder')
+    assert.deepEqual(finderDone.at(-1), ['paste', '/Users/fixture/Documents/main.go'])
+    await tjs(`document.querySelector('.fi-list').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 700, clientY: 520 }))`)
+    await tuntil(`!!${menuItem('Paste')}`, 'background menu has Paste')
+    await tjs(`${menuItem('Paste')}.click()`)
+    for (let n = 0; n < 40 && finderDone.at(-1)?.[0] !== 'pasteCommand'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(finderDone.at(-1), ['pasteCommand'], 'the menu item pastes through Edit → Paste')
     await tjs(`${row('Runbook.pdf')}.click()`)
     await tkey('Backspace', { metaKey: true })
     await tuntil(`![...document.querySelectorAll('.fi-row')].some((r) => r.textContent.includes('Runbook.pdf'))`, '⌘⌫ moves to the Trash')

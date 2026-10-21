@@ -4,13 +4,15 @@ import { createPortal } from 'react-dom'
 /**
  * Small floating menu anchored to a button. Portalled to body because the title bar and toolbars clip overflow;
  * closes on an outside press or Escape and flips above the anchor when it would run off the bottom of the window.
+ * `side` places it beside the anchor instead, as a submenu opens next to its row (flipping left at the window's edge).
  */
-export default function Popover({ anchor, onClose, children, align = 'left', width }: {
+export default function Popover({ anchor, onClose, children, align = 'left', width, side }: {
   anchor: HTMLElement | null
   onClose: () => void
   children: ReactNode
   align?: 'left' | 'right'
   width?: number
+  side?: boolean
 }): ReactElement | null {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
@@ -21,12 +23,17 @@ export default function Popover({ anchor, onClose, children, align = 'left', wid
     if (!anchor || !ref.current) return
     const a = anchor.getBoundingClientRect()
     const m = ref.current.getBoundingClientRect()
+    if (side) {
+      const left = a.right + m.width + 8 <= window.innerWidth ? a.right + 2 : Math.max(8, a.left - m.width - 2)
+      setPos({ top: Math.max(8, Math.min(a.top - 5, window.innerHeight - m.height - 8)), left })
+      return
+    }
     let top = a.bottom + 4
     if (top + m.height > window.innerHeight - 8) top = Math.max(8, a.top - m.height - 4)
     let left = align === 'right' ? a.right - m.width : a.left
     left = Math.max(8, Math.min(left, window.innerWidth - m.width - 8))
     setPos({ top, left })
-  }, [anchor, align])
+  }, [anchor, align, side])
 
   useEffect(() => {
     const down = (e: MouseEvent): void => {
