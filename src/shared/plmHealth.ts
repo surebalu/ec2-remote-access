@@ -78,7 +78,10 @@ export interface HostHealth {
   cpu: number | null
   mem: number | null
   memBytes: number | null
+  /** The fullest of the machine's own disks (fullestDisk). */
   disk: { mount: string; pct: number } | null
+  /** Network stores it mounts (NFS, SMB): judged once under Storage, never against the machine. */
+  sharedStores?: { mount: string; pct: number; level: Level }[]
   load: number | null
   cores: number | null
   uptimeSec: number | null
@@ -163,6 +166,64 @@ export interface KernelHealth {
   servers: KernelServer[]
   license: LicenseStatus | null
   gaps: string[]
+}
+
+/**
+ * One 3DSpace server's kernel over a window (health:kernelMemory), from the enovia_kernel_* metrics its cron script
+ * writes for node_exporter's textfile collector. The series carry a `host` label naming the server they describe, which
+ * is not always the machine that exports them.
+ */
+export interface KernelMemorySeries {
+  ip: string
+  label: string
+  name: string
+  /** The C++ kernel's memory: in use, held from the system, and the peak since it started. */
+  allocated: Spark
+  reserved: Spark
+  highwater: Spark
+  contexts: Spark
+  users: Spark
+  /** When TomEE restarted inside the window (ms): a new pid or start time in enovia_kernel_info. */
+  restarts: number[]
+}
+
+export interface KernelMemoryHistory {
+  env: PlmEnvId
+  hours: number
+  /** ms; one point every `step` seconds. */
+  start: number
+  step: number
+  servers: KernelMemorySeries[]
+}
+
+/**
+ * How a memory series moved over the part of the window it covers, from its first point (or the last restart, when
+ * there is one inside the window) to the latest: plain figures, no forecast, since the history may only be hours old.
+ */
+export function memoryChange(values: Spark, start: number, stepMs: number, since: number | null = null): { from: number; to: number; at: number; min: number; max: number } | null {
+  const pts: [number, number][] = []
+  values.forEach((v, i) => { const t = start + i * stepMs; if (v !== null && Number.isFinite(v) && (since === null || t >= since)) pts.push([t, v]) })
+  if (pts.length < 2) return null
+  const vs = pts.map(([, v]) => v)
+  return { from: pts[0][1], to: pts[pts.length - 1][1], at: pts[0][0], min: Math.min(...vs), max: Math.max(...vs) }
+}
+
+/**
+ * Everyone signed in across the 3DSpace servers, each person once: the load balancer can give one person sessions on
+ * both servers. `onMany` counts the people seen on more than one.
+ */
+export function signedInPeople(servers: Pick<KernelServer, 'reachable' | 'people'>[]): { people: string[]; onMany: number } {
+  const seen = new Map<string, { name: string; n: number }>()
+  for (const s of servers) {
+    if (!s.reachable) continue
+    for (const p of new Set(s.people.map((x) => x.trim()).filter(Boolean))) {
+      const k = p.toLowerCase()
+      const had = seen.get(k)
+      seen.set(k, { name: had?.name ?? p, n: (had?.n ?? 0) + 1 })
+    }
+  }
+  const all = [...seen.values()]
+  return { people: all.map((x) => x.name).sort((a, b) => a.localeCompare(b)), onMany: all.filter((x) => x.n > 1).length }
 }
 
 /** The kernel's own sessions, never a person. */
@@ -510,6 +571,19 @@ export function worst(levels: Level[]): Level {
   return any ? w : levels.includes('unknown') ? 'unknown' : levels.length ? 'off' : 'unknown'
 }
 
+export interface DiskUse { mount: string; pct: number; shared: boolean }
+
+/**
+ * A machine's own fullest disk. A network store (the FCS file store on the NetApp, say) is shared by every machine
+ * that mounts it, so it is judged once under Storage rather than turning each of those machines unhealthy; the small
+ * boot partitions only count once they fill up.
+ */
+export function fullestDisk(disks: DiskUse[], windows: boolean): { mount: string; pct: number } | null {
+  const limits = windows ? LIMITS.diskWindows : LIMITS.disk
+  const own = disks.filter((d) => !d.shared && (!/^\/boot(\/|$)/.test(d.mount) || d.pct >= limits[0])).sort((a, b) => b.pct - a.pct)[0]
+  return own ? { mount: own.mount, pct: own.pct } : null
+}
+
 // ---------- reading Prometheus labels ----------
 
 /** The private address in an instance label: "10.0.2.175:9100", "ip-10-0-2-175.us-west-1…:9404", or a URL to either. */
@@ -646,6 +720,103 @@ export function verdict(issues: Issue[], services: ServiceHealth[]): { level: Le
         ? `Running, with ${warn} ${warn === 1 ? 'warning' : 'warnings'}`
         : 'All systems operational'
   return { level: sorted.length ? level : 'ok', headline, issues: sorted }
+}
+
+// ---------- machines (the honeycomb) ----------
+
+/** One health check that runs on a machine. */
+export interface MachineCheck {
+  service: string
+  url: string
+  level: Level
+  status: number | null
+  ms: number | null
+}
+
+/** One machine in an environment: its own readings (node or Windows exporter) joined with every check that runs on it. */
+export interface MachineCell {
+  ip: string
+  name: string
+  /** "3DSpace 01", "All-in-one server". */
+  title: string
+  roleId: string | null
+  label: string
+  level: Level
+  state: HostHealth['state']
+  /** Null when no exporter runs on it, so only its checks are known. */
+  reporting: boolean | null
+  os: HostHealth['os'] | null
+  cpu: number | null
+  mem: number | null
+  disk: HostHealth['disk']
+  sharedStores: NonNullable<HostHealth['sharedStores']>
+  checks: MachineCheck[]
+  problems: string[]
+  instanceKey?: string
+  instanceType?: string
+  /** Has a row under Servers (an exporter runs on it). */
+  listed: boolean
+}
+
+const roleRank = (id: string | null): number => {
+  const i = id ? SERVICE_ORDER.indexOf(id) : -1
+  return i < 0 ? SERVICE_ORDER.length : i
+}
+
+/**
+ * Every machine in an environment, once, for the honeycomb. A machine is unhealthy when it stops reporting, a health
+ * check on it fails, or its CPU, memory or disk is over the limit; stopped in EC2 is set apart, never unhealthy. Sorted
+ * by the services' order, then label, so a machine keeps its place when its colour changes.
+ */
+export function machines(env: Pick<PlmEnvHealth, 'hosts' | 'services'>): MachineCell[] {
+  const byIp = new Map<string, MachineCell>()
+  for (const h of env.hosts) {
+    const had = byIp.get(h.ip)
+    if (had) {
+      // The same machine under two exporters' jobs: one cell, the worse reading.
+      had.level = worst([had.level, h.level])
+      had.problems.push(...h.problems)
+      continue
+    }
+    byIp.set(h.ip, {
+      ip: h.ip, name: h.name, title: `${h.role}${h.label ? ` ${h.label}` : ''}`, roleId: ROLES.find((r) => r.name === h.role)?.id ?? null, label: h.label,
+      level: h.level, state: h.state, reporting: h.reporting, os: h.os, cpu: h.cpu, mem: h.mem, disk: h.disk, sharedStores: h.sharedStores ?? [], checks: [], problems: [...h.problems],
+      instanceKey: h.instanceKey, instanceType: h.instanceType, listed: true
+    })
+  }
+  const unlisted = new Map<string, Set<string>>()
+  for (const s of env.services) {
+    for (const n of s.nodes) {
+      if (!n.ip) continue
+      let m = byIp.get(n.ip)
+      if (!m) {
+        // Checked but not monitored itself (no exporter): known only by its checks.
+        const label = n.label === 'server' || n.label === n.ip ? '' : n.label
+        m = {
+          ip: n.ip, name: n.name, title: `${s.name}${label ? ` ${label}` : ''}`, roleId: s.id, label, level: 'unknown', state: n.stopped ? 'stopped' : 'unknown',
+          reporting: null, os: null, cpu: null, mem: null, disk: null, sharedStores: [], checks: [], problems: [], instanceKey: n.instanceKey, listed: false
+        }
+        byIp.set(n.ip, m)
+      }
+      if (!m.listed) unlisted.set(n.ip, (unlisted.get(n.ip) ?? new Set()).add(s.id))
+      if (!m.checks.some((c) => c.url === n.url)) m.checks.push({ service: s.name, url: n.url, level: n.stopped ? 'off' : n.level, status: n.status, ms: n.ms })
+    }
+  }
+  for (const m of byIp.values()) {
+    // An unmonitored machine that serves several services is named by its EC2 name, not the first service found.
+    if (!m.listed && (unlisted.get(m.ip)?.size ?? 0) > 1) { m.title = m.name; m.roleId = null; m.label = '' }
+    if (!m.listed && m.checks.length && m.checks.every((c) => c.level === 'off')) m.state = 'stopped'
+    if (m.state === 'stopped') { m.level = 'off'; m.problems = []; continue }
+    const live = m.checks.filter((c) => c.level !== 'off')
+    for (const c of live) {
+      if (c.level === 'crit') m.problems.push(`${c.service} check fails: ${c.status ? `HTTP ${c.status}` : 'no answer'}`)
+      else if (c.level === 'warn') m.problems.push(`${c.service} check is slow: ${formatMs(c.ms)}`)
+    }
+    m.problems = [...new Set(m.problems)]
+    m.level = worst([m.level, ...live.map((c) => c.level)])
+  }
+  return [...byIp.values()].sort((a, b) =>
+    roleRank(a.roleId) - roleRank(b.roleId) || a.title.localeCompare(b.title, undefined, { numeric: true }) || a.ip.localeCompare(b.ip, undefined, { numeric: true }))
 }
 
 // ---------- formatting ----------

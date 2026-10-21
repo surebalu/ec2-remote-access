@@ -1,5 +1,5 @@
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
-import type { JvmGcDetail, KernelHealth, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
+import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -107,6 +107,8 @@ export interface IpcApi {
   'health:memory': (env: PlmEnvId, hours: number) => Promise<MemoryHistory>
   /** Each 3DSpace server's ENOVIA kernel (memory, sessions, who is signed in) and the license server check. */
   'health:kernel': (env: PlmEnvId) => Promise<KernelHealth>
+  /** Each 3DSpace server's kernel memory, contexts and users over `hours`, where its enovia_kernel_* metrics are recorded. */
+  'health:kernelMemory': (env: PlmEnvId, hours: number) => Promise<KernelMemoryHistory>
   'ec2:password': (instanceKey: string, pemFile?: string) => Promise<WindowsPasswordResult>
   'ec2:start': (instanceKey: string) => Promise<void>
   'ec2:stop': (instanceKey: string) => Promise<void>

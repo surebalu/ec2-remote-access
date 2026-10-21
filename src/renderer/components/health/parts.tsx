@@ -5,6 +5,13 @@ import { Icon } from '../icons'
 /** The class that colours a part by its level (--lvl and --lvl-soft in styles.css). */
 export const lvl = (l: Level): string => `lvl-${l}`
 
+/** A letter pair and a hue for each part of the platform, so cards and hexagons can be told apart at a glance. */
+export const MARKS: Record<string, [string, number]> = {
+  passport: ['Pa', 262], dashboard: ['Da', 214], space: ['Sp', 196], search: ['Se', 26], fcs: ['Fc', 150], index: ['Ft', 44], comment: ['Co', 328],
+  swym: ['Sw', 182], notification: ['No', 4], docs: ['Do', 222], tif: ['Ti', 18], converter: ['Dc', 240], cad: ['Ca', 286], apache: ['Ap', 352],
+  allinone: ['Ai', 170], migration: ['Mi', 300]
+}
+
 const WORDS: Record<Level, string> = { ok: 'Healthy', warn: 'Warning', crit: 'Down', off: 'Stopped', unknown: 'No data' }
 
 export function Pill({ level, children }: { level: Level; children?: ReactNode }): ReactElement {

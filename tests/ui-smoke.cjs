@@ -143,7 +143,7 @@ const healthFixture = () => {
           svc('dashboard', '3DDashboard', 'ok', '2 servers up', [ep('https://dash-prod.example.com/3ddashboard/test-alive')], [node('01', '10.9.0.41'), node('02', '10.9.0.42')]),
           svc('space', '3DSpace', 'warn', '1 of 2 servers down, still served', [ep('https://space-prod.example.com/3dspace/servlet/fcs/ping', 'ok', 22)], [node('01', '10.9.0.11'), node('02', '10.9.0.12', 'crit')]),
           svc('fcs', 'File Collaboration Server', 'ok', '2 servers up', [ep('https://fcs-prod.example.com/fcs/servlet/fcs/ping')], [node('01', '10.9.0.51'), node('02', '10.9.0.52')])],
-        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11'), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51')],
+        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11'), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51', { sharedStores: [{ mount: '/filestore', pct: 86.3, level: 'crit' }] })],
         { alerts: [{ name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: 'pass-prod.example.com', since: now - 600000, level: 'crit', muted: false }, { name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: '3DPassport 02', since: now - 7200000, level: 'off', muted: true }] }),
       env('qa', 'QA', 'ok', 'All systems operational', [],
         [svc('passport', '3DPassport', 'ok', 'Up · 1 stopped', [ep('https://pass-qa.example.com/3dpassport/healthcheck')], [node('01', '10.8.0.31'), node('02', '10.8.0.32', 'crit', true)])],
@@ -293,8 +293,25 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return { env: args[0], at: Date.now(), start: now - 86400000, step: 300, gaps: [],
         servers: [{ ip: '10.9.0.11', label: '01', name: 'space-01', reachable: true, people: ['alex.example', 'sam.example'], service: ['svc_sync'], system: ['ADMINISTRATION', 'User Agent'], reported: 5,
           allocatedBytes: 205 * MB, reservedBytes: 135 * MB, highwaterBytes: 663 * MB, limitBytes: 8192 * MB, contexts: 544, dbConnections: 87, dbExceeded: 0, exceptions: 527, uptimeSec: 175000, version: 'R2025x HotFix 10',
-          usersSpark: Array.from({ length: 289 }, (_, i) => 4 + Math.round(10 * Math.max(0, Math.sin((i - 100) / 46)))), usersPeak: 14, level: 'ok' }],
+          usersSpark: Array.from({ length: 289 }, (_, i) => 4 + Math.round(10 * Math.max(0, Math.sin((i - 100) / 46)))), usersPeak: 14, level: 'ok' },
+        // The same person can be signed in to both servers; the banner counts people once.
+        { ip: '10.9.0.12', label: '02', name: 'space-02', reachable: true, people: ['sam.example', 'riley.example'], service: [], system: [], reported: 2,
+          allocatedBytes: 180 * MB, reservedBytes: 120 * MB, highwaterBytes: 600 * MB, limitBytes: 8192 * MB, contexts: 300, dbConnections: 60, dbExceeded: 0, exceptions: 12, uptimeSec: 90000, version: 'R2025x HotFix 10',
+          usersSpark: Array.from({ length: 289 }, () => 2), usersPeak: 2, level: 'ok' }],
         license: { at: now - 720000, status: 'RUNNING', type: 'MANAGED', version: '6.428.3', offline: 'Enabled', level: 'ok', nodes: [{ host: 'lic-1.example.com', ip: '192.0.2.1', port: '443', rttMs: 3 }, { host: 'lic-2.example.com', ip: '192.0.2.2', port: '443', rttMs: 4 }] } }
+    }
+    case 'health:kernelMemory': {
+      if (process.env.HEALTH_KMEM_JSON) return JSON.parse(readFileSync(process.env.HEALTH_KMEM_JSON, 'utf8'))[`${args[0]}|${args[1]}`] ?? { env: args[0], hours: args[1], start: now - args[1] * 3600000, step: 60, servers: [] }
+      // Server 01 records its kernel (recording began part-way through, then one restart); 02 has no history.
+      const MB = 1024 ** 2
+      const n = 145
+      const step = Math.round((args[1] * 3600) / (n - 1))
+      const restartAt = 100
+      const series = (f) => Array.from({ length: n }, (_, i) => (i < 30 ? null : f(i)))
+      return { env: args[0], hours: args[1], start: now - args[1] * 3600000, step, servers: [{ ip: '10.9.0.11', label: '01', name: 'space-01',
+        allocated: series((i) => (i < restartAt ? 150 + i * 0.6 : 120 + (i - restartAt) * 0.4) * MB), reserved: series((i) => (i < restartAt ? 120 : 100) * MB),
+        highwater: series((i) => (i < restartAt ? 600 : 300 + (i - restartAt)) * MB), contexts: series((i) => 400 + i), users: series((i) => 5 + (i % 4)),
+        restarts: [now - args[1] * 3600000 + restartAt * step * 1000] }] }
     }
     case 'health:gc': return process.env.HEALTH_GC_JSON ? JSON.parse(readFileSync(process.env.HEALTH_GC_JSON, 'utf8'))[`${args[0]}|${args[1]}`] : gcFixture(args[0], args[1])
     case 'finder:openWithApps': return [{ name: 'TextEdit', path: '/System/Applications/TextEdit.app', isDefault: true }, { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', isDefault: false }]
@@ -441,8 +458,61 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
     assert.equal(await js(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling')
     assert.ok((await js(`document.querySelector('.hl-alert.lvl-off')`)) === null, 'alerts about stopped servers start hidden')
+    // The honeycomb: every machine once (servers with an exporter and those only the checks know), red where a check
+    // on it fails or it stopped reporting, grey when stopped; pointing says which machine, a click finds its row.
+    await until(`document.querySelectorAll('.hl-hex').length === 8`)
+    assert.equal(await js(`document.querySelectorAll('.hl-hex.lvl-crit').length`), 2, 'not reporting, and a failing check, are unhealthy')
+    assert.equal(await js(`document.querySelectorAll('.hl-hex.lvl-off').length`), 1, 'a stopped machine is set apart')
+    assert.equal(await js(`document.querySelectorAll('.hl-hex.lvl-ok').length`), 5)
+    assert.match(await js(`document.querySelector('.hl-hive-score').textContent`), /^5of 7 machines healthy$/)
+    await js(`document.querySelector('.hl-hex[data-ip="10.9.0.12"]').dispatchEvent(new PointerEvent('pointerover', { pointerType: 'mouse', bubbles: true }))`)
+    await until(`!!document.querySelector('.hl-hex-tip')`)
+    const hexTip = await js(`document.querySelector('.hl-hex-tip').textContent`)
+    for (const want of ['3DSpace 02', '3dspace-02', '10.9.0.12', 'Unhealthy', 'Memory at 83%', '3DSpace check fails: no answer', 'Click to see it under Servers']) assert.ok(hexTip.includes(want), `the tip says ${want}: ${hexTip}`)
+    await js(`document.querySelector('#hl-machines').scrollIntoView()`)
+    await new Promise((r) => setTimeout(r, 500))
+    await screenshot('health-hive.png')
+    // A full shared store is the store's problem (under Storage), not the machines that mount it.
+    await js(`document.querySelector('.hl-hex[data-ip="10.9.0.51"]').dispatchEvent(new PointerEvent('pointerover', { pointerType: 'mouse', bubbles: true }))`)
+    await until(`!!document.querySelector('.hl-hex-tip') && document.querySelector('.hl-hex-tip').textContent.includes('File Collaboration Server 01')`)
+    assert.ok(await js(`document.querySelector('.hl-hex[data-ip="10.9.0.51"]').classList.contains('lvl-ok')`), 'the FCS machine stays healthy')
+    assert.match(await js(`document.querySelector('.hl-hex-tip').textContent`), /Shared store \/filestore is 86% full: counted under Storage/)
+    await js(`document.querySelector('.hl-hex[data-ip="10.9.0.51"]').dispatchEvent(new PointerEvent('pointerout', { pointerType: 'mouse', bubbles: true }))`)
+    await js(`document.documentElement.setAttribute('data-theme', 'light')`)
+    await screenshot('health-hive-light.png')
+    await js(`document.documentElement.setAttribute('data-theme', 'dark')`)
+    await js(`(() => { const g = document.querySelector('.hl-hex[data-ip="10.9.0.12"]'); g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
+    await until(`!!document.querySelector('.hl-srv.lit[data-ip="10.9.0.12"]') && !document.querySelector('.hl-hex-tip')`)
+    // Lighting up one status from the legend dims the rest.
+    await js(`[...document.querySelectorAll('.hl-hive-legend button')].find((b) => b.textContent.startsWith('Unhealthy')).click()`)
+    assert.equal(await js(`document.querySelectorAll('.hl-hex.dim').length`), 6)
+    await js(`[...document.querySelectorAll('.hl-hive-legend button')].find((b) => b.textContent.startsWith('Unhealthy')).click()`)
+    assert.equal(await js(`document.querySelectorAll('.hl-hex.dim').length`), 0)
+    await js(`document.querySelector('.hl').scrollTop = 0`)
     // Who is signed in and the kernel's own memory, live from each 3DSpace server; the license server beside them.
-    await until(`!!document.querySelector('.hl-kernel') && document.querySelectorAll('.hl-user').length === 5 && !!document.querySelector('.hl-license')`)
+    await until(`!!document.querySelector('.hl-kernel') && document.querySelectorAll('.hl-user').length === 7 && !!document.querySelector('.hl-license')`)
+    // The banner counts each person once across the servers; the machines tile matches the honeycomb.
+    const kpi = (label) => js(`(() => { const k = [...document.querySelectorAll('.hl-kpi')].find((b) => b.querySelector('.hl-kpi-label').textContent === '${label}'); return k.querySelector('.hl-kpi-value').textContent + '|' + (k.querySelector('.hl-kpi-note')?.textContent ?? '') })()`)
+    assert.equal(await kpi('Signed in'), '3|1 on both servers')
+    assert.equal(await js(`document.querySelector('.hl-kpi-note') && [...document.querySelectorAll('.hl-kpi-note')].every((n) => n.scrollWidth <= n.clientWidth)`), true, 'tile notes fit')
+    assert.equal(await kpi('Machines'), '5/7|healthy')
+    assert.match(await js(`document.querySelector('#hl-kernel').textContent`), /3 people signed in now \(1 on more than one server, counted once\)/)
+    assert.equal(await js(`document.querySelectorAll('.hl-kpi').length`), 8)
+    // The kernel's memory over time where Prometheus records it: three lines, the restart, a readout; none for 02.
+    await until(`document.querySelectorAll('.hl-kchart svg').length === 1 && document.querySelectorAll('.hl-kline.allocated').length > 0`)
+    assert.ok(await js(`!!document.querySelector('.hl-kchart .hl-chart-restart') && !!document.querySelector('.hl-kchart .hl-kchart-before')`), 'the restart and the start of recording are marked')
+    assert.match(await js(`document.querySelectorAll('.hl-kernel')[0].querySelector('.hl-kernel-mem .hl-metric-note').textContent`), /since the restart at/)
+    assert.match(await js(`document.querySelectorAll('.hl-kernel')[1].querySelector('.hl-kernel-mem').textContent`), /No history for this server/)
+    await js(`(() => { const s = document.querySelector('.hl-kchart svg'); const r = s.getBoundingClientRect(); s.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width * 0.8, clientY: r.top + 50, bubbles: true })) })()`)
+    await until(`!!document.querySelector('.hl-kchart .hl-chart-tip') && document.querySelector('.hl-kchart .hl-chart-tip').textContent.includes('In use') && document.querySelector('.hl-kchart .hl-chart-tip').textContent.includes('Contexts')`)
+    await js(`document.querySelector('#hl-kernel').scrollIntoView()`)
+    await new Promise((r) => setTimeout(r, 300))
+    await screenshot('health-kernel-memory.png')
+    await js(`document.querySelector('.hl-kchart svg').dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }))`)
+    await js(`[...document.querySelectorAll('.hl-kernel-mem .hl-seg button')].find((b) => b.textContent === '7d').click()`)
+    for (let k = 0; k < 100 && !calls.some((c) => c.channel === 'health:kernelMemory' && c.args[1] === 168); k++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'health:kernelMemory' && c.args[1] === 168), 'the week asked for')
+    await js(`document.querySelector('.hl').scrollTop = 0`)
     assert.match(await js(`document.querySelector('.hl-signed-now').textContent`), /2people signed in/)
     assert.ok(await js(`[...document.querySelectorAll('.hl-user.system')].length === 2 && [...document.querySelectorAll('.hl-user.service')].length === 1`), 'system and service accounts set apart')
     // Every machine's memory on one scale, one crosshair through them all.
@@ -1243,6 +1313,19 @@ app.whenReady().then(async () => {
     assert.equal(await noSideScroll(), true, 'health fits the phone width')
     assert.equal(await pjs(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling inside health on a phone')
     await pshot('phone-health.png')
+    // A touch has no hover: the first tap on a hexagon says which machine it is, the second goes to its row.
+    await puntil(`document.querySelectorAll('.hl-hex').length === 8`)
+    await pjs(`document.querySelector('#hl-machines').scrollIntoView()`)
+    await new Promise((r) => setTimeout(r, 500))
+    const tapHex = (ip) => pjs(`(() => { const g = document.querySelector('.hl-hex[data-ip="${ip}"]'); g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
+    await tapHex('10.9.0.31')
+    await puntil(`!!document.querySelector('.hl-hex-tip') && document.querySelector('.hl-hex-tip').textContent.includes('Tap again')`)
+    assert.ok(await pjs(`document.querySelector('.hl-hex-tip').textContent.includes('3DPassport 01')`))
+    assert.equal(await pjs(`(() => { const t = document.querySelector('.hl-hex-tip').getBoundingClientRect(); return t.left >= 0 && t.right <= innerWidth })()`), true, 'the tip stays on screen')
+    await pshot('phone-health-hive.png')
+    await tapHex('10.9.0.31')
+    await puntil(`!!document.querySelector('.hl-srv.lit[data-ip="10.9.0.31"]')`)
+    await pjs(`document.querySelector('.hl').scrollTop = 0`)
     phone.setContentSize(1194, 834)
     await puntil(`innerWidth === 1194 && document.querySelector('.m-app').classList.contains('wide')`)
     await new Promise((r) => setTimeout(r, 300))

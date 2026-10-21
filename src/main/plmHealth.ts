@@ -15,10 +15,10 @@ import { CloudWatchClient, GetMetricDataCommand, ListMetricsCommand, type Metric
 import { DescribeDBInstancesCommand, RDSClient } from '@aws-sdk/client-rds'
 import type { Instance } from '@shared/types'
 import {
-  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
+  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, fullestDisk, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
   serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, isServiceAccount, parseLicense, SYSTEM_USERS, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
-  type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type Endpoint, type HostHealth, type Issue, type JvmHealth,
-  type HealthCheck, type KernelHealth, type KernelServer, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
+  type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type DiskUse, type Endpoint, type HostHealth, type Issue, type JvmHealth,
+  type HealthCheck, type KernelHealth, type KernelMemoryHistory, type KernelMemorySeries, type KernelServer, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
 } from '@shared/plmHealth'
 import { credentialsFor } from './aws/credentials'
 import { log } from './log'
@@ -282,13 +282,13 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
   const winCpu = byInstance(q.winCpu)
   const winMem = byInstance(q.winMem)
   const winMemTotal = byInstance(q.winMemTotal)
-  const disks = new Map<string, { mount: string; pct: number }[]>()
+  const disks = new Map<string, DiskUse[]>()
   const storageMap = new Map<string, StorageHealth>()
   const addDisk = (instance: string, mount: string, device: string, fstype: string, size: number, free: number, windows: boolean): void => {
     if (!(size > 0)) return
     const pct = ((size - free) / size) * 100
-    disks.set(instance, [...(disks.get(instance) ?? []), { mount, pct }])
     const shared = /^nfs|cifs|smb/i.test(fstype)
+    disks.set(instance, [...(disks.get(instance) ?? []), { mount, pct, shared }])
     const ip = ipOf(instance)
     const key = shared ? device : `${instance}|${mount}`
     const level = levelOf(pct, windows ? LIMITS.diskWindows : LIMITS.disk)
@@ -315,9 +315,8 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     const stopped = stoppedIn(inst)
     const label = nodeLabel(job)
     const roleName = role?.name ?? job
-    // The small boot partitions only count once they fill up; otherwise the fullest disk is a real one.
-    const limits = windows ? LIMITS.diskWindows : LIMITS.disk
-    const worstDisk = (disks.get(instance) ?? []).filter((d) => !/^\/boot(\/|$)/.test(d.mount) || d.pct >= limits[0]).sort((a, b) => b.pct - a.pct)[0] ?? null
+    const worstDisk = fullestDisk(disks.get(instance) ?? [], windows)
+    const sharedStores = (disks.get(instance) ?? []).filter((d) => d.shared).map((d) => ({ mount: d.mount, pct: d.pct, level: levelOf(d.pct, LIMITS.disk) }))
     const c = (windows ? winCpu : cpu).get(instance) ?? null
     const m = (windows ? winMem : mem).get(instance) ?? null
     const problems: string[] = []
@@ -339,7 +338,7 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
       state: inst ? (stopped ? 'stopped' : 'running') : 'unknown',
       reporting, os: windows ? 'windows' : 'linux',
       cpu: reporting ? c : null, mem: reporting ? m : null, memBytes: (windows ? winMemTotal : memTotal).get(instance) ?? null,
-      disk: reporting ? worstDisk : null, load: load.get(instance) ?? null, cores: cores.get(instance) ?? null, uptimeSec: uptime.get(instance) ?? null,
+      disk: reporting ? worstDisk : null, sharedStores: reporting && sharedStores.length ? sharedStores : undefined, load: load.get(instance) ?? null, cores: cores.get(instance) ?? null, uptimeSec: uptime.get(instance) ?? null,
       cpuSpark: windows ? undefined : spark(r.cpu, instance), instanceKey: inst?.key, instanceType: inst?.instanceType
     }
     hosts.push(h)
@@ -1017,6 +1016,52 @@ export async function kernelHealth(env: PlmEnvId): Promise<KernelHealth> {
   }
   const d: KernelHealth = { env, at: Date.now(), start: start * 1000, step, servers, license, gaps }
   kernelCache.set(env, { at: Date.now(), d })
+  return d
+}
+
+const kmemCache = new Map<string, { at: number; d: KernelMemoryHistory }>()
+
+/**
+ * Each 3DSpace server's kernel over a window, from the enovia_kernel_* metrics its cron script hands node_exporter's
+ * textfile collector. One machine may export another's numbers, so series are matched by their `host` label, never by
+ * the instance that served them. A failed read drops the values until the next good one, so gaps stay gaps.
+ */
+export async function kernelMemoryHistory(env: PlmEnvId, hours: number): Promise<KernelMemoryHistory> {
+  if (!ENV_ORDER.includes(env)) throw new Error('Unknown environment.')
+  const r = GC_RANGES.find((x) => x.hours === hours) ?? GC_RANGES[2]
+  const key = `${env}|${r.hours}`
+  const have = kmemCache.get(key)
+  if (have && Date.now() - have.at < (r.hours <= 1 ? 12_000 : 50_000)) return have.d
+  const jvms = (await plmHealth()).envs.find((e) => e.id === env)?.jvms ?? []
+  const targets = jvms.filter((j) => j.ip).map((j) => ({ ip: j.ip!, label: j.label, name: j.name }))
+  const port = await prometheusPort(source())
+  const end = Math.floor(Date.now() / 1000)
+  const minutes = r.hours * 60
+  // The cron script writes every few minutes: the highest value in each step keeps short peaks in long views.
+  const win = `${Math.max(r.step, 60)}s`
+  const q = (metric: string): Promise<Series[]> => range(port, `max by (host) (max_over_time(${metric}[${win}]))`, end, minutes, r.step).catch(() => [] as Series[])
+  const [allocated, reserved, highwater, contexts, users, runs] = await Promise.all([
+    q('enovia_kernel_memory_allocated_bytes'), q('enovia_kernel_memory_reserved_bytes'), q('enovia_kernel_memory_highwater_bytes'),
+    q('enovia_kernel_context_count'), q('enovia_kernel_active_users'),
+    range(port, `max by (host, pid, startdatetime) (max_over_time(enovia_kernel_info[${win}]))`, end, minutes, r.step).catch(() => [] as Series[])
+  ])
+  const start = (end - minutes * 60) * 1000
+  const n = Math.round((minutes * 60) / r.step) + 1
+  const empty = (): Spark => new Array<number | null>(n).fill(null)
+  const of = (list: Series[], ip: string): Spark => list.find((x) => ipOf(x.metric.host ?? '') === ip)?.values ?? empty()
+  const servers: KernelMemorySeries[] = []
+  for (const t of targets) {
+    const a = of(allocated, t.ip)
+    if (!a.some((v) => v !== null)) continue
+    // Each TomEE run is its own series; every run after the first one in view began with a restart.
+    const firsts = runs.filter((x) => ipOf(x.metric.host ?? '') === t.ip).map((x) => x.values.findIndex((v) => v !== null)).filter((i) => i >= 0).sort((x, y) => x - y)
+    servers.push({
+      ...t, allocated: a, reserved: of(reserved, t.ip), highwater: of(highwater, t.ip), contexts: of(contexts, t.ip), users: of(users, t.ip),
+      restarts: firsts.slice(1).map((i) => start + i * r.step * 1000)
+    })
+  }
+  const d: KernelMemoryHistory = { env, hours: r.hours, start, step: r.step, servers }
+  kmemCache.set(key, { at: Date.now(), d })
   return d
 }
 
