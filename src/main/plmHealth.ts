@@ -433,6 +433,7 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
       const stopped = stoppedIn(inst)
       const level: Level = stopped ? 'off' : s.value !== 1 ? 'unknown' : apacheUp.get(instance) === 1 ? 'ok' : 'crit'
       const label = nodeLabel(job) || (ip ? w.ipLabel.get(ip) ?? 'server' : 'server')
+      // This form is how isExporterCheck tells it from a real probe (the honeycomb leaves it out).
       const url = `http://${ip ?? instance}:9117 (Apache status)`
       const slot = byRole.get('apache') ?? { fronts: [], nodes: [] }
       slot.nodes.push({ url, level, status: level === 'ok' ? 200 : null, ms: null, label, ip, name: inst?.name ?? (ip ?? instance), stopped, instanceKey: inst?.key })
