@@ -143,7 +143,7 @@ const healthFixture = () => {
           svc('dashboard', '3DDashboard', 'ok', '2 servers up', [ep('https://dash-prod.example.com/3ddashboard/test-alive')], [node('01', '10.9.0.41'), node('02', '10.9.0.42')]),
           svc('space', '3DSpace', 'warn', '1 of 2 servers down, still served', [ep('https://space-prod.example.com/3dspace/servlet/fcs/ping', 'ok', 22)], [node('01', '10.9.0.11'), node('02', '10.9.0.12', 'crit')]),
           svc('fcs', 'File Collaboration Server', 'ok', '2 servers up', [ep('https://fcs-prod.example.com/fcs/servlet/fcs/ping')], [node('01', '10.9.0.51'), node('02', '10.9.0.52')])],
-        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11'), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51')],
+        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11'), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51', { sharedStores: [{ mount: '/filestore', pct: 86.3, level: 'crit' }] })],
         { alerts: [{ name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: 'pass-prod.example.com', since: now - 600000, level: 'crit', muted: false }, { name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: '3DPassport 02', since: now - 7200000, level: 'off', muted: true }] }),
       env('qa', 'QA', 'ok', 'All systems operational', [],
         [svc('passport', '3DPassport', 'ok', 'Up · 1 stopped', [ep('https://pass-qa.example.com/3dpassport/healthcheck')], [node('01', '10.8.0.31'), node('02', '10.8.0.32', 'crit', true)])],
@@ -455,6 +455,12 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('#hl-machines').scrollIntoView()`)
     await new Promise((r) => setTimeout(r, 500))
     await screenshot('health-hive.png')
+    // A full shared store is the store's problem (under Storage), not the machines that mount it.
+    await js(`document.querySelector('.hl-hex[data-ip="10.9.0.51"]').dispatchEvent(new PointerEvent('pointerover', { pointerType: 'mouse', bubbles: true }))`)
+    await until(`!!document.querySelector('.hl-hex-tip') && document.querySelector('.hl-hex-tip').textContent.includes('File Collaboration Server 01')`)
+    assert.ok(await js(`document.querySelector('.hl-hex[data-ip="10.9.0.51"]').classList.contains('lvl-ok')`), 'the FCS machine stays healthy')
+    assert.match(await js(`document.querySelector('.hl-hex-tip').textContent`), /Shared store \/filestore is 86% full: counted under Storage/)
+    await js(`document.querySelector('.hl-hex[data-ip="10.9.0.51"]').dispatchEvent(new PointerEvent('pointerout', { pointerType: 'mouse', bubbles: true }))`)
     await js(`document.documentElement.setAttribute('data-theme', 'light')`)
     await screenshot('health-hive-light.png')
     await js(`document.documentElement.setAttribute('data-theme', 'dark')`)

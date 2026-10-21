@@ -15,9 +15,9 @@ import { CloudWatchClient, GetMetricDataCommand, ListMetricsCommand, type Metric
 import { DescribeDBInstancesCommand, RDSClient } from '@aws-sdk/client-rds'
 import type { Instance } from '@shared/types'
 import {
-  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
+  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, fullestDisk, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
   serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, isServiceAccount, parseLicense, SYSTEM_USERS, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
-  type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type Endpoint, type HostHealth, type Issue, type JvmHealth,
+  type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type DiskUse, type Endpoint, type HostHealth, type Issue, type JvmHealth,
   type HealthCheck, type KernelHealth, type KernelServer, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
 } from '@shared/plmHealth'
 import { credentialsFor } from './aws/credentials'
@@ -282,13 +282,13 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
   const winCpu = byInstance(q.winCpu)
   const winMem = byInstance(q.winMem)
   const winMemTotal = byInstance(q.winMemTotal)
-  const disks = new Map<string, { mount: string; pct: number }[]>()
+  const disks = new Map<string, DiskUse[]>()
   const storageMap = new Map<string, StorageHealth>()
   const addDisk = (instance: string, mount: string, device: string, fstype: string, size: number, free: number, windows: boolean): void => {
     if (!(size > 0)) return
     const pct = ((size - free) / size) * 100
-    disks.set(instance, [...(disks.get(instance) ?? []), { mount, pct }])
     const shared = /^nfs|cifs|smb/i.test(fstype)
+    disks.set(instance, [...(disks.get(instance) ?? []), { mount, pct, shared }])
     const ip = ipOf(instance)
     const key = shared ? device : `${instance}|${mount}`
     const level = levelOf(pct, windows ? LIMITS.diskWindows : LIMITS.disk)
@@ -315,9 +315,8 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     const stopped = stoppedIn(inst)
     const label = nodeLabel(job)
     const roleName = role?.name ?? job
-    // The small boot partitions only count once they fill up; otherwise the fullest disk is a real one.
-    const limits = windows ? LIMITS.diskWindows : LIMITS.disk
-    const worstDisk = (disks.get(instance) ?? []).filter((d) => !/^\/boot(\/|$)/.test(d.mount) || d.pct >= limits[0]).sort((a, b) => b.pct - a.pct)[0] ?? null
+    const worstDisk = fullestDisk(disks.get(instance) ?? [], windows)
+    const sharedStores = (disks.get(instance) ?? []).filter((d) => d.shared).map((d) => ({ mount: d.mount, pct: d.pct, level: levelOf(d.pct, LIMITS.disk) }))
     const c = (windows ? winCpu : cpu).get(instance) ?? null
     const m = (windows ? winMem : mem).get(instance) ?? null
     const problems: string[] = []
@@ -339,7 +338,7 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
       state: inst ? (stopped ? 'stopped' : 'running') : 'unknown',
       reporting, os: windows ? 'windows' : 'linux',
       cpu: reporting ? c : null, mem: reporting ? m : null, memBytes: (windows ? winMemTotal : memTotal).get(instance) ?? null,
-      disk: reporting ? worstDisk : null, load: load.get(instance) ?? null, cores: cores.get(instance) ?? null, uptimeSec: uptime.get(instance) ?? null,
+      disk: reporting ? worstDisk : null, sharedStores: reporting && sharedStores.length ? sharedStores : undefined, load: load.get(instance) ?? null, cores: cores.get(instance) ?? null, uptimeSec: uptime.get(instance) ?? null,
       cpuSpark: windows ? undefined : spark(r.cpu, instance), instanceKey: inst?.key, instanceType: inst?.instanceType
     }
     hosts.push(h)

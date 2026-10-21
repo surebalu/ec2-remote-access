@@ -78,7 +78,10 @@ export interface HostHealth {
   cpu: number | null
   mem: number | null
   memBytes: number | null
+  /** The fullest of the machine's own disks (fullestDisk). */
   disk: { mount: string; pct: number } | null
+  /** Network stores it mounts (NFS, SMB): judged once under Storage, never against the machine. */
+  sharedStores?: { mount: string; pct: number; level: Level }[]
   load: number | null
   cores: number | null
   uptimeSec: number | null
@@ -510,6 +513,19 @@ export function worst(levels: Level[]): Level {
   return any ? w : levels.includes('unknown') ? 'unknown' : levels.length ? 'off' : 'unknown'
 }
 
+export interface DiskUse { mount: string; pct: number; shared: boolean }
+
+/**
+ * A machine's own fullest disk. A network store (the FCS file store on the NetApp, say) is shared by every machine
+ * that mounts it, so it is judged once under Storage rather than turning each of those machines unhealthy; the small
+ * boot partitions only count once they fill up.
+ */
+export function fullestDisk(disks: DiskUse[], windows: boolean): { mount: string; pct: number } | null {
+  const limits = windows ? LIMITS.diskWindows : LIMITS.disk
+  const own = disks.filter((d) => !d.shared && (!/^\/boot(\/|$)/.test(d.mount) || d.pct >= limits[0])).sort((a, b) => b.pct - a.pct)[0]
+  return own ? { mount: own.mount, pct: own.pct } : null
+}
+
 // ---------- reading Prometheus labels ----------
 
 /** The private address in an instance label: "10.0.2.175:9100", "ip-10-0-2-175.us-west-1…:9404", or a URL to either. */
@@ -675,6 +691,7 @@ export interface MachineCell {
   cpu: number | null
   mem: number | null
   disk: HostHealth['disk']
+  sharedStores: NonNullable<HostHealth['sharedStores']>
   checks: MachineCheck[]
   problems: string[]
   instanceKey?: string
@@ -705,7 +722,7 @@ export function machines(env: Pick<PlmEnvHealth, 'hosts' | 'services'>): Machine
     }
     byIp.set(h.ip, {
       ip: h.ip, name: h.name, title: `${h.role}${h.label ? ` ${h.label}` : ''}`, roleId: ROLES.find((r) => r.name === h.role)?.id ?? null, label: h.label,
-      level: h.level, state: h.state, reporting: h.reporting, os: h.os, cpu: h.cpu, mem: h.mem, disk: h.disk, checks: [], problems: [...h.problems],
+      level: h.level, state: h.state, reporting: h.reporting, os: h.os, cpu: h.cpu, mem: h.mem, disk: h.disk, sharedStores: h.sharedStores ?? [], checks: [], problems: [...h.problems],
       instanceKey: h.instanceKey, instanceType: h.instanceType, listed: true
     })
   }
@@ -719,7 +736,7 @@ export function machines(env: Pick<PlmEnvHealth, 'hosts' | 'services'>): Machine
         const label = n.label === 'server' || n.label === n.ip ? '' : n.label
         m = {
           ip: n.ip, name: n.name, title: `${s.name}${label ? ` ${label}` : ''}`, roleId: s.id, label, level: 'unknown', state: n.stopped ? 'stopped' : 'unknown',
-          reporting: null, os: null, cpu: null, mem: null, disk: null, checks: [], problems: [], instanceKey: n.instanceKey, listed: false
+          reporting: null, os: null, cpu: null, mem: null, disk: null, sharedStores: [], checks: [], problems: [], instanceKey: n.instanceKey, listed: false
         }
         byIp.set(n.ip, m)
       }

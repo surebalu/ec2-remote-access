@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkNote, envOf, machines, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkNote, envOf, fullestDisk, machines, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -242,4 +242,13 @@ test('an unmonitored machine that serves several services goes by its EC2 name',
   ] })
   assert.equal(cells.length, 1)
   assert.deepEqual([cells[0].title, cells[0].roleId, cells[0].checks.length], ['MSDEV-AllInOne', null, 2])
+})
+
+test("a machine is judged by its own disks: a shared store it mounts is counted once under Storage", () => {
+  const fcs = [{ mount: '/', pct: 13.4, shared: false }, { mount: '/apps/DassaultSystemes', pct: 9.5, shared: false }, { mount: '/fcsdataprod', pct: 86.3, shared: true }]
+  assert.deepEqual(fullestDisk(fcs, false), { mount: '/', pct: 13.4 })
+  // A full boot partition counts; a nearly empty one is passed over for a real disk.
+  assert.deepEqual(fullestDisk([{ mount: '/', pct: 40, shared: false }, { mount: '/boot', pct: 82, shared: false }], false), { mount: '/boot', pct: 82 })
+  assert.deepEqual(fullestDisk([{ mount: '/', pct: 40, shared: false }, { mount: '/boot/efi', pct: 60, shared: false }], false), { mount: '/', pct: 40 })
+  assert.equal(fullestDisk([{ mount: '/fcsdata', pct: 90, shared: true }], false), null)
 })

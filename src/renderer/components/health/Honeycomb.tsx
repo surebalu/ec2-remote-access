@@ -199,6 +199,9 @@ export default function Honeycomb({ env, onPick }: { env: PlmEnvHealth; onPick: 
                 </div>
               )}
               {tip.problems.length > 0 && <ul className="hl-hex-tip-problems">{tip.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+              {tip.sharedStores.filter((d) => d.level === 'warn' || d.level === 'crit').map((d) => (
+                <p key={d.mount} className="hl-hex-tip-note">Shared store {d.mount} is {formatPct(d.pct)} full: counted under Storage, not against this machine.</p>
+              ))}
               {tip.checks.length > 0 && (
                 <div className="hl-hex-tip-checks">
                   <span className="hl-mini-label">{tip.checks.length === 1 ? 'Health check on it' : `${tip.checks.length} health checks on it`}</span>
