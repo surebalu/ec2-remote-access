@@ -142,7 +142,8 @@ export const TOOL_KEYS: Partial<Record<RailSection, Record<string, string>>> = {
     'ctrl+shift+tab': 'Previous tab'
   },
   finder: {
-    'cmd+o': 'Open', 'cmd+[': 'Back', 'cmd+]': 'Forward', 'shift+cmd+n': 'New folder', 'shift+cmd+.': 'Show hidden files', 'cmd+y': 'Quick Look'
+    'cmd+o': 'Open', 'cmd+[': 'Back', 'cmd+]': 'Forward', 'shift+cmd+n': 'New folder', 'shift+cmd+.': 'Show hidden files', 'cmd+y': 'Quick Look',
+    'cmd+d': 'Duplicate', 'alt+cmd+c': 'Copy the path'
   },
   board: { 'cmd+y': 'Redo', 'cmd+[': 'Send to back', 'cmd+]': 'Bring to front', 'cmd+0': 'Fit everything' },
   notes: {

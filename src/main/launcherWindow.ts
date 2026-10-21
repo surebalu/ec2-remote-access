@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppCommand } from '@shared/types'
 import { toAccelerator } from '@shared/keyCombos'
+import { launcherBounds } from '@shared/launcher'
 import { getSettings } from './store'
 import { mainWindow } from './windows'
 
@@ -55,9 +56,11 @@ function create(): BrowserWindow {
 
 export function showLauncher(): void {
   const w = win ?? (win = create())
-  // On the screen with the pointer, a fifth of the way down, like Spotlight.
-  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
-  w.setBounds({ x: Math.round(area.x + (area.width - SIZE.width) / 2), y: Math.round(area.y + area.height * 0.18), ...SIZE })
+  // Over the app's window when the app is in front (the rail button, or the key pressed in the app); from another app,
+  // on the screen with the pointer, like Spotlight.
+  const main = mainWindow()
+  const appWindow = main && main.isVisible() && !main.isMinimized() && main.isFocused() ? main.getBounds() : null
+  w.setBounds(launcherBounds(SIZE, appWindow, appWindow && screen.getDisplayMatching(appWindow).workArea, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea))
   const reveal = (): void => {
     w.show()
     w.focus()

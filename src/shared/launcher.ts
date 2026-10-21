@@ -3,6 +3,24 @@
  * and commands, how what you open often rises, and its calculator. Pure, so tests/launcher.test.ts covers it.
  */
 
+export interface Rect { x: number; y: number; width: number; height: number }
+
+/**
+ * Where the launcher's window goes: centred over the app's window when that is in front (opened from inside the app),
+ * kept on that window's screen; otherwise on the screen with the pointer, a fifth of the way down, as Spotlight does.
+ */
+export function launcherBounds(size: { width: number; height: number }, appWindow: Rect | null, appArea: Rect | null, pointerArea: Rect): Rect {
+  const clamp = (v: number, lo: number, hi: number): number => Math.round(Math.max(lo, Math.min(v, Math.max(lo, hi))))
+  if (appWindow && appArea) {
+    return {
+      x: clamp(appWindow.x + (appWindow.width - size.width) / 2, appArea.x, appArea.x + appArea.width - size.width),
+      y: clamp(appWindow.y + (appWindow.height - size.height) / 2, appArea.y, appArea.y + appArea.height - size.height),
+      ...size
+    }
+  }
+  return { x: Math.round(pointerArea.x + (pointerArea.width - size.width) / 2), y: Math.round(pointerArea.y + pointerArea.height * 0.18), ...size }
+}
+
 /** An app on this Mac. */
 export interface LauncherApp {
   name: string

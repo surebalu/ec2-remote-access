@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { calculate, convert, formatNumber, issueKey, jiraSite, matchScore, nameQuery, rank, recentIds, recordUse, usageBoost, wantedFile } from '../src/shared/launcher.ts'
+import { launcherBounds, calculate, convert, formatNumber, issueKey, jiraSite, matchScore, nameQuery, rank, recentIds, recordUse, usageBoost, wantedFile } from '../src/shared/launcher.ts'
 
 test('names match best whole, then by their start, a word, initials, anywhere, letters in order', () => {
   const s = (q: string, t: string): number => matchScore(q, t)
@@ -113,4 +113,18 @@ test('Jira issue keys, and where your Jira is from the Browser history', () => {
   ]
   assert.deepEqual(jiraSite(pages), { base: 'https://mainspring.atlassian.net', space: 'work' })
   assert.equal(jiraSite([]), null)
+})
+
+test('the launcher opens over the app when the app is in front, else on the pointer\'s screen like Spotlight', () => {
+  const size = { width: 700, height: 446 }
+  const screen = { x: 0, y: 25, width: 1512, height: 920 }
+  // Centred on the app's window.
+  assert.deepEqual(launcherBounds(size, { x: 100, y: 60, width: 1200, height: 800 }, screen, screen), { x: 350, y: 237, width: 700, height: 446 })
+  // A window near the screen's edge (or smaller than the launcher) keeps the launcher on that screen.
+  assert.deepEqual(launcherBounds(size, { x: 1300, y: 700, width: 400, height: 300 }, screen, screen), { x: 812, y: 499, width: 700, height: 446 })
+  // A second display to the left, with the app on it.
+  const left = { x: -1920, y: 0, width: 1920, height: 1055 }
+  assert.deepEqual(launcherBounds(size, { x: -1800, y: 100, width: 1000, height: 700 }, left, screen), { x: -1650, y: 227, width: 700, height: 446 })
+  // From another app: the pointer's screen, a fifth of the way down.
+  assert.deepEqual(launcherBounds(size, null, null, screen), { x: 406, y: 191, width: 700, height: 446 })
 })

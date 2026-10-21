@@ -467,6 +467,9 @@ html[data-tabs-crowded] .titlebar .brand-name { display: none; }
 .menu-item { display: flex; width: 100%; align-items: center; gap: 8px; padding: 6px 12px; color: var(--text); text-align: left; }
 .menu-item:hover:not(:disabled) { background: var(--accent); color: #fff; }
 .menu-item:hover:not(:disabled) .muted { color: rgba(255, 255, 255, .8); }
+/* A row whose submenu is open (Open With ›) stays lit while the pointer is in the submenu. */
+.menu-item[aria-expanded='true'] { background: var(--accent); color: #fff; }
+.menu-item[aria-expanded='true'] .muted { color: rgba(255, 255, 255, .8); }
 .menu-item:disabled { opacity: .4; }
 .menu-item.on { font-weight: 600; }
 .menu-item.on::before { content: '✓'; margin-left: -4px; }
@@ -1705,6 +1708,9 @@ html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 .fi-icon { flex-shrink: 0; }
 .fi-where { flex-shrink: 1; margin-left: 6px; color: var(--muted); font-size: 11px; }
 .fi-rename { flex: 1; min-width: 0; height: 21px; padding: 0 5px; border: 1.5px solid var(--accent); border-radius: 4px; outline: none; background: var(--panel); color: var(--text); font: inherit; }
+.fi-app { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.fi-app img, .fi-app-blank { flex-shrink: 0; width: 16px; height: 16px; }
+.fi-app-blank { border-radius: 4px; background: var(--panel-2); }
 .fi-banner { padding: 8px 8px 4px; color: var(--muted); font-size: 11.5px; }
 .fi-empty { padding: 40px 16px; color: var(--muted); font-size: 12.5px; text-align: center; }
 .fi-pathbar { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 12px; overflow: hidden; border-top: 1px solid var(--border); background: var(--bg-elev); color: var(--text-2); font-size: 11.5px; white-space: nowrap; }

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactElement, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactElement, type ReactNode } from 'react'
 import type { SftpEntry } from '@shared/types'
 import {
   favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, sortEntries,
-  type FinderPlace, type FinderPlaces, type FinderSort, type RecentFile
+  type FinderPlace, type FinderPlaces, type FinderSort, type OpenWithApp, type RecentFile
 } from '@shared/finder'
 import { useStore, type Tab } from '../../store'
 import { setTabKeys, type TabKey } from '../../shortcuts'
@@ -12,7 +12,9 @@ import Popover, { MenuItem, MenuSep } from '../Popover'
 /**
  * The Finder tab: the files on this Mac with the macOS Finder's sidebar (Recents, the Favorites from Finder's own
  * sidebar plus folders added here, and Locations: iCloud Drive, cloud drives, disks), a sortable list, a path bar, Quick
- * Look and Spotlight search. Folders open in the app's Terminal; files open in their default app.
+ * Look and Spotlight search. Folders open in the app's Terminal; files open in their default app, or Open With another.
+ * Copy puts the files themselves on the clipboard, so ⌘V pastes them here or in Finder, and files copied in Finder paste
+ * here: ⌘V is Edit → Paste, which macOS treats as the user's own paste and which hands the page the files.
  */
 
 const RECENTS = 'recents'
@@ -25,6 +27,11 @@ const read = <T,>(k: string, d: T): T => { try { const v = localStorage.getItem(
 const write = (k: string, v: unknown): void => { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* storage off */ } }
 
 type Entry = SftpEntry & { lastUsed?: number }
+
+/** Open With's apps by kind of item (a file's extension, or folder), and their icons, kept for the run. */
+const appsByKind = new Map<string, OpenWithApp[]>()
+const appIcons = new Map<string, string>()
+const kindKey = (e: Pick<SftpEntry, 'name' | 'path' | 'type'>): string => (e.type === 'dir' ? '/folder' : /\.([^./]+)$/.exec(e.name)?.[1]?.toLowerCase() ?? e.path)
 
 /** A file's icon, drawn like Finder's: a blue folder, an application tile, or a page with a coloured band for its kind. */
 function FileIcon({ e, size = 18 }: { e: Pick<SftpEntry, 'name' | 'type'>; size?: number }): ReactElement {
@@ -88,6 +95,10 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
   const [results, setResults] = useState<Entry[] | null>(null)
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
   const [menu, setMenu] = useState<{ anchor: HTMLElement; entry?: Entry; place?: FinderPlace } | null>(null)
+  /** Open With's submenu: the row it opens beside, and the apps (null while they load). */
+  const [sub, setSub] = useState<HTMLElement | null>(null)
+  const [apps, setApps] = useState<OpenWithApp[] | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const [dropFav, setDropFav] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -215,6 +226,54 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
     if (!list.length) return
     void window.api.invoke('clipboard:write', list.map((e) => e.path).join('\n')).then(() => toast('success', list.length === 1 ? 'Path copied' : `${list.length} paths copied`))
   }
+  /** The files themselves onto the clipboard, as Finder's Copy: ⌘V pastes them here, in Finder, or in a mail. */
+  const copyFiles = (list = selected): void => {
+    if (!list.length) return
+    window.api.invoke('finder:copy', list.map((e) => e.path)).then(
+      () => toast('success', list.length === 1 ? `Copied “${list[0].name}”` : `Copied ${list.length} items`),
+      (e: Error) => toast('error', e.message)
+    )
+  }
+  /** Copies items into this folder (Paste) or beside themselves (Duplicate), then selects the copies. */
+  const copyInto = async (run: () => Promise<string[]>, count: number): Promise<void> => {
+    // A big folder takes a while; say so rather than look stuck.
+    const slow = setTimeout(() => toast('info', `Copying ${count === 1 ? '1 item' : `${count} items`}…`), 800)
+    try {
+      const made = await run()
+      if (loc) await load(loc, true)
+      setSel(made)
+      listRef.current?.querySelector(`[data-path="${CSS.escape(made[made.length - 1] ?? '')}"]`)?.scrollIntoView({ block: 'nearest' })
+    } catch (e) { toast('error', (e as Error).message) } finally { clearTimeout(slow) }
+  }
+  const pasteFiles = (paths: string[]): void => {
+    if (!loc || loc === RECENTS) { toast('info', 'Open a folder to paste into.'); return }
+    if (!paths.length) { toast('info', 'There are no files on the clipboard. Copy some here or in Finder (⌘C) first.'); return }
+    void copyInto(() => window.api.invoke('finder:paste', paths, loc), paths.length)
+  }
+  const duplicate = (list = selected): void => {
+    if (list.length) void copyInto(() => window.api.invoke('finder:duplicate', list.map((e) => e.path)), list.length)
+  }
+  /** The Paste menu item goes through Edit → Paste too, so it pastes exactly what ⌘V would. */
+  const pasteFromMenu = (): void => void window.api.invoke('finder:pasteCommand')
+  const openWith = (app: string | null, list = selected): void => {
+    if (!list.length) return
+    const paths = list.map((e) => e.path)
+    const done = app ? window.api.invoke('finder:openWith', paths, app) : window.api.invoke('finder:openWithOther', paths)
+    done.catch((e: Error) => toast('error', e.message))
+  }
+  /** Asks for an item's apps as its menu opens, so Open With is ready by the time the pointer gets there. */
+  const loadApps = (e: Entry): void => {
+    const key = kindKey(e)
+    const known = appsByKind.get(key)
+    if (known) { setApps(known); return }
+    setApps(null)
+    void window.api.invoke('finder:openWithApps', e.path).then(async (list) => {
+      const missing = list.map((a) => a.path).filter((p) => !appIcons.has(p))
+      if (missing.length) for (const [p, url] of Object.entries(await window.api.invoke('launcher:icons', missing).catch(() => ({})))) appIcons.set(p, url)
+      appsByKind.set(key, list)
+      setApps(list)
+    }, () => setApps([]))
+  }
   const inTerminal = (path: string): void => useStore.getState().openTerminal({ cwd: path, newTab: true })
   const setFavorite = (path: string, add: boolean): void => {
     const s = useStore.getState()
@@ -257,7 +316,9 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
       case 'n': if (k.shift) { void newFolder(); return true } return false
       case 'f': searchRef.current?.focus(); searchRef.current?.select(); return true
       case 'a': if (typing) return false; setSel(shown.map((e) => e.path)); return true
-      case 'c': if (typing || !selected.length) return false; copyPaths(); return true
+      // ⌥⌘C (Copy as Pathname in Finder) arrives as ç on a US keyboard.
+      case 'c': case 'ç': if (typing || !selected.length) return false; if (k.alt) copyPaths(); else copyFiles(); return true
+      case 'd': if (typing || !selected.length || k.shift) return false; duplicate(); return true
       case '.': if (!k.shift) return false; setShowHidden((v) => { write(HIDDEN_KEY, !v); return !v }); return true
       case 'y': quickLook(); return true
     }
@@ -296,6 +357,24 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
     return () => document.removeEventListener('keydown', down)
   }, [active])
 
+  // ⌘V (and the Paste menu item) arrive as a paste event carrying the clipboard's files, wherever they were copied.
+  const pasteRef = useRef(pasteFiles)
+  pasteRef.current = pasteFiles
+  useEffect(() => {
+    if (!active) return
+    const onPaste = (e: ClipboardEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (t && t !== document.body && !rootRef.current?.contains(t)) return
+      if (document.querySelector('.modal-backdrop')) return
+      e.preventDefault()
+      pasteRef.current([...(e.clipboardData?.files ?? [])].map((f) => window.api.pathForFile(f)).filter((p) => !!p))
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [active])
+  useEffect(() => { if (!menu) setSub(null) }, [menu])
+
   // ----- drag a folder onto Favorites -----
   const dragRow = (e: Entry) => (ev: DragEvent): void => {
     ev.dataTransfer.setData(PATH_DRAG, e.path)
@@ -313,6 +392,7 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
 
   const contextFor = (anchor: HTMLElement, entry?: Entry, place?: FinderPlace): void => {
     if (entry && !sel.includes(entry.path)) setSel([entry.path])
+    if (entry && !isBundle(entry)) loadApps(entry)
     setMenu({ anchor, entry, place })
   }
   const openMenuAt = (ev: React.MouseEvent, entry?: Entry, place?: FinderPlace): void => {
@@ -346,7 +426,7 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
   )
 
   return (
-    <div className="finder">
+    <div ref={rootRef} className="finder">
       <aside className="fi-side" aria-label="Finder sidebar">
         <button type="button" className={`fi-place ${loc === RECENTS ? 'on' : ''}`} onClick={() => go(RECENTS)}>
           <span className="fi-place-icon">{PLACE_ICONS.recents}</span>
@@ -471,27 +551,59 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
               )}
             </>
           ) : menu.entry ? (
-            <>
+            // Hovering any other row closes Open With's submenu, as in a Mac menu.
+            <div onMouseOver={(ev) => { if (!(ev.target as HTMLElement).closest('[data-submenu]')) setSub(null) }}>
               <MenuItem onClick={() => { setMenu(null); open(menu.entry!) }} hint="⌘O">Open</MenuItem>
+              {!isBundle(menu.entry) && (
+                <button type="button" data-submenu className="menu-item" aria-haspopup="menu" aria-expanded={!!sub} onMouseEnter={(ev) => setSub(ev.currentTarget)} onClick={(ev) => setSub(ev.currentTarget)}>
+                  <span className="min-w-0 flex-1 truncate text-left">Open With</span>
+                  <span className="muted shrink-0 text-[11px]">›</span>
+                </button>
+              )}
               <MenuItem onClick={() => { setMenu(null); quickLook() }} hint="Space">Quick Look</MenuItem>
               <MenuItem onClick={() => { setMenu(null); inTerminal(menu.entry!.type === 'dir' && !isBundle(menu.entry!) ? menu.entry!.path : parentOf(menu.entry!.path)) }}>Open in Terminal</MenuItem>
               <MenuItem onClick={() => { setMenu(null); void window.api.invoke('local:reveal', menu.entry!.path) }}>Show in Finder</MenuItem>
               <MenuSep />
-              <MenuItem onClick={() => { setMenu(null); copyPaths() }} hint="⌘C">{selected.length > 1 ? `Copy ${selected.length} Paths` : 'Copy Path'}</MenuItem>
+              <MenuItem onClick={() => { setMenu(null); copyFiles() }} hint="⌘C">{selected.length > 1 ? `Copy ${selected.length} Items` : 'Copy'}</MenuItem>
+              <MenuItem onClick={() => { setMenu(null); copyPaths() }} hint="⌥⌘C">{selected.length > 1 ? `Copy ${selected.length} Paths` : 'Copy Path'}</MenuItem>
+              <MenuItem onClick={() => { setMenu(null); duplicate() }} hint="⌘D">Duplicate</MenuItem>
+              <MenuItem disabled={!loc || loc === RECENTS} onClick={() => { setMenu(null); pasteFromMenu() }} hint="⌘V">Paste</MenuItem>
+              <MenuSep />
               {selected.length === 1 && loc !== RECENTS && <MenuItem onClick={() => { setMenu(null); setRenaming({ path: menu.entry!.path, value: menu.entry!.name }) }} hint="↩">Rename</MenuItem>}
               {menu.entry.type === 'dir' && !isBundle(menu.entry) && !isFavorite(menu.entry.path) && <MenuItem onClick={() => { setMenu(null); setFavorite(menu.entry!.path, true) }}>Add to Favorites</MenuItem>}
-              <MenuSep />
               <MenuItem danger onClick={() => { setMenu(null); void trash() }} hint="⌘⌫">Move to Trash</MenuItem>
-            </>
+            </div>
           ) : (
             <>
               <MenuItem disabled={!loc || loc === RECENTS} onClick={() => { setMenu(null); void newFolder() }} hint="⌘⇧N">New Folder</MenuItem>
+              <MenuItem disabled={!loc || loc === RECENTS} onClick={() => { setMenu(null); pasteFromMenu() }} hint="⌘V">Paste</MenuItem>
+              <MenuSep />
               <MenuItem disabled={!loc || loc === RECENTS} onClick={() => { setMenu(null); if (loc) inTerminal(loc) }}>Open in Terminal</MenuItem>
               <MenuItem disabled={!loc || loc === RECENTS} onClick={() => { setMenu(null); if (loc) void window.api.invoke('local:reveal', loc) }}>Show in Finder</MenuItem>
               <MenuSep />
               <MenuItem on={showHidden} onClick={() => { setMenu(null); setShowHidden((v) => { write(HIDDEN_KEY, !v); return !v }) }} hint="⌘⇧.">Show Hidden Files</MenuItem>
             </>
           )}
+        </Popover>
+      )}
+      {menu?.entry && sub && (
+        // Re-placed once the apps arrive, since the list changes its height.
+        <Popover key={apps ? 'apps' : 'loading'} anchor={sub} side width={250} onClose={() => setSub(null)}>
+          {!apps && <div className="muted px-3 py-1.5">Looking for apps…</div>}
+          {apps && !apps.length && <div className="muted px-3 py-1.5">No app says it opens this.</div>}
+          {apps?.map((a, i) => (
+            <Fragment key={a.path}>
+              <MenuItem title={a.path} onClick={() => { setMenu(null); openWith(a.path) }}>
+                <span className="fi-app">
+                  {appIcons.get(a.path) ? <img src={appIcons.get(a.path)} alt="" /> : <span className="fi-app-blank" />}
+                  <span className="truncate">{a.name}{a.isDefault && <span className="muted"> (default)</span>}</span>
+                </span>
+              </MenuItem>
+              {a.isDefault && i === 0 && apps.length > 1 && <MenuSep />}
+            </Fragment>
+          ))}
+          <MenuSep />
+          <MenuItem onClick={() => { setMenu(null); openWith(null) }}>Other…</MenuItem>
         </Popover>
       )}
     </div>

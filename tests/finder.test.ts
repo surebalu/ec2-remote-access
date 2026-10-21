@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cloudName, displayPath, favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, placeKind, sortEntries } from '../src/shared/finder.ts'
+import { cloudName, copyName, displayPath, favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, placeKind, sortEntries } from '../src/shared/finder.ts'
 
 const e = (name: string, type: 'file' | 'dir' = 'file', size = 0, mtime = 0) => ({ name, path: `/x/${name}`, type, size, mtime, mode: 0 })
 
@@ -70,4 +70,19 @@ test('folders read short in the launcher: cloud drives by name, home as ~, long 
   const long = displayPath('/Users/me/Documents/Surendra-Personal/codebase/Mainspring/remote-access-tool/src/renderer/launcher', home, 40)
   assert.ok(long.length <= 40, long)
   assert.ok(long.startsWith('~/…/') && long.endsWith('/renderer/launcher'), long)
+})
+
+test('copies are named as Finder names them, and never take a name already there', () => {
+  // Beside the original (Duplicate, or Paste into the same folder).
+  assert.equal(copyName('report.pdf', false, ['report.pdf'], true), 'report copy.pdf')
+  assert.equal(copyName('report.pdf', false, ['report.pdf', 'Report Copy.pdf'], true), 'report copy 2.pdf')
+  assert.equal(copyName('report copy.pdf', false, ['report.pdf', 'report copy.pdf'], true), 'report copy 2.pdf')
+  assert.equal(copyName('report copy 2.pdf', false, ['report copy.pdf', 'report copy 2.pdf'], true), 'report copy 3.pdf')
+  // Folders keep their dots; bundles and dotfiles too.
+  assert.equal(copyName('v1.2 notes', true, ['v1.2 notes'], true), 'v1.2 notes copy')
+  assert.equal(copyName('Notes.app', false, ['Notes.app'], true), 'Notes copy.app')
+  assert.equal(copyName('.zshrc', false, ['.zshrc'], true), '.zshrc copy')
+  // Into another folder: the same name when free, else keep both.
+  assert.equal(copyName('report.pdf', false, ['other.pdf'], false), 'report.pdf')
+  assert.equal(copyName('report.pdf', false, ['REPORT.pdf', 'report 2.pdf'], false), 'report 3.pdf')
 })

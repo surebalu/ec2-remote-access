@@ -29,7 +29,7 @@ import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
-import { finderPlaces, finderRecents, finderSearch } from './finder'
+import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
@@ -187,6 +187,20 @@ export const handlers: Handlers = {
   'finder:places': () => finderPlaces(),
   'finder:recents': () => finderRecents(),
   'finder:search': (query, dir) => finderSearch(query, dir),
+  'finder:openWithApps': (path) => finderOpenWithApps(path),
+  'finder:openWith': (paths, app) => finderOpenWith(paths, app),
+  'finder:openWithOther': async (paths) => {
+    const app = (await host().pickPaths({ title: 'Choose an app to open the item with', kind: 'file', buttonLabel: 'Open' }))?.[0]
+    if (app) await finderOpenWith(paths, app)
+  },
+  'finder:copy': async (paths) => {
+    if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string' && p.startsWith('/'))) throw new Error('Nothing to copy.')
+    if (!host().copyFiles) throw new Error('Copying files needs the Mac app.')
+    await host().copyFiles!(paths)
+  },
+  'finder:paste': (paths, dir) => finderPaste(paths, dir),
+  'finder:duplicate': (paths) => finderDuplicate(paths),
+  'finder:pasteCommand': async () => host().paste?.(),
   'browser:openDownload': async (path, how) => {
     const dir = host().downloadsDir()
     if (!dir) return

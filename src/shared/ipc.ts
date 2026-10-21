@@ -1,4 +1,4 @@
-import type { FinderPlaces, RecentFile } from './finder'
+import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -71,6 +71,16 @@ export interface IpcApi {
   'finder:places': () => Promise<FinderPlaces>
   'finder:recents': () => Promise<RecentFile[]>
   'finder:search': (query: string, dir: string) => Promise<RecentFile[]>
+  /** Open With: the apps that can open an item (the default first), opening items in one, or in one picked from a dialog. */
+  'finder:openWithApps': (path: string) => Promise<OpenWithApp[]>
+  'finder:openWith': (paths: string[], app: string) => Promise<void>
+  'finder:openWithOther': (paths: string[]) => Promise<void>
+  /** Copy puts the files themselves on the clipboard; Paste and Duplicate copy items into a folder and return the new paths. */
+  'finder:copy': (paths: string[]) => Promise<void>
+  'finder:paste': (paths: string[], dir: string) => Promise<string[]>
+  'finder:duplicate': (paths: string[]) => Promise<string[]>
+  /** The Paste menu item: Edit → Paste in the window, which hands the tab the clipboard's files through a paste event. */
+  'finder:pasteCommand': () => Promise<void>
   'sftp:cancel': (transferId: string) => Promise<void>
   'sftp:transfers': (sessionId: string) => Promise<SftpTransfer[]>
   'sftp:clearTransfers': (sessionId: string) => Promise<void>

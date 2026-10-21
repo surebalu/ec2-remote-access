@@ -87,7 +87,9 @@ export const FINDER_SHORTCUTS: ShortcutInfo[] = [
   { keys: 'Space', label: 'Quick Look' },
   { keys: '↩', label: 'Rename' },
   { keys: '⌘⇧N / ⌘⌫', label: 'New folder / move to the Trash' },
-  { keys: '⌘F / ⌘C / ⌘A', label: 'Search this folder (Spotlight) / copy the path / select all' },
+  { keys: '⌘C / ⌘V / ⌘D', label: 'Copy the files / paste here (from this tab or Finder) / duplicate' },
+  { keys: '⌥⌘C', label: 'Copy the path' },
+  { keys: '⌘F / ⌘A', label: 'Search this folder (Spotlight) / select all' },
   { keys: '⌘⇧.', label: 'Show or hide hidden files' }
 ]
 

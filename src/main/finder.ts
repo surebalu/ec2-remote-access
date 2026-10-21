@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { existsSync, lstatSync, readdirSync, statSync, realpathSync } from 'node:fs'
+import { cp } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
-import type { FinderPlace, FinderPlaces, RecentFile } from '@shared/finder'
-import { cloudName, placeKind } from '@shared/finder'
+import { basename, dirname, join } from 'node:path'
+import type { FinderPlace, FinderPlaces, OpenWithApp, RecentFile } from '@shared/finder'
+import { cloudName, copyName, isBundle, placeKind } from '@shared/finder'
 import { getSettings } from './store'
 
 /**
@@ -133,4 +134,87 @@ export async function finderSearch(query: string, dir: string, limit = 300): Pro
     } catch { /* gone */ }
   }
   return out
+}
+
+// The default app first, then every other app Launch Services says can open the item (macOS 12+), by display name.
+const OPEN_WITH_JXA = `
+ObjC.import('AppKit')
+function run(argv) {
+  const ws = $.NSWorkspace.sharedWorkspace
+  const fm = $.NSFileManager.defaultManager
+  const url = $.NSURL.fileURLWithPath(argv[0])
+  const out = []
+  const add = (u, isDefault) => {
+    if (!u || u.isNil()) return
+    const path = u.path.js
+    out.push({ path, name: fm.displayNameAtPath(path).js.replace(/\\.app$/, ''), isDefault })
+  }
+  add(ws.URLForApplicationToOpenURL(url), true)
+  const all = ws.URLsForApplicationsToOpenURL ? ws.URLsForApplicationsToOpenURL(url) : $()
+  for (let i = 0; i < (all.count || 0); i++) add(all.objectAtIndex(i), false)
+  return JSON.stringify(out)
+}`
+
+/** The apps that can open an item, for Open With: the default first, then the rest by name, each app once. */
+export async function finderOpenWithApps(path: string): Promise<OpenWithApp[]> {
+  if (process.platform !== 'darwin' || typeof path !== 'string' || !path.startsWith('/') || !existsSync(path)) return []
+  let found: OpenWithApp[]
+  try { found = JSON.parse((await run('osascript', ['-l', 'JavaScript', '-e', OPEN_WITH_JXA, path])).trim() || '[]') as OpenWithApp[] } catch { return [] }
+  // The same app can be registered from more than one place (/Applications and a system cryptex): show it once,
+  // preferring the copy in /Applications.
+  const byName = new Map<string, OpenWithApp>()
+  for (const a of found) {
+    const had = byName.get(a.name)
+    if (!had) byName.set(a.name, a)
+    else if (a.isDefault || (!had.isDefault && a.path.startsWith('/Applications/') && !had.path.startsWith('/Applications/'))) byName.set(a.name, { ...a, isDefault: a.isDefault || had.isDefault })
+  }
+  const list = [...byName.values()]
+  return [...list.filter((a) => a.isDefault), ...list.filter((a) => !a.isDefault).sort((a, b) => a.name.localeCompare(b.name))]
+}
+
+const existing = (paths: unknown): string[] => {
+  if (!Array.isArray(paths) || !paths.length) throw new Error('Nothing is selected.')
+  for (const p of paths) if (typeof p !== 'string' || !p.startsWith('/') || !existsSync(p)) throw new Error(`“${basename(String(p))}” is no longer there.`)
+  return paths as string[]
+}
+
+/** Opens items in the given app (Open With). */
+export async function finderOpenWith(paths: string[], app: string): Promise<void> {
+  const items = existing(paths)
+  if (typeof app !== 'string' || !/\.app\/?$/i.test(app) || !isDir(app)) throw new Error('That app is no longer there.')
+  await run('open', ['-a', app, ...items], 15_000)
+}
+
+const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
+
+/**
+ * Copies items into a folder, as Finder's Paste and Duplicate do, and returns their new paths. It never replaces
+ * anything: an item beside its original is "name copy", one whose name is taken there keeps both ("name 2"). On a
+ * Mac with ditto, which keeps what Finder keeps (extended attributes, app bundles' links and signatures).
+ */
+export async function finderPaste(paths: string[], dir: string): Promise<string[]> {
+  const items = existing(paths)
+  if (typeof dir !== 'string' || !dir.startsWith('/') || !isDir(dir)) throw new Error('Open a folder to paste into.')
+  const into = real(dir)
+  const taken = readdirSync(dir)
+  const made: string[] = []
+  for (const p of items) {
+    const from = real(p)
+    if (into === from || into.startsWith(`${from}/`)) throw new Error(`“${basename(p)}” cannot be copied into itself.`)
+    const plainFolder = isDir(p) && !isBundle({ name: basename(p), type: 'dir' })
+    const name = copyName(basename(p), plainFolder, taken, real(dirname(p)) === into)
+    const to = join(dir, name)
+    if (process.platform === 'darwin') await run('ditto', [p, to], 0)
+    else await cp(p, to, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true, verbatimSymlinks: true })
+    taken.push(name)
+    made.push(to)
+  }
+  return made
+}
+
+/** Duplicate: each item copied beside itself. */
+export async function finderDuplicate(paths: string[]): Promise<string[]> {
+  const made: string[] = []
+  for (const p of existing(paths)) made.push(...(await finderPaste([p], dirname(p))))
+  return made
 }
