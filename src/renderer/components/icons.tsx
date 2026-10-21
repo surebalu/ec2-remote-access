@@ -379,6 +379,33 @@ export const Icon = {
       <path d="M3 12h4l3-8 4 16 3-8h4" />
     </svg>
   ),
+  /** A heart with a pulse through it: the Health tab. */
+  health: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M12 20.5s-7.5-4.6-9.2-9.6C1.6 7.3 3.9 4 7.3 4c2 0 3.6 1.1 4.7 2.7C13.1 5.1 14.7 4 16.7 4c3.4 0 5.7 3.3 4.5 6.9C19.5 15.9 12 20.5 12 20.5z" />
+      <path d="M3.5 12.5h4.2l1.6-2.8 2.6 5.3 1.9-3.6h6.7" />
+    </svg>
+  ),
+  database: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
+      <path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8" />
+    </svg>
+  ),
+  disk: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="13" width="18" height="7" rx="2" />
+      <path d="M3 15l2.6-9.2A2 2 0 0 1 7.5 4.4h9a2 2 0 0 1 1.9 1.4L21 15M7 16.5h.01M11 16.5h6" />
+    </svg>
+  ),
+  /** Arrows fanning out from one point: a load balancer. */
+  balancer: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="5" cy="12" r="2.2" />
+      <path d="M7.2 12H11l4.5-6H19M11 12h8M11 12l4.5 6H19" />
+      <path d="M17.2 4.2 19 6l-1.8 1.8M17.2 10.2 19 12l-1.8 1.8M17.2 16.2 19 18l-1.8 1.8" />
+    </svg>
+  ),
   x: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M6 6l12 12M18 6 6 18" />

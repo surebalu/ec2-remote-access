@@ -16,6 +16,7 @@ import { handlers } from '../main/handlers'
 import { closeAllSsh } from '../main/ssh/session'
 import { closeAllSftp } from '../main/sftp/session'
 import { closeAllTunnels } from '../main/tunnels'
+import { closePlmHealth } from '../main/plmHealth'
 import { releaseAllRdp } from '../main/rdp/sessions'
 import { ensureProxy, stopProxy } from '../main/rdp/cleanpath'
 import { createGatewayHost } from './host'
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     closing = true
     log('[gateway] shutting down')
     closeAllLocal()
-    Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels()])
+    Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), closePlmHealth()])
       .then(() => stopProxy())
       .catch(() => undefined)
       .then(() => gateway.close())

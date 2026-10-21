@@ -130,7 +130,7 @@ export interface TabKey {
 export type BrowserKey = TabKey
 
 /** The Browser, Terminal, Whiteboard, Finder and chat tabs claim their keys (⌘T, ⌘W, ⌘D, ⌘1…) while they are the active tab. */
-type KeyedKind = 'browser' | 'local' | 'board' | 'finder' | 'claude' | 'chatgpt'
+type KeyedKind = 'browser' | 'local' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health'
 const tabKeys: Partial<Record<KeyedKind, (k: TabKey) => boolean>> = {}
 
 /** Registers (or with null removes) the key handler of an app tab kind; it returns whether it used the key. */

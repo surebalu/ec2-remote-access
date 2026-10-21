@@ -55,8 +55,8 @@ export interface BrowserRequest {
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
-export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt'
-export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT' }
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health'
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health' }
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
 export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'claude', 'chatgpt']
 const inElectron = /\bElectron\//.test(navigator.userAgent)
@@ -361,6 +361,7 @@ export const useStore = create<State>((set, get) => ({
     else if (kind === 'notes') s.openNotes()
     else if (kind === 'finder') s.openFinder()
     else if (kind === 'board') s.openBoard()
+    else if (kind === 'health') s.setActive(s.toolTab('health'))
     else if (inElectron) s.setActive(s.toolTab(kind))
     else void window.api.invoke('shell:open', WEB_APPS[kind].home)
   },
@@ -853,7 +854,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || (tab && isWebApp(tab.kind))) { /* nothing in main to close: they save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'health' || (tab && isWebApp(tab.kind))) { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)

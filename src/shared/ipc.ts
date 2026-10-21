@@ -1,4 +1,5 @@
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
+import type { PlmHealthSnapshot } from './plmHealth'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -98,6 +99,8 @@ export interface IpcApi {
   /** SSM port forward to the instance (or remoteHost through it); resolves once it is listening. */
   'tunnels:open': (req: PortForwardRequest) => Promise<Tunnel>
   'ec2:health': (instanceKey: string) => Promise<HostHealth>
+  /** The Health tab: the 3DEXPERIENCE platform per environment (cached 20 s; `force` reads again). */
+  'health:snapshot': (force?: boolean) => Promise<PlmHealthSnapshot>
   'ec2:password': (instanceKey: string, pemFile?: string) => Promise<WindowsPasswordResult>
   'ec2:start': (instanceKey: string) => Promise<void>
   'ec2:stop': (instanceKey: string) => Promise<void>

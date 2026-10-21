@@ -72,14 +72,14 @@ interface Data {
 const EMPTY: Data = { apps: [], usage: {}, settings: null, hosts: [], profiles: [], browser: null, home: '' }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  hosts: Icon.server, overview: Icon.grid, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_ABOUT: Record<RailSection, string> = {
-  hosts: 'Every account’s hosts', overview: 'All open sessions on one page', local: 'Shells on this Mac', finder: 'Files on this Mac',
+  hosts: 'Every account’s hosts', overview: 'All open sessions on one page', health: 'The 3DEXPERIENCE platform at a glance', local: 'Shells on this Mac', finder: 'Files on this Mac',
   browser: 'AWS console spaces and web tabs', notes: 'Your Markdown notes', board: 'The scratch pad', claude: 'Chat, signed in on its own', chatgpt: 'Chat, signed in on its own'
 }
 const SECTION_WORDS: Record<RailSection, string> = {
-  hosts: 'instances servers ec2 list', overview: 'all sessions grid', local: 'shell zsh console warp', finder: 'files folders', browser: 'web tabs arc',
+  hosts: 'instances servers ec2 list', overview: 'all sessions grid', health: 'status monitoring 3dexperience prometheus grafana alerts', local: 'shell zsh console warp', finder: 'files folders', browser: 'web tabs arc',
   notes: 'obsidian markdown', board: 'whiteboard draw sketch', claude: 'ai chat anthropic', chatgpt: 'ai chat openai gpt'
 }
 
@@ -317,7 +317,7 @@ export default function Launcher(): ReactElement {
         actions: [{ title: 'Open a Terminal Tab', key: 'enter', run: inApp(id, { kind: 'terminal', profile: p.name }) }]
       }
     })
-  ], [data, keys.hosts, keys.overview, keys.local, keys.finder, keys.browser, keys.notes, keys.board, keys.claude, keys.chatgpt]) // eslint-disable-line react-hooks/exhaustive-deps
+  ], [data, keys.hosts, keys.overview, keys.health, keys.local, keys.finder, keys.browser, keys.notes, keys.board, keys.claude, keys.chatgpt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Browser favorites and pinned tabs (each opens in its own space), then pages from history, newest of each address. */
   const webRows: Row[] = useMemo(() => {

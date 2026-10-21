@@ -29,6 +29,7 @@ import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
+import { plmHealth } from './plmHealth'
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
@@ -131,6 +132,7 @@ export const handlers: Handlers = {
   'tunnels:close': (id) => closeTunnel(id),
   'tunnels:open': (req) => openPortForward(req),
   'ec2:health': (key) => hostHealth(key),
+  'health:snapshot': (force) => plmHealth(!!force),
   'ec2:password': (key, pem) => windowsPassword(key, pem),
   'ec2:start': (key) => setInstanceState(key, 'start'),
   'ec2:stop': (key) => setInstanceState(key, 'stop'),

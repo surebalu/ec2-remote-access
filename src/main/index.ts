@@ -10,6 +10,7 @@ import { closeAllTunnels } from './tunnels'
 import { closeAllLocal } from './localterm'
 import { closeAllVoice } from './voice'
 import { closeOnePassword } from './onepassword'
+import { closePlmHealth } from './plmHealth'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
@@ -114,7 +115,7 @@ app.on('before-quit', (e) => {
   closeAllLocal()
   closeAllVoice()
   closeOnePassword()
-  Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess()])
+  Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth()])
     .then(() => stopProxy())
     .catch(() => undefined)
     .finally(() => app.quit())
