@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import {
-  ENV_NAMES, LIMITS, ago, formatBytes, formatDuration, formatMs, formatPct, levelOf, worst,
-  type AlbHealth, type HostHealth, type Issue, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth
+  GC_RANGES, LIMITS, ago, formatBytes, formatDuration, formatMs, formatPct, levelOf, worst,
+  type AlbHealth, type HealthCheck, type HostHealth, type Issue, type JvmGcDetail, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth
 } from '@shared/plmHealth'
 import { useStore, type Tab } from '../../store'
 import { setTabKeys, type TabKey } from '../../shortcuts'
@@ -9,6 +9,8 @@ import { openSshFor } from '../../quickConnect'
 import { Icon } from '../icons'
 import Popover from '../Popover'
 import { Bar, Dot, Empty, Gauge, Pill, SectionHead, Spark, StatusRing, lvl } from './parts'
+import HeapChart from './HeapChart'
+import MemoryGrid from './MemoryGrid'
 
 /**
  * The Health tab: the 3DEXPERIENCE platform at a glance, one environment at a time, from main/plmHealth.ts. It reads
@@ -146,7 +148,7 @@ export default function HealthTab({ active }: { tab: Tab; active: boolean }): Re
       {snap && error && (
         <div className="hl-banner lvl-warn"><Icon.alert /><span className="min-w-0 flex-1">Could not refresh ({error}). Showing what was read {ago(snap.at, now)}.</span><button type="button" className="hl-btn sm" onClick={() => void load(true)}>Try again</button></div>
       )}
-      {env && <EnvView env={env} now={now} onJump={jump} />}
+      {env && <EnvView env={env} now={now} active={active} onJump={jump} />}
 
       {snap && (
         <footer className="hl-foot">
@@ -164,7 +166,7 @@ export default function HealthTab({ active }: { tab: Tab; active: boolean }): Re
 
 // ---------- one environment ----------
 
-function EnvView({ env, now, onJump }: { env: PlmEnvHealth; now: number; onJump: (section: string) => void }): ReactElement {
+function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number; active: boolean; onJump: (section: string) => void }): ReactElement {
   const services = env.services
   const upServices = services.filter((s) => s.level === 'ok' || s.level === 'warn').length
   const running = env.hosts.filter((h) => h.state !== 'stopped').length
@@ -173,6 +175,8 @@ function EnvView({ env, now, onJump }: { env: PlmEnvHealth; now: number; onJump:
   const alerts = env.alerts.filter((a) => !a.muted)
   const errors = front ? (front.target5xx ?? 0) + (front.elb5xx ?? 0) : null
   const frontMs = front?.responseMs ?? avgFront(services)
+  const checks = env.checks ?? []
+  const [showChecks, setShowChecks] = useState(false)
   return (
     <div className="hl-body" key={env.id}>
       <section className={`hl-hero ${lvl(env.level)}`}>
@@ -197,18 +201,22 @@ function EnvView({ env, now, onJump }: { env: PlmEnvHealth; now: number; onJump:
         {env.issues.length > 0 && <Issues issues={env.issues} onJump={onJump} />}
       </section>
 
-      <SectionHead id="hl-services" icon={<Icon.layers />} title="Services" sub="Through the load balancer, and on each server" />
+      <SectionHead id="hl-services" icon={<Icon.layers />} title="Services" sub="Each one's health-check URL, through the load balancer and on each server"
+        right={checks.length ? <button type="button" className="hl-link" aria-expanded={showChecks} onClick={() => setShowChecks(!showChecks)}>{showChecks ? 'Hide' : 'All'} health checks ({checks.length})</button> : undefined} />
       <div className="hl-grid services">
         {services.map((s) => <ServiceCard key={s.id} s={s} />)}
         {!services.length && <Empty>No service checks for this environment.</Empty>}
       </div>
+      {showChecks && <Checks checks={checks} />}
 
       {env.jvms.length > 0 && (
         <>
-          <SectionHead id="hl-jvm" icon={<Icon.activity />} title="3DSpace application servers" sub="Java heap, garbage collection and threads (JMX)" />
-          <div className="hl-grid jvms">{env.jvms.map((j) => <JvmCard key={`${j.ip}${j.label}`} j={j} />)}</div>
+          <SectionHead id="hl-jvm" icon={<Icon.activity />} title="3DSpace application servers" sub="Heap and garbage collection: a healthy saw-tooth drops back to the same floor after every collection" />
+          <div className="hl-jvms">{env.jvms.map((j) => <JvmPanel key={`${j.ip}${j.label}`} j={j} active={active} />)}</div>
         </>
       )}
+
+      <MemoryGrid env={env.id} active={active} />
 
       <div className="hl-split">
         <div className="min-w-0">
@@ -232,6 +240,29 @@ function EnvView({ env, now, onJump }: { env: PlmEnvHealth; now: number; onJump:
       <Servers env={env} />
       <Alerts env={env} now={now} />
       <Certs env={env} />
+    </div>
+  )
+}
+
+/** Every URL the monitoring server checks for this environment, as Grafana's HTTP monitoring table lists them. */
+function Checks({ checks }: { checks: HealthCheck[] }): ReactElement {
+  return (
+    <div className="hl-card hl-list hl-checks">
+      <div className="hl-chk-head" aria-hidden="true"><span>Service</span><span>Check</span><span>URL</span><span>Status</span><span>Response</span><span>DNS</span><span>Certificate</span></div>
+      {checks.map((c) => (
+        <div key={c.url} className={`hl-row hl-chk ${lvl(c.level)} ${c.stopped ? 'off' : ''}`}>
+          <span className="hl-row-title"><Dot level={c.level} /><span className="truncate">{c.service}</span></span>
+          <span className="hl-chk-via">{c.via === 'lb' ? 'Load balancer' : `Server ${c.label}`}</span>
+          <span className="hl-chk-url" title={c.note ? `${c.url}\n${c.note}` : c.url}>
+            <span className="truncate">{c.url.replace(/^https?:\/\//, '').replace(/\.us-west-\d\.compute\.internal/, '')}</span>
+            {c.note && <span className="hl-chip hl-chk-note" title={c.note}>page only</span>}
+          </span>
+          <span className="hl-chk-status" data-label="Status">{c.stopped ? <Pill level="off">stopped</Pill> : c.broken ? <Pill level="unknown">not running</Pill> : <Pill level={c.level}>{c.status ? `HTTP ${c.status}` : 'no answer'}</Pill>}</span>
+          <span className="hl-chk-num" data-label="Response">{formatMs(c.ms)}</span>
+          <span className="hl-chk-num" data-label="DNS">{c.dnsMs === null ? '–' : formatMs(c.dnsMs)}</span>
+          <span className="hl-chk-num" data-label="Certificate">{c.certDays === null ? '–' : `${c.certDays} days`}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -285,7 +316,7 @@ function ServiceCard({ s }: { s: ServiceHealth }): ReactElement {
           <h4 title={s.name}>{s.name}</h4>
           <p>{s.blurb}</p>
         </div>
-        <Pill level={s.level}>{s.level === 'ok' ? 'Up' : s.level === 'warn' ? 'Degraded' : undefined}</Pill>
+        <Pill level={s.level}>{s.level === 'ok' ? 'Up' : s.level === 'warn' ? 'Degraded' : s.level === 'unknown' ? 'Not checked' : undefined}</Pill>
       </div>
       <div className="hl-svc-mid">
         <div>
@@ -311,37 +342,114 @@ function ServiceCard({ s }: { s: ServiceHealth }): ReactElement {
   )
 }
 
-function JvmCard({ j }: { j: PlmEnvHealth['jvms'][number] }): ReactElement {
-  const heapLevel = j.reporting ? levelOf(j.heapPct, LIMITS.heap) : j.level
+/** The heap chart's range, remembered; and what each JVM's chart last showed, so switching back is instant. */
+const GC_KEY = 'ui.health.gcHours'
+const gcSeen = new Map<string, JvmGcDetail>()
+const readHours = (): number => { try { const n = Number(localStorage.getItem(GC_KEY)); return GC_RANGES.some((r) => r.hours === n) ? n : 24 } catch { return 24 } }
+
+function JvmPanel({ j, active }: { j: PlmEnvHealth['jvms'][number]; active: boolean }): ReactElement {
+  const [hours, setHours] = useState(readHours)
+  const key = `${j.promInstance}|${hours}`
+  const [d, setD] = useState<JvmGcDetail | null>(gcSeen.get(key) ?? null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const narrow = typeof window !== 'undefined' && window.matchMedia('(max-width: 600px)').matches
+  useEffect(() => {
+    if (!j.reporting) return
+    setD(gcSeen.get(key) ?? null)
+    let gone = false
+    const load = (): void => {
+      setLoading(true)
+      window.api.invoke('health:gc', j.promInstance, hours).then(
+        (x) => { gcSeen.set(key, x); if (!gone) { setD(x); setError(null) } },
+        (e: Error) => { if (!gone) setError(e.message) }
+      ).finally(() => { if (!gone) setLoading(false) })
+    }
+    if (active) load()
+    const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, hours <= 1 ? 15_000 : 60_000)
+    return () => { gone = true; clearInterval(t) }
+  }, [key, active, j.reporting]) // eslint-disable-line react-hooks/exhaustive-deps
+  const pick = (h: number): void => { setHours(h); try { localStorage.setItem(GC_KEY, String(h)) } catch { /* storage off */ } }
+
+  if (!j.reporting) {
+    return (
+      <article className={`hl-card hl-jvm-panel ${lvl(j.level)}`}>
+        <div className="hl-card-head"><h4>3DSpace {j.label}</h4><span className="hl-card-sub">{j.name}</span><span className="flex-1" /><Pill level={j.level}>{j.level === 'off' ? 'Stopped' : 'No metrics'}</Pill></div>
+        <p className="hl-card-note">{j.level === 'off' ? 'The server is stopped in EC2.' : 'The JMX exporter on this server does not answer, so its heap and collections cannot be read.'}</p>
+      </article>
+    )
+  }
+  // A leak shows over a day or more: shorter views keep the last day's verdict and slope.
+  const trend = hours >= 24 ? (d?.trend ?? j.trend) : (j.trend ?? d?.trend)
+  const partial = d?.collectors.filter((c) => !c.full) ?? []
+  const full = d?.collectors.filter((c) => c.full) ?? []
+  const sum = (cs: typeof partial, f: (c: (typeof partial)[number]) => number): number => cs.reduce((a, c) => a + f(c), 0)
+  const avgMs = (cs: typeof partial): number | null => { const n = sum(cs, (c) => c.count); return n ? (sum(cs, (c) => c.seconds) / n) * 1000 : null }
+  const slope = trend?.slopePerDay ?? null
+  const slopeText = slope === null ? '–' : Math.abs(slope) < 0.02 * (j.heapMax ?? 8 * 1024 ** 3) ? 'flat' : `${slope > 0 ? '+' : '−'}${formatBytes(Math.abs(slope))}/day`
+  const range = GC_RANGES.find((r) => r.hours === hours)!
   return (
-    <article className={`hl-card hl-jvm ${lvl(j.level)}`}>
+    <article className={`hl-card hl-jvm-panel ${lvl(j.level)}`}>
       <div className="hl-card-head">
         <h4>3DSpace {j.label}</h4>
         <span className="hl-card-sub" title={j.ip ?? ''}>{j.name}</span>
+        {d?.policy && <span className="hl-chip" title="Garbage collection policy">{d.policy}</span>}
+        <Pill level={j.level} />
         <span className="flex-1" />
-        <Pill level={j.level}>{!j.reporting ? (j.level === 'off' ? 'Stopped' : 'No metrics') : undefined}</Pill>
-      </div>
-      {j.reporting ? (
-        <div className="hl-jvm-body">
-          <Gauge pct={j.heapPct} level={heapLevel} size={116}>
-            <strong>{formatPct(j.heapPct)}</strong>
-            <span>heap</span>
-            <em>{j.heapUsed === null ? '' : (j.heapUsed / 1024 ** 3).toFixed(1)}/{formatBytes(j.heapMax, 0)}</em>
-          </Gauge>
-          <div className="hl-stats">
-            <Stat label="GC time" value={formatPct(j.gcPct)} level={levelOf(j.gcPct, LIMITS.gc)} />
-            <Stat label="Threads" value={j.threads === null ? '–' : String(Math.round(j.threads))} />
-            <Stat label="Process CPU" value={formatPct(j.cpu)} level={levelOf(j.cpu, LIMITS.cpu)} />
-            <Stat label="Open files" value={formatPct(j.fdsPct)} level={levelOf(j.fdsPct, LIMITS.fds)} />
-            <Stat label="Up for" value={formatDuration(j.uptimeSec)} />
-          </div>
-          <div className="hl-jvm-spark">
-            <span className="hl-mini-label">Heap, last hour</span>
-            <Spark values={j.heapSpark} level={heapLevel} min={0} max={100} height={36} />
-          </div>
+        <div className="hl-seg" role="group" aria-label="Time range">
+          {GC_RANGES.map((r) => <button key={r.hours} type="button" className={r.hours === hours ? 'on' : ''} aria-pressed={r.hours === hours} onClick={() => pick(r.hours)}>{r.label}</button>)}
         </div>
-      ) : (
-        <p className="hl-card-note">{j.level === 'off' ? 'The server is stopped in EC2.' : 'The JMX exporter on this server does not answer.'}</p>
+      </div>
+      {trend && (
+        <div className={`hl-verdict ${lvl(trend.level)}`}>
+          <Dot level={trend.level === 'unknown' ? 'off' : trend.level} />
+          <span>{trend.text}</span>
+        </div>
+      )}
+      <div className="hl-heap-wrap">
+        {d ? <HeapChart d={d} height={narrow ? 210 : 280} /> : <div className={`hl-heap hl-skel ${error ? 'err' : ''}`} style={{ height: narrow ? 210 : 280 }}>{error && <span>{error}</span>}</div>}
+        {loading && d && <span className="hl-heap-loading">Updating…</span>}
+      </div>
+      <div className="hl-legend">
+        <span><i className="sw band" />Heap in use (low–high per {range.step >= 3600 ? `${range.step / 3600} h` : range.step >= 60 ? `${range.step / 60} min` : `${range.step} s`})</span>
+        <span><i className="sw after" />Left after GC</span>
+        {d?.trend.line && <span><i className="sw trend" />Trend</span>}
+        <span><i className="sw max" />Maximum</span>
+        <span><i className="sw gc" />Full GC</span>
+        {d?.startedAt && d.startedAt > d.start && <span><i className="sw restart" />Restart</span>}
+      </div>
+      <div className="hl-gc-kpis">
+        <Stat label="Heap now" value={`${formatBytes(j.heapUsed)} · ${formatPct(j.heapPct)}`} />
+        <Stat label="After GC" value={`${formatBytes(j.afterGcBytes)} · ${formatPct(j.afterGcPct)}`} level={levelOf(j.afterGcPct, [80, 90])} />
+        <Stat label={hours >= 24 ? 'After-GC trend' : 'After-GC trend · 24h'} value={slopeText} level={trend?.level === 'warn' || trend?.level === 'crit' ? trend.level : undefined} />
+        <Stat label="Throughput" value={d?.throughputPct === null || d?.throughputPct === undefined ? '–' : `${d.throughputPct.toFixed(d.throughputPct >= 99.9 ? 2 : 1)}%`} level={d?.throughputPct !== null && d?.throughputPct !== undefined && d.throughputPct < 95 ? 'warn' : undefined} />
+        <Stat label={`Full GCs · ${range.label}`} value={d ? `${sum(full, (c) => c.count)} · ${(sum(full, (c) => c.perHour)).toFixed(1)}/h` : '–'} />
+        <Stat label="Full GC pause" value={formatMs(avgMs(full))} />
+        <Stat label={`Partial GCs · ${range.label}`} value={d ? `${sum(partial, (c) => c.count)} · ${(sum(partial, (c) => c.perHour)).toFixed(1)}/h` : '–'} />
+        <Stat label="Partial GC pause" value={formatMs(avgMs(partial))} />
+        <Stat label="Allocation" value={d?.allocBytesPerSec ? `${formatBytes(d.allocBytesPerSec)}/s` : '–'} />
+        <Stat label="Last full GC" value={d?.lastFullGcAt ? ago(d.lastFullGcAt, Date.now()) : d ? `none in ${range.label}` : '–'} />
+        <Stat label="Non-heap" value={formatBytes(d?.nonHeapBytes)} />
+        <Stat label="Process memory" value={formatBytes(d?.rssBytes)} />
+        <Stat label="Process CPU" value={formatPct(j.cpu)} level={levelOf(j.cpu, LIMITS.cpu) === 'ok' ? undefined : levelOf(j.cpu, LIMITS.cpu)} />
+        <Stat label="Open files" value={d?.openFds === null || d?.openFds === undefined ? '–' : `${Math.round(d.openFds).toLocaleString()} · ${formatPct(j.fdsPct)}`} level={levelOf(j.fdsPct, LIMITS.fds) === 'ok' ? undefined : levelOf(j.fdsPct, LIMITS.fds)} />
+        <Stat label="Threads" value={j.threads === null ? '–' : String(Math.round(j.threads))} />
+        <Stat label="Up for" value={formatDuration(j.uptimeSec)} />
+      </div>
+      {d && d.pools.length > 0 && (
+        <details className="hl-pools">
+          <summary>Memory pools</summary>
+          {d.pools.map((p) => {
+            const pct = p.max ? (p.used / p.max) * 100 : null
+            return (
+              <div key={p.name} className="hl-pool">
+                <span className="hl-pool-name">{p.name}{p.heap && <span className="hl-chip">heap</span>}</span>
+                <Bar pct={pct} level={p.heap ? 'ok' : levelOf(pct, [85, 95])} />
+                <span className="hl-pool-num">{formatBytes(p.used)}{p.max ? ` of ${formatBytes(p.max, 0)}` : ''}</span>
+              </div>
+            )
+          })}
+        </details>
       )}
     </article>
   )

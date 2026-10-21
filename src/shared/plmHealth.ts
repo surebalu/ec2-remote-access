@@ -34,6 +34,26 @@ export interface ServiceNode extends Endpoint {
   instanceKey?: string
 }
 
+/** One health-check URL as the monitoring server probes it (blackbox exporter), for the checks table. */
+export interface HealthCheck {
+  serviceId: string
+  service: string
+  url: string
+  /** Through the load balancer (what users reach) or on one server. */
+  via: 'lb' | 'server'
+  label: string
+  level: Level
+  status: number | null
+  ms: number | null
+  dnsMs: number | null
+  certDays: number | null
+  stopped: boolean
+  /** Less than a health endpoint (checkNote). */
+  note: string | null
+  /** The probe itself failed: the blackbox exporter is down, or refused the check. */
+  broken?: string
+}
+
 export interface ServiceHealth {
   id: string
   name: string
@@ -71,12 +91,20 @@ export interface JvmHealth {
   label: string
   ip: string | null
   name: string
+  /** Prometheus's instance label, for the GC detail (health:gc). */
+  promInstance: string
   level: Level
   problems: string[]
   reporting: boolean
   heapUsed: number | null
   heapMax: number | null
   heapPct: number | null
+  /** What the last collections left in the heap: the floor that keeps rising when memory leaks. */
+  afterGcBytes: number | null
+  afterGcPct: number | null
+  /** The after-GC floor over the last day, judged (gcTrend). */
+  trend?: GcTrend
+  startedAt: number | null
   gcPct: number | null
   threads: number | null
   fdsPct: number | null
@@ -84,6 +112,174 @@ export interface JvmHealth {
   uptimeSec: number | null
   heapSpark?: Spark
   instanceKey?: string
+}
+
+/** One machine's memory over a window, for the memory-by-machine grid (health:memory). */
+export interface MachineMemory {
+  ip: string
+  name: string
+  role: string
+  label: string
+  os: 'linux' | 'windows'
+  state: HostHealth['state']
+  totalBytes: number | null
+  /** Memory in use, % of the machine's total, per step. */
+  pct: Spark
+  now: number | null
+  peak: number | null
+  avg: number | null
+  level: Level
+  instanceKey?: string
+}
+
+export interface MemoryHistory {
+  env: PlmEnvId
+  hours: number
+  start: number
+  step: number
+  machines: MachineMemory[]
+}
+
+/** How the heap's after-GC floor behaves over a window: the memory-leak signal. */
+export interface GcTrend {
+  level: Level
+  text: string
+  floorBytes: number | null
+  floorPct: number | null
+  /** Growth of the floor per day over the latest stretch of the window. */
+  slopePerDay: number | null
+  daysToMax: number | null
+  /** The fitted line over the latest stretch, to draw: [t0 ms, bytes, t1 ms, bytes]. */
+  line: [number, number, number, number] | null
+}
+
+export interface GcCollector {
+  name: string
+  /** A full (global, old-generation) collection rather than a partial or young one. */
+  full: boolean
+  count: number
+  seconds: number
+  avgMs: number | null
+  perHour: number
+}
+
+/** One JVM's heap and garbage collection over a window, for the heap chart (health:gc). */
+export interface JvmGcDetail {
+  instance: string
+  hours: number
+  /** First point's time (ms) and the step between points (s). */
+  start: number
+  step: number
+  heapMax: number | null
+  /** Per step: the highest and lowest heap in use, the saw-tooth's top and bottom. */
+  heapHigh: Spark
+  heapLow: Spark
+  /** Per step: what the last collection left. */
+  afterGc: Spark
+  /** Per step: how many full collections ran. */
+  fullGcs: Spark
+  startedAt: number | null
+  lastFullGcAt: number | null
+  collectors: GcCollector[]
+  /** Share of time the application ran rather than the collector, as GCeasy reports it. */
+  throughputPct: number | null
+  allocBytesPerSec: number | null
+  pools: { name: string; used: number; max: number | null; heap: boolean }[]
+  trend: GcTrend
+  /** "OpenJ9 balanced", "G1"…, from the pools' names. */
+  policy: string
+  nonHeapBytes: number | null
+  /** The process's resident memory (RSS), heap and everything else. */
+  rssBytes: number | null
+  openFds: number | null
+}
+
+/** The collector a JVM runs, read from its memory pools' names. */
+export function gcPolicy(pools: string[]): string {
+  const has = (re: RegExp): boolean => pools.some((p) => re.test(p))
+  if (has(/^balanced-/i)) return 'OpenJ9 balanced'
+  if (has(/^nursery-|^tenured-/i)) return 'OpenJ9 gencon'
+  if (has(/^G1 /)) return 'G1'
+  if (has(/^ZHeap|^ZGC/)) return 'ZGC'
+  if (has(/^Shenandoah/)) return 'Shenandoah'
+  if (has(/^PS /)) return 'Parallel'
+  if (has(/^CMS /)) return 'CMS'
+  return ''
+}
+
+/** The heap chart's ranges: hours, and the step that keeps each near 360 points. */
+export const GC_RANGES: { hours: number; label: string; step: number }[] = [
+  // Every scrape: OpenJ9's teeth are a few minutes long, as on Grafana's JVM heap panel.
+  { hours: 1, label: '1h', step: 15 },
+  { hours: 6, label: '6h', step: 60 },
+  { hours: 24, label: '24h', step: 240 },
+  { hours: 72, label: '3d', step: 600 },
+  { hours: 168, label: '7d', step: 1800 },
+  { hours: 336, label: '14d', step: 3600 }
+]
+
+/**
+ * Whether a collector (the JMX gc label) is a full collection: OpenJ9's "global garbage collect" (balanced, gencon),
+ * HotSpot's old-generation collectors (G1 Old Generation, PS MarkSweep, ConcurrentMarkSweep, MarkSweepCompact).
+ */
+export const isFullGc = (name: string): boolean => /global|old gen|marksweep|mark ?sweep|\bfull\b|tenured/i.test(name) && !/young|scavenge|partial|minor/i.test(name)
+
+/**
+ * Judges the after-GC floor over a window, the way one reads GCeasy's heap-after-GC graph: a healthy saw-tooth drops
+ * back to the same level after each collection; a leak shows the floor climbing, or sitting near the maximum while
+ * collections keep running. Only time since the JVM started counts, and the slope is taken over the latest stretch,
+ * so caches warming up after a restart and then levelling off read as healthy.
+ */
+export function gcTrend(times: number[], values: Spark, max: number | null, startedAt: number | null = null): GcTrend {
+  const pts: [number, number][] = []
+  times.forEach((t, i) => { const v = values[i]; if (v !== null && v !== undefined && Number.isFinite(v) && (startedAt === null || t >= startedAt)) pts.push([t, v]) })
+  if (pts.length < 6) return { level: 'unknown', text: 'Not enough data yet to judge the heap after collections.', floorBytes: pts.at(-1)?.[1] ?? null, floorPct: null, slopePerDay: null, daysToMax: null, line: null }
+  const tail = pts.slice(-3).map((p) => p[1]).sort((a, b) => a - b)
+  const floor = tail[1]
+  const pct = max && max > 0 ? (floor / max) * 100 : null
+  const t0 = pts[0][0]
+  const t1 = pts[pts.length - 1][0]
+  // Only the latest stretch decides (a quarter of the window, at least six hours): a floor that rose after a restart
+  // and has been flat since is not a leak, whichever range is on screen.
+  const recentFrom = t1 - Math.max(6 * 3_600_000, (t1 - t0) / 4)
+  const recentPts = pts.filter((p) => p[0] >= recentFrom)
+  const recent = recentPts.length >= 6 ? recentPts : pts.slice(-6)
+  const fit = (ps: [number, number][]): { slope: number; icpt: number; r2: number } => {
+    const n = ps.length
+    const mx = ps.reduce((a, p) => a + p[0], 0) / n
+    const my = ps.reduce((a, p) => a + p[1], 0) / n
+    let sxy = 0, sxx = 0, syy = 0
+    for (const [x, y] of ps) { sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; syy += (y - my) ** 2 }
+    const slope = sxx ? sxy / sxx : 0
+    return { slope, icpt: my - slope * mx, r2: sxx && syy ? (sxy * sxy) / (sxx * syy) : 0 }
+  }
+  const r = fit(recent)
+  const all = fit(pts)
+  const perDay = r.slope * 86_400_000
+  const scale = max ?? Math.max(...pts.map((p) => p[1]))
+  const rising = perDay > scale * 0.03 && r.r2 >= 0.5
+  const days = rising && max ? Math.max(0, (max - floor) / perDay) : null
+  const line: GcTrend['line'] = rising ? [recent[0][0], r.icpt + r.slope * recent[0][0], t1, r.icpt + r.slope * t1] : null
+  const gb = (b: number): string => `${(b / 1024 ** 3).toFixed(b >= 10 * 1024 ** 3 ? 0 : 1)} GB`
+  const of = max ? ` (${Math.round(pct!)}% of ${gb(max)})` : ''
+  let level: Level = 'ok'
+  let text: string
+  if (pct !== null && pct >= 90) {
+    level = 'crit'
+    text = `The heap stays at ${Math.round(pct)}% of its maximum even after collections: the garbage collector cannot free it. Likely a memory leak; a heap dump would show what holds it.`
+  } else if (rising && days !== null && days < 14) {
+    level = 'warn'
+    text = `What survives each collection keeps growing, about ${gb(perDay)} a day; at this rate the heap is full in ${days < 1 ? 'under a day' : `${Math.round(days)} days`}. Possible memory leak.`
+  } else if (pct !== null && pct >= 80) {
+    level = 'warn'
+    text = `After collections the heap still holds ${Math.round(pct)}% of its maximum: little room left for new work.`
+  } else {
+    // Said only when the restart is on screen: otherwise the climb is just the window's start.
+    const restartInView = startedAt !== null && times.length > 0 && startedAt >= times[0]
+    const settled = restartInView && all.slope * 86_400_000 > scale * 0.03 && !rising
+    text = `Healthy saw-tooth: after collections the heap drops back to about ${gb(floor)}${of}.${settled ? ' It grew after the restart and has levelled off since.' : ''}`
+  }
+  return { level, text, floorBytes: floor, floorPct: pct, slopePerDay: perDay, daysToMax: days, line }
 }
 
 export interface ApacheHealth {
@@ -174,6 +370,7 @@ export interface PlmEnvHealth {
   headline: string
   issues: Issue[]
   services: ServiceHealth[]
+  checks: HealthCheck[]
   hosts: HostHealth[]
   jvms: JvmHealth[]
   apaches: ApacheHealth[]
@@ -321,18 +518,38 @@ export const probeOk = (status: number | null, success: number | null): boolean 
 // ---------- verdicts ----------
 
 export function serviceLevel(fronts: Endpoint[], nodes: ServiceNode[]): { level: Level; summary: string } {
+  // Servers, not checks: 3DSpace has two checks on each machine (its page and its internal one).
+  const machines = (list: ServiceNode[]): number => new Set(list.map((n) => n.ip ?? n.url)).size
   const live = nodes.filter((n) => !n.stopped)
   const down = live.filter((n) => n.level === 'crit')
-  const stopped = nodes.length - live.length
+  const stopped = machines(nodes.filter((n) => n.stopped))
+  const nLive = machines(live)
+  const nDown = machines(down)
   const frontDown = fronts.filter((f) => f.level === 'crit')
   const slow = [...fronts, ...live].filter((e) => e.level === 'warn')
   const note = stopped ? ` · ${stopped} stopped` : ''
-  if (frontDown.length) return { level: 'crit', summary: `Unreachable through the load balancer${down.length ? ` · ${down.length} of ${live.length} servers down` : ''}${note}` }
-  if (live.length && down.length === live.length) return { level: 'crit', summary: `All ${live.length === 1 ? 'servers are' : `${live.length} servers are`} down${note}` }
-  if (down.length) return { level: 'warn', summary: `${down.length} of ${live.length} servers down, still served${note}` }
+  if (frontDown.length) return { level: 'crit', summary: `Unreachable through the load balancer${nDown ? ` · ${nDown} of ${nLive} servers down` : ''}${note}` }
+  if (nLive && nDown === nLive) return { level: 'crit', summary: `All ${nLive === 1 ? 'servers are' : `${nLive} servers are`} down${note}` }
+  if (nDown) return { level: 'warn', summary: `${nDown} of ${nLive} servers down, still served${note}` }
   if (slow.length) return { level: 'warn', summary: `Slow to answer${note}` }
-  if (!fronts.length && !live.length) return { level: stopped ? 'off' : 'unknown', summary: stopped ? 'Stopped' : 'Not monitored' }
-  return { level: 'ok', summary: `${live.length > 1 ? `${live.length} servers up` : 'Up'}${note}` }
+  // Checks whose probe itself failed (the blackbox exporter down, a module missing): nothing is known.
+  if ([...fronts, ...live].length && [...fronts, ...live].every((e) => e.level === 'unknown')) return { level: 'unknown', summary: 'Its health check is not running' }
+  if (!fronts.length && !live.length) return { level: stopped ? 'off' : 'unknown', summary: stopped ? 'Stopped' : 'Not checked: only its servers are monitored' }
+  return { level: 'ok', summary: `${nLive > 1 ? `${nLive} servers up` : 'Up'}${note}` }
+}
+
+/**
+ * What a check really proves, when it is less than a health endpoint: a page that only shows the web app answers (a
+ * landing or docs page, a login redirect). Null for a real health check (healthcheck, test-alive, isAlive, ping).
+ */
+export function checkNote(url: string): string | null {
+  if (/federated\/manager\?query=monitoring/i.test(url)) return 'Redirects to the 3DPassport login page: proves the web app and sign-in page answer, not that search works'
+  if (/swagger-ui/i.test(url)) return 'The API documentation page'
+  if (/\/enovia\/adminui/i.test(url)) return 'The admin UI page'
+  if (/\/English\/?$/i.test(url)) return 'A content page'
+  if (/^https?:\/\/[^/]+:(19|29)0\d\d\/?$/i.test(url)) return 'The search landing page, not its isAlive check'
+  if (/^https?:\/\/[^/:]+(:80)?\/?$/i.test(url)) return "The web server's root page"
+  return null
 }
 
 const SECTION_WEIGHT: Record<Issue['section'], number> = { services: 0, db: 1, alb: 2, jvm: 3, web: 4, storage: 5, servers: 6, certs: 7 }
