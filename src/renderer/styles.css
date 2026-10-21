@@ -1866,7 +1866,7 @@ html.launcher-page, html.launcher-page body { background: transparent; }
 .hl-sec-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
 .hl-sec-sub { color: var(--muted); font-size: 11.5px; }
 .hl[data-flash='services'] #hl-services, .hl[data-flash='jvm'] #hl-jvm, .hl[data-flash='db'] #hl-db, .hl[data-flash='alb'] #hl-alb, .hl[data-flash='web'] #hl-web,
-.hl[data-flash='storage'] #hl-storage, .hl[data-flash='servers'] #hl-servers, .hl[data-flash='alerts'] #hl-alerts, .hl[data-flash='certs'] #hl-certs { animation: hl-flash 1.4s var(--ease); border-radius: 10px; }
+.hl[data-flash='storage'] #hl-storage, .hl[data-flash='kernel'] #hl-kernel, .hl[data-flash='memory'] #hl-memory, .hl[data-flash='servers'] #hl-servers, .hl[data-flash='alerts'] #hl-alerts, .hl[data-flash='certs'] #hl-certs { animation: hl-flash 1.4s var(--ease); border-radius: 10px; }
 .hl-grid { display: grid; gap: 12px; }
 .hl-grid.services { grid-template-columns: repeat(auto-fill, minmax(min(100%, 252px), 1fr)); }
 .hl-grid.jvms { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
@@ -1989,6 +1989,27 @@ i.sw.gc { width: 10px; height: 9px; border-radius: 0; background: var(--err); cl
 .hl-pool { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(80px, 1fr) minmax(120px, auto); align-items: center; gap: 12px; padding: 5px 2px; font-size: 11.5px; }
 .hl-pool-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .hl-pool-num { color: var(--text-2); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* The 3DSpace kernel and who is signed in */
+.hl-kernel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; }
+.hl-kernel { display: flex; flex-direction: column; gap: 12px; }
+.hl-kernel .hl-card-head { margin-bottom: 0; }
+.hl-signed { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 18px; }
+.hl-signed-now .hl-big { font-size: 30px; }
+.hl-signed-now .hl-unit { margin-top: 4px; }
+.hl-signed-chart .hl-spark { margin-top: 4px; }
+.hl-users { display: flex; flex-wrap: wrap; gap: 6px; }
+.hl-user { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); font-size: 11.5px; }
+.hl-user i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.hl-user.service, .hl-user.system { color: var(--muted); border-style: dashed; }
+.hl-user em { color: var(--muted); font-size: 9.5px; font-style: normal; letter-spacing: .06em; text-transform: uppercase; }
+.hl-kernel-mem { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 11px; background: var(--panel-2); }
+.hl-kernel-mem-head { display: flex; flex-direction: column; gap: 2px; }
+.hl-kernel .hl-gc-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.hl-license { display: flex; flex-direction: column; gap: 10px; }
+.hl-license .hl-card-head { margin-bottom: 0; }
+.hl-license-nodes { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; }
+.hl-license-nodes .hl-row:first-child { border-top: 0; }
 
 /* Memory by machine: small multiples on one scale, one crosshair through all */
 .hl-sec-controls { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -2151,7 +2172,8 @@ i.sw.gc { width: 10px; height: 9px; border-radius: 0; background: var(--err); cl
   .hl-chk-status::before, .hl-chk-num::before { content: attr(data-label); display: block; color: var(--muted); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
   .hl-jvm-panel .hl-seg { width: 100%; }
   .hl-jvm-panel .hl-seg button { flex: 1; justify-content: center; }
-  .hl-gc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hl-gc-kpis, .hl-kernel .hl-gc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hl-signed { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .hl-pool { grid-template-columns: minmax(0, 1fr) auto; }
   .hl-pool .hl-bar { grid-column: 1 / -1; grid-row: 2; }
 }

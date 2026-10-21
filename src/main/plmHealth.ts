@@ -16,9 +16,9 @@ import { DescribeDBInstancesCommand, RDSClient } from '@aws-sdk/client-rds'
 import type { Instance } from '@shared/types'
 import {
   ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
-  serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
+  serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, isServiceAccount, parseLicense, SYSTEM_USERS, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
   type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type Endpoint, type HostHealth, type Issue, type JvmHealth,
-  type HealthCheck, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
+  type HealthCheck, type KernelHealth, type KernelServer, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
 } from '@shared/plmHealth'
 import { credentialsFor } from './aws/credentials'
 import { log } from './log'
@@ -45,44 +45,58 @@ function source(): Source {
   return { inst, host: want?.host?.trim() || inst.privateIp || '127.0.0.1', port: want?.port || 9090 }
 }
 
-let tunnel: { key: string; port: number; handle: SsmHandle } | null = null
-let opening: Promise<number> | null = null
-let idleTimer: ReturnType<typeof setTimeout> | null = null
+/**
+ * Tunnels through the monitoring host, one per address it relays to (Prometheus, Loki, each 3DSpace server's Jolokia):
+ * an SSM port forward reaches one host and port. Each closes ten minutes after it was last used.
+ */
+interface Tunnel { port: number; handle: SsmHandle; timer: ReturnType<typeof setTimeout> | null }
+const tunnels = new Map<string, Tunnel>()
+const opening = new Map<string, Promise<number>>()
 const IDLE_MS = 10 * 60_000
 
-function keepOpen(): void {
-  if (idleTimer) clearTimeout(idleTimer)
-  idleTimer = setTimeout(() => void closePlmHealth(), IDLE_MS)
+function keepOpen(key: string): void {
+  const t = tunnels.get(key)
+  if (!t) return
+  if (t.timer) clearTimeout(t.timer)
+  t.timer = setTimeout(() => void closeTunnel(key), IDLE_MS)
 }
 
-async function prometheusPort(src: Source): Promise<number> {
-  const key = `${src.inst.key}|${src.host}:${src.port}`
-  keepOpen()
-  if (tunnel?.key === key && tunnel.handle.child.exitCode === null && !tunnel.handle.child.killed) return tunnel.port
-  opening ??= (async () => {
-    await closeTunnel()
-    const port = await freePort()
-    const local = /^(127\.0\.0\.1|localhost)$/.test(src.host)
-    const handle = await startPortForward(src.inst, src.port, port, undefined, local ? undefined : src.host)
-    tunnel = { key, port, handle }
-    handle.child.once('exit', () => { if (tunnel?.handle === handle) tunnel = null })
-    log('health', 'prometheus tunnel open', { via: src.inst.name, target: `${src.host}:${src.port}`, localPort: port })
-    return port
-  })().finally(() => { opening = null })
-  return opening
+/** A local port that reaches host:port from the monitoring host. */
+async function forward(src: Source, host: string, port: number): Promise<number> {
+  const key = `${src.inst.key}|${host}:${port}`
+  const have = tunnels.get(key)
+  if (have && have.handle.child.exitCode === null && !have.handle.child.killed) { keepOpen(key); return have.port }
+  let p = opening.get(key)
+  if (!p) {
+    p = (async () => {
+      await closeTunnel(key)
+      const local = await freePort()
+      const self = /^(127\.0\.0\.1|localhost)$/.test(host)
+      const handle = await startPortForward(src.inst, port, local, undefined, self ? undefined : host)
+      tunnels.set(key, { port: local, handle, timer: null })
+      handle.child.once('exit', () => { if (tunnels.get(key)?.handle === handle) tunnels.delete(key) })
+      log('health', 'tunnel open', { via: src.inst.name, target: `${host}:${port}`, localPort: local })
+      return local
+    })().finally(() => opening.delete(key))
+    opening.set(key, p)
+  }
+  const local = await p
+  keepOpen(key)
+  return local
 }
 
-async function closeTunnel(): Promise<void> {
-  const t = tunnel
-  tunnel = null
+async function closeTunnel(key: string): Promise<void> {
+  const t = tunnels.get(key)
+  tunnels.delete(key)
+  if (t?.timer) clearTimeout(t.timer)
   if (t) await t.handle.terminate().catch(() => undefined)
 }
 
+const prometheusPort = (src: Source): Promise<number> => forward(src, src.host, src.port)
+
 /** On quit, and ten minutes after the tab was last looked at. */
 export async function closePlmHealth(): Promise<void> {
-  if (idleTimer) clearTimeout(idleTimer)
-  idleTimer = null
-  await closeTunnel()
+  await Promise.all([...tunnels.keys()].map(closeTunnel))
 }
 
 // ---------- Prometheus ----------
@@ -407,6 +421,27 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     const names = [...new Set(scrapeError.values())]
     issues.push({ level: 'warn', text: `${names.join(', ')}: ${scrapeError.size === 1 ? 'its health check is' : 'health checks are'} not running (the probe fails)`, section: 'services' })
   }
+  // Apache without an HTTP check (Production's): the Apache exporter reads Apache's own status page, which is a check
+  // of the server process itself: up, Apache not answering, or the exporter silent.
+  const apacheSlot = byRole.get('apache')
+  if (!apacheSlot || (!apacheSlot.fronts.length && !apacheSlot.nodes.length)) {
+    const apacheUp = byInstance(q.apacheUp)
+    for (const s of q.up) {
+      const { job = '', instance = '' } = s.metric
+      if (port(instance) !== '9117' || !inEnv(s)) continue
+      const ip = ipOf(instance)
+      const inst = w.ec2(ip)
+      const stopped = stoppedIn(inst)
+      const level: Level = stopped ? 'off' : s.value !== 1 ? 'unknown' : apacheUp.get(instance) === 1 ? 'ok' : 'crit'
+      const label = nodeLabel(job) || (ip ? w.ipLabel.get(ip) ?? 'server' : 'server')
+      const url = `http://${ip ?? instance}:9117 (Apache status)`
+      const slot = byRole.get('apache') ?? { fronts: [], nodes: [] }
+      slot.nodes.push({ url, level, status: level === 'ok' ? 200 : null, ms: null, label, ip, name: inst?.name ?? (ip ?? instance), stopped, instanceKey: inst?.key })
+      byRole.set('apache', slot)
+      checks.push({ serviceId: 'apache', service: 'Apache web tier', url, via: 'server', label, level, status: level === 'ok' ? 200 : null, ms: null, dnsMs: null, certDays: null, stopped,
+        note: "Apache's own status page, read by the Apache exporter (there is no HTTP health check here)", broken: level === 'unknown' ? 'The Apache exporter does not answer' : undefined })
+    }
+  }
   // Parts of the platform whose servers are monitored but which nothing checks: a card that says so.
   for (const h of hosts) {
     const role = ROLES.find((r) => r.name === h.role)
@@ -419,7 +454,13 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     // The main page first (3DSpace's own check before its internal one).
     slot.fronts.sort((a, b) => Number(/\/internal\//.test(a.url)) - Number(/\/internal\//.test(b.url)))
     slot.nodes.sort((a, b) => a.label.localeCompare(b.label) || a.url.localeCompare(b.url))
-    const { level, summary } = serviceLevel(slot.fronts, slot.nodes)
+    let { level, summary } = serviceLevel(slot.fronts, slot.nodes)
+    if (!slot.fronts.length && !slot.nodes.length) {
+      // Checked in another environment but not this one: name where, so it reads as a gap here, not a mistake.
+      const elsewhere = ENV_ORDER.filter((e2) => e2 !== env && q.probeOk.some((p) => roleOf(p.metric.job ?? '', p.metric.instance ?? '')?.id === id && envsFor(w, p.metric.job ?? '', p.metric.instance ?? '').includes(e2)))
+      if (elsewhere.length) summary = `Not checked here: its health check covers ${elsewhere.map((e2) => ENV_NAMES[e2]).join(' and ')} only`
+      level = 'unknown'
+    }
     services.push({ id, name: role.name, blurb: role.blurb, level, summary, fronts: slot.fronts, nodes: slot.nodes })
     if ((level === 'crit' || level === 'warn') && !summary.startsWith('Its health check')) issues.push({ level, text: `${role.name}: ${summary.split(' · ')[0].toLowerCase()}`, section: 'services' })
   }
@@ -538,6 +579,17 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     .sort((a, b) => Number(a.muted) - Number(b.muted) || (b.since ?? 0) - (a.since ?? 0))
 
   const gaps = [...(cloud?.gaps ?? [])]
+  // The kernel is read only for the environment on screen; what it last said counts while it is fresh.
+  const kern = kernelCache.get(env)
+  if (kern && now - kern.at < 3 * 60_000) {
+    for (const s of kern.d.servers) {
+      const who = s.label ? `3DSpace ${s.label}` : '3DSpace'
+      if (!s.reachable) issues.push({ level: 'warn', text: `${who}: kernel monitoring does not answer`, section: 'kernel' })
+      else if (s.dbExceeded) issues.push({ level: 'warn', text: `${who}: database connections went over the limit ${s.dbExceeded} times`, section: 'kernel' })
+      else if (s.level === 'warn' || s.level === 'crit') issues.push({ level: s.level, text: `${who}: kernel memory near its limit`, section: 'kernel' })
+    }
+    if (kern.d.license && kern.d.license.level !== 'ok') issues.push({ level: 'crit', text: `License server is ${kern.d.license.status.toLowerCase()}`, section: 'kernel' })
+  }
   if (cloud?.db) for (const p of cloud.db.problems) issues.push({ level: cloud.db.level === 'crit' ? 'crit' : 'warn', text: `Database: ${p}`, section: 'db' })
   for (const a of cloud?.albs ?? []) for (const p of a.problems) issues.push({ level: a.level === 'crit' ? 'crit' : 'warn', text: `${a.internal ? 'Internal load balancer' : 'Load balancer'}: ${p}`, section: 'alb' })
 
@@ -858,6 +910,136 @@ export async function memoryHistory(env: PlmEnvId, hours: number): Promise<Memor
   return d
 }
 
+// ---------- the ENOVIA kernel and who is signed in (Jolokia on each 3DSpace server, history from Loki) ----------
+
+/** The Jolokia agent on each 3DSpace server's TomEE (the same one the monitoring scripts read). */
+const JOLOKIA_PORT = 8001
+const LOKI_PORT = 3100
+const kernelCache = new Map<PlmEnvId, { at: number; d: KernelHealth }>()
+let licenseCache: { at: number; d: KernelHealth['license'] } | null = null
+
+interface JolokiaReply { status: number; value?: Record<string, unknown>; error?: string }
+
+async function jolokia(local: number, reads: { mbean: string; attribute?: string }[]): Promise<JolokiaReply[]> {
+  // One bulk request of reads only.
+  const r = await fetch(`http://127.0.0.1:${local}/jolokia/`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(reads.map((x) => ({ type: 'read', ...x }))), signal: AbortSignal.timeout(15_000)
+  })
+  return (await r.json()) as JolokiaReply[]
+}
+
+async function loki<T>(local: number, path: string, params: Record<string, string>): Promise<T> {
+  const r = await fetch(`http://127.0.0.1:${local}/loki/api/v1/${path}?${new URLSearchParams(params)}`, { signal: AbortSignal.timeout(20_000) })
+  const j = (await r.json()) as { status: string; data: T }
+  if (j.status !== 'success') throw new Error(`Loki: HTTP ${r.status}`)
+  return j.data
+}
+
+async function readKernel(src: Source, j: { ip: string; label: string; name: string }): Promise<KernelServer> {
+  const base: KernelServer = {
+    ip: j.ip, label: j.label, name: j.name, reachable: false, people: [], service: [], system: [], reported: null,
+    allocatedBytes: null, reservedBytes: null, highwaterBytes: null, limitBytes: null, contexts: null, dbConnections: null, dbExceeded: null,
+    exceptions: null, uptimeSec: null, version: '', level: 'unknown'
+  }
+  try {
+    const local = await forward(src, j.ip, JOLOKIA_PORT)
+    const [kernel, limit, status, db, count, users, server] = await jolokia(local, [
+      { mbean: 'mcs:00=memory,name=kernel' },
+      { mbean: 'mcs:00=settings,name=system', attribute: 'MemoryLimit' },
+      { mbean: 'mcs:name=status' },
+      { mbean: 'mcs:00=Database,name=connection' },
+      { mbean: '3DEXPERIENCE:name=EnoviaKernelMonitoring.activeUserCount' },
+      { mbean: '3DEXPERIENCE:name=EnoviaKernelMonitoring.activeUsers' },
+      { mbean: '3DEXPERIENCE:name=EnoviaKernelMonitoring.monitorServer' }
+    ])
+    const num = (r: JolokiaReply | undefined, k?: string): number | null => {
+      const v = k ? r?.value?.[k] : r?.value
+      return r?.status === 200 && typeof v === 'number' ? v : null
+    }
+    // activeUsers is tenant -> names; the kernel's own sessions and service accounts are not people.
+    const names = new Set<string>()
+    const byTenant = (users?.value as { Value?: Record<string, string[]> } | undefined)?.Value ?? {}
+    for (const list of Object.values(byTenant)) for (const u of list ?? []) if (typeof u === 'string') names.add(u)
+    const all = [...names].sort((a, b) => a.localeCompare(b))
+    const counts = (count?.value as { Value?: Record<string, number> } | undefined)?.Value ?? {}
+    const xml = String((server?.value as { Value?: unknown } | undefined)?.Value ?? '')
+    const allocated = num(kernel, 'allocatedBytes')
+    const lim = limit?.status === 200 && typeof limit.value === 'number' ? limit.value : null
+    const pct = allocated !== null && lim ? (allocated / lim) * 100 : null
+    return {
+      ...base, reachable: true,
+      people: all.filter((u) => !SYSTEM_USERS.has(u) && !isServiceAccount(u)), service: all.filter(isServiceAccount), system: all.filter((u) => SYSTEM_USERS.has(u)),
+      reported: Object.values(counts).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0),
+      allocatedBytes: allocated, reservedBytes: num(kernel, 'reservedBytes'), highwaterBytes: num(kernel, 'highwater'), limitBytes: lim,
+      contexts: Number(/<contextCount>(\d+)<\/contextCount>/.exec(xml)?.[1] ?? NaN) || null,
+      dbConnections: num(db, 'nbConnections'), dbExceeded: num(db, 'nbExceedConnections'), exceptions: num(status, 'nbExceptions'), uptimeSec: num(status, 'uptime'),
+      version: (/<version>([^<]+)<\/version>/.exec(xml)?.[1] ?? '').replace(/^3DEXPERIENCE\s+/, '').replace(/\s*\([0-9a-f]+\)$/, ''),
+      level: (num(db, 'nbExceedConnections') ?? 0) > 0 ? 'warn' : levelOf(pct, [75, 90])
+    }
+  } catch (e) {
+    return { ...base, error: `Its kernel monitoring (Jolokia on port ${JOLOKIA_PORT}) did not answer: ${(e as Error).message}`, level: 'crit' }
+  }
+}
+
+export async function kernelHealth(env: PlmEnvId): Promise<KernelHealth> {
+  if (!ENV_ORDER.includes(env)) throw new Error('Unknown environment.')
+  const have = kernelCache.get(env)
+  if (have && Date.now() - have.at < 25_000) return have.d
+  const src = source()
+  const snap = await plmHealth()
+  const jvms = snap.envs.find((e) => e.id === env)?.jvms ?? []
+  const targets = jvms.filter((j) => j.ip).map((j) => ({ ip: j.ip!, label: j.label, name: j.name }))
+  const gaps: string[] = []
+  const end = Math.floor(Date.now() / 1000)
+  const step = 300
+  const start = end - 24 * 3600
+  const [servers, history, license] = await Promise.all([
+    Promise.all(targets.map((t) => readKernel(src, t))),
+    // Who was signed in over the day: the count the servers' monitoring script logs every minute.
+    forward(src, src.host, LOKI_PORT).then((lp) => loki<{ result: { metric: Record<string, string>; values: [number, string][] }[] }>(lp, 'query_range', {
+      // Backticks: LogQL takes them literally, where a quoted string would read \\d as an escape.
+      query: 'max by (host) (max_over_time({job=~".+_ActiveUsers"} |= "Total Active Users" | regexp `Total Active Users: (?P<n>\\d+)` | unwrap n [5m]))',
+      start: String(start), end: String(end), step: String(step)
+    })).catch((e: Error) => { gaps.push(`Active users over the day (Loki): ${e.message}`); return null }),
+    licenseStatus(src).catch((e: Error) => { gaps.push(`License server check (Loki): ${e.message}`); return null })
+  ])
+  const n = Math.round((end - start) / step) + 1
+  for (const s of history?.result ?? []) {
+    const ip = ipOf(s.metric.host ?? '')
+    const server = servers.find((x) => x.ip === ip)
+    if (!server) continue
+    const spark: (number | null)[] = new Array(n).fill(null)
+    for (const [t, v] of s.values) { const i = Math.round((t - start) / step); if (i >= 0 && i < n) spark[i] = Number(v) }
+    server.usersSpark = spark
+    const vals = spark.filter((v): v is number => v !== null)
+    server.usersPeak = vals.length ? Math.max(...vals) : null
+  }
+  const d: KernelHealth = { env, at: Date.now(), start: start * 1000, step, servers, license, gaps }
+  kernelCache.set(env, { at: Date.now(), d })
+  return d
+}
+
+/** The last license server check: DSCheckLS output that one 3DSpace server logs every 30 minutes. */
+async function licenseStatus(src: Source): Promise<KernelHealth['license']> {
+  if (licenseCache && Date.now() - licenseCache.at < 5 * 60_000) return licenseCache.d
+  const lp = await forward(src, src.host, LOKI_PORT)
+  const now = Date.now()
+  const data = await loki<{ result: { values: [string, string][] }[] }>(lp, 'query_range', {
+    query: '{job="DSLS_Status"}', start: String((now - 2 * 3600_000) * 1e6), end: String(now * 1e6), limit: '400', direction: 'backward'
+  })
+  const lines = data.result.flatMap((r) => r.values).sort((a, b) => (BigInt(a[0]) < BigInt(b[0]) ? -1 : 1))
+  // The newest block runs from its "Run time:" line to the row of '='.
+  let from = -1
+  lines.forEach(([, l], i) => { if (/^Run time:/.test(l)) from = i })
+  if (from < 0) { licenseCache = { at: Date.now(), d: null }; return null }
+  const block: string[] = []
+  for (const [, l] of lines.slice(from + 1)) { if (/^={10,}/.test(l)) break; block.push(l) }
+  const d = parseLicense(block, Number(BigInt(lines[from][0]) / 1_000_000n))
+  licenseCache = { at: Date.now(), d }
+  return d
+}
+
 // ---------- the snapshot ----------
 
 let cached: { at: number; snap: PlmHealthSnapshot } | null = null
@@ -865,7 +1047,7 @@ let building: Promise<PlmHealthSnapshot> | null = null
 const SNAP_MS = 20_000
 
 export function plmHealth(force = false): Promise<PlmHealthSnapshot> {
-  if (!force && cached && Date.now() - cached.at < SNAP_MS) { keepOpen(); return Promise.resolve(cached.snap) }
+  if (!force && cached && Date.now() - cached.at < SNAP_MS) return Promise.resolve(cached.snap)
   building ??= build().finally(() => { building = null })
   return building
 }
@@ -877,7 +1059,7 @@ async function build(): Promise<PlmHealthSnapshot> {
     data = await gather(await prometheusPort(src))
   } catch (e) {
     // A tunnel that died quietly (laptop slept, SSM dropped it): one fresh try.
-    await closeTunnel()
+    await closeTunnel(`${src.inst.key}|${src.host}:${src.port}`)
     try {
       data = await gather(await prometheusPort(src))
     } catch (e2) {
