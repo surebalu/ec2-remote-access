@@ -1,15 +1,40 @@
-import { useEffect, useState, type ReactElement } from 'react'
-import { ago, formatBytes, formatDuration, formatPct, levelOf, signedInPeople, type KernelHealth, type KernelServer, type PlmEnvId } from '@shared/plmHealth'
+import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import {
+  GC_RANGES, ago, formatBytes, formatDuration, formatPct, levelOf, memoryChange, signedInPeople,
+  type KernelHealth, type KernelMemoryHistory, type KernelMemorySeries, type KernelServer, type PlmEnvId
+} from '@shared/plmHealth'
 import { Icon } from '../icons'
 import { Bar, Dot, Empty, Pill, SectionHead, Spark, lvl } from './parts'
+import KernelChart, { type KernelLine } from './KernelChart'
 
 /**
  * Each 3DSpace server's ENOVIA kernel, read live from its MBeans (Jolokia): who is signed in, the C++ kernel's own
- * memory (Prometheus does not record it), contexts, database connections and exceptions; plus the day's sign-ins from
- * the servers' own log in Loki, and the license server check.
+ * memory, contexts, database connections and exceptions; the kernel's memory over time where its enovia_kernel_*
+ * metrics are recorded in Prometheus; plus the day's sign-ins from the servers' own log in Loki, and the license
+ * server check.
  */
 
 const seen = new Map<PlmEnvId, KernelHealth>()
+const seenMem = new Map<string, KernelMemoryHistory>()
+const HOURS_KEY = 'ui.health.kernelHours'
+const readHours = (): number => { try { const n = Number(localStorage.getItem(HOURS_KEY)); return GC_RANGES.some((r) => r.hours === n) ? n : 24 } catch { return 24 } }
+
+/** The kernel's memory over the chosen window, every minute while on screen (15 s for the last hour). */
+function useKernelMemory(env: PlmEnvId, hours: number, active: boolean): KernelMemoryHistory | null {
+  const key = `${env}|${hours}`
+  const [d, setD] = useState<KernelMemoryHistory | null>(seenMem.get(key) ?? null)
+  useEffect(() => {
+    setD(seenMem.get(key) ?? null)
+    let gone = false
+    const load = (): void => {
+      window.api.invoke('health:kernelMemory', env, hours).then((x) => { seenMem.set(key, x); if (!gone) setD(x) }, () => undefined)
+    }
+    if (active) load()
+    const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, hours <= 1 ? 15_000 : 60_000)
+    return () => { gone = true; clearInterval(t) }
+  }, [key, active]) // eslint-disable-line react-hooks/exhaustive-deps
+  return d
+}
 
 /** The kernel reading for an environment, every 30 s while on screen; shared by the banner and the panel. */
 export function useKernel(env: PlmEnvId, active: boolean): { d: KernelHealth | null; error: string | null } {
@@ -31,7 +56,10 @@ export function useKernel(env: PlmEnvId, active: boolean): { d: KernelHealth | n
   return { d, error }
 }
 
-export default function KernelPanel({ d, error }: { d: KernelHealth | null; error: string | null }): ReactElement {
+export default function KernelPanel({ env, active, d, error }: { env: PlmEnvId; active: boolean; d: KernelHealth | null; error: string | null }): ReactElement {
+  const [hours, setHours] = useState(readHours)
+  const mem = useKernelMemory(env, hours, active)
+  const pick = (h: number): void => { setHours(h); try { localStorage.setItem(HOURS_KEY, String(h)) } catch { /* storage off */ } }
   const { people, onMany } = signedInPeople(d?.servers ?? [])
   const n = people.length
   return (
@@ -42,7 +70,7 @@ export default function KernelPanel({ d, error }: { d: KernelHealth | null; erro
       {!d && error && <Empty>{error}</Empty>}
       {d && (
         <div className="hl-kernel-grid">
-          {d.servers.map((s) => <KernelCard key={s.ip} s={s} start={d.start} step={d.step} />)}
+          {d.servers.map((s) => <KernelCard key={s.ip} s={s} start={d.start} step={d.step} mem={mem} hours={hours} onHours={pick} />)}
           {d.license && <LicenseCard l={d.license} />}
           {d.gaps.map((g) => <Empty key={g}>{g}</Empty>)}
         </div>
@@ -51,7 +79,7 @@ export default function KernelPanel({ d, error }: { d: KernelHealth | null; erro
   )
 }
 
-function KernelCard({ s, start, step }: { s: KernelServer; start: number; step: number }): ReactElement {
+function KernelCard({ s, start, step, mem, hours, onHours }: { s: KernelServer; start: number; step: number; mem: KernelMemoryHistory | null; hours: number; onHours: (h: number) => void }): ReactElement {
   if (!s.reachable) {
     return (
       <article className={`hl-card hl-kernel ${lvl(s.level)}`}>
@@ -88,14 +116,7 @@ function KernelCard({ s, start, step }: { s: KernelServer; start: number; step: 
         {others.map(({ u, kind }) => <span key={u} className={`hl-user ${kind}`} title={kind === 'system' ? "The kernel's own session" : 'A service account'}>{u}<em>{kind}</em></span>)}
         {!s.people.length && !others.length && <span className="muted">Nobody signed in.</span>}
       </div>
-      <div className="hl-kernel-mem">
-        <div className="hl-kernel-mem-head">
-          <span className="hl-stat-label">Kernel memory (C++)</span>
-          <span className="hl-stat-value">{formatBytes(s.allocatedBytes)} <span className="muted">in use · {formatBytes(s.reservedBytes)} held · peak {formatBytes(s.highwaterBytes)}</span></span>
-        </div>
-        <Bar pct={kernelPct} level="ok" />
-        <span className="hl-metric-note">{formatPct(kernelPct)} of its peak since start{s.limitBytes ? ` · limit ${formatBytes(s.limitBytes, 0)}` : ''}. Not recorded by Prometheus, so there is no history yet.</span>
-      </div>
+      <KernelMemory s={s} series={mem?.servers.find((x) => x.ip === s.ip) ?? null} mem={mem} hours={hours} onHours={onHours} kernelPct={kernelPct} />
       <div className="hl-gc-kpis">
         <div className="hl-stat"><span className="hl-stat-label">Contexts</span><span className="hl-stat-value">{s.contexts ?? '–'}</span></div>
         <div className={`hl-stat ${s.dbExceeded ? 'lvl-warn' : ''}`}><span className="hl-stat-label">DB connections</span><span className="hl-stat-value">{s.dbConnections ?? '–'}{s.dbExceeded ? ` · ${s.dbExceeded} over` : ''}</span></div>
@@ -103,6 +124,70 @@ function KernelCard({ s, start, step }: { s: KernelServer; start: number; step: 
         <div className="hl-stat"><span className="hl-stat-label">Kernel up for</span><span className="hl-stat-value">{formatDuration(s.uptimeSec)}</span></div>
       </div>
     </article>
+  )
+}
+
+/** The kernel's memory now, and over the chosen window where Prometheus records it. */
+function KernelMemory({ s, series, mem, hours, onHours, kernelPct }: {
+  s: KernelServer; series: KernelMemorySeries | null; mem: KernelMemoryHistory | null; hours: number; onHours: (h: number) => void; kernelPct: number | null
+}): ReactElement {
+  const lines = useMemo<KernelLine[]>(() => (series ? [
+    { key: 'allocated', label: 'In use', values: series.allocated },
+    { key: 'reserved', label: 'Held', values: series.reserved },
+    { key: 'highwater', label: 'Peak since start', values: series.highwater }
+  ] : []), [series])
+  const stepMs = (mem?.step ?? 60) * 1000
+  const lastRestart = series?.restarts.at(-1) ?? null
+  const change = series && mem ? memoryChange(series.allocated, mem.start, stepMs, lastRestart) : null
+  const when = (t: number): string => {
+    const d = new Date(t)
+    return d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+  let story = ''
+  if (change) {
+    const pct = change.from ? ((change.to - change.from) / change.from) * 100 : 0
+    const since = lastRestart !== null && change.at >= lastRestart ? `since the restart at ${when(change.at)}` : `since ${when(change.at)}`
+    story = Math.abs(pct) < 2
+      ? `In use held steady around ${formatBytes(change.to)} ${since} (${formatBytes(change.min)} to ${formatBytes(change.max)}).`
+      : `In use went from ${formatBytes(change.from)} to ${formatBytes(change.to)} (${pct > 0 ? '+' : ''}${pct.toFixed(0)}%) ${since}; lowest ${formatBytes(change.min)}, highest ${formatBytes(change.max)}.`
+  }
+  return (
+    <div className="hl-kernel-mem">
+      <div className="hl-kernel-mem-top">
+        <div className="hl-kernel-mem-head">
+          <span className="hl-stat-label">Kernel memory (C++)</span>
+          <span className="hl-stat-value">{formatBytes(s.allocatedBytes)} <span className="muted">in use · {formatBytes(s.reservedBytes)} held · peak {formatBytes(s.highwaterBytes)}</span></span>
+        </div>
+        {series && (
+          <div className="hl-seg sm" role="group" aria-label="Kernel memory time range">
+            {GC_RANGES.map((r) => <button key={r.hours} type="button" className={r.hours === hours ? 'on' : ''} aria-pressed={r.hours === hours} onClick={() => onHours(r.hours)}>{r.label}</button>)}
+          </div>
+        )}
+      </div>
+      {series && mem ? (
+        <>
+          <div className="hl-legend tight">
+            <span><i className="sw k-allocated" />In use</span>
+            <span><i className="sw k-reserved" />Held</span>
+            <span><i className="sw k-highwater" />Peak since start</span>
+            {series.restarts.length > 0 && <span><i className="sw restart" />Restart</span>}
+          </div>
+          <KernelChart start={mem.start} step={mem.step} hours={mem.hours} lines={lines} restarts={series.restarts} height={180}
+            extra={(i) => [
+              ...(series.contexts[i] !== null ? [{ label: 'Contexts', value: String(Math.round(series.contexts[i]!)) }] : []),
+              ...(series.users[i] !== null ? [{ label: 'Active users', value: String(Math.round(series.users[i]!)) }] : [])
+            ]} />
+          <span className="hl-metric-note">{story || 'Not enough readings in this window yet.'}{s.limitBytes ? ` Limit ${formatBytes(s.limitBytes, 0)}.` : ''}</span>
+        </>
+      ) : (
+        <>
+          <Bar pct={kernelPct} level="ok" />
+          <span className="hl-metric-note">{formatPct(kernelPct)} of its peak since start{s.limitBytes ? ` · limit ${formatBytes(s.limitBytes, 0)}` : ''}. {mem ? 'No history for this server: Prometheus has no enovia_kernel_* metrics for it.' : 'Reading its history…'}</span>
+        </>
+      )}
+    </div>
   )
 }
 

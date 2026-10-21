@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkNote, envOf, fullestDisk, machines, signedInPeople, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkNote, envOf, fullestDisk, machines, memoryChange, signedInPeople, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -261,4 +261,13 @@ test('people signed in are counted once across the 3DSpace servers', () => {
   ])
   assert.deepEqual(r, { people: ['alee', 'jdoe', 'mchen', 'sbalu'], onMany: 2 })
   assert.deepEqual(signedInPeople([]), { people: [], onMany: 0 })
+})
+
+test('kernel memory change reads from the first point, or the last restart, to the latest', () => {
+  const MB = 1024 ** 2
+  const v = [null, 100 * MB, 120 * MB, null, 90 * MB, 110 * MB]
+  assert.deepEqual(memoryChange(v, 0, 1000), { from: 100 * MB, to: 110 * MB, at: 1000, min: 90 * MB, max: 120 * MB })
+  // Since a restart at t=4000: the run before it does not count.
+  assert.deepEqual(memoryChange(v, 0, 1000, 4000), { from: 90 * MB, to: 110 * MB, at: 4000, min: 90 * MB, max: 110 * MB })
+  assert.equal(memoryChange([null, 5, null], 0, 1000), null, 'one point is no change')
 })

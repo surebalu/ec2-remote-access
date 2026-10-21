@@ -224,7 +224,7 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
         </>
       )}
 
-      {env.jvms.length > 0 && <KernelPanel d={kernel.d} error={kernel.error} />}
+      {env.jvms.length > 0 && <KernelPanel env={env.id} active={active} d={kernel.d} error={kernel.error} />}
 
       <MemoryGrid env={env.id} active={active} />
 

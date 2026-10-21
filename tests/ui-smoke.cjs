@@ -300,6 +300,19 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
           usersSpark: Array.from({ length: 289 }, () => 2), usersPeak: 2, level: 'ok' }],
         license: { at: now - 720000, status: 'RUNNING', type: 'MANAGED', version: '6.428.3', offline: 'Enabled', level: 'ok', nodes: [{ host: 'lic-1.example.com', ip: '192.0.2.1', port: '443', rttMs: 3 }, { host: 'lic-2.example.com', ip: '192.0.2.2', port: '443', rttMs: 4 }] } }
     }
+    case 'health:kernelMemory': {
+      if (process.env.HEALTH_KMEM_JSON) return JSON.parse(readFileSync(process.env.HEALTH_KMEM_JSON, 'utf8'))[`${args[0]}|${args[1]}`] ?? { env: args[0], hours: args[1], start: now - args[1] * 3600000, step: 60, servers: [] }
+      // Server 01 records its kernel (recording began part-way through, then one restart); 02 has no history.
+      const MB = 1024 ** 2
+      const n = 145
+      const step = Math.round((args[1] * 3600) / (n - 1))
+      const restartAt = 100
+      const series = (f) => Array.from({ length: n }, (_, i) => (i < 30 ? null : f(i)))
+      return { env: args[0], hours: args[1], start: now - args[1] * 3600000, step, servers: [{ ip: '10.9.0.11', label: '01', name: 'space-01',
+        allocated: series((i) => (i < restartAt ? 150 + i * 0.6 : 120 + (i - restartAt) * 0.4) * MB), reserved: series((i) => (i < restartAt ? 120 : 100) * MB),
+        highwater: series((i) => (i < restartAt ? 600 : 300 + (i - restartAt)) * MB), contexts: series((i) => 400 + i), users: series((i) => 5 + (i % 4)),
+        restarts: [now - args[1] * 3600000 + restartAt * step * 1000] }] }
+    }
     case 'health:gc': return process.env.HEALTH_GC_JSON ? JSON.parse(readFileSync(process.env.HEALTH_GC_JSON, 'utf8'))[`${args[0]}|${args[1]}`] : gcFixture(args[0], args[1])
     case 'finder:openWithApps': return [{ name: 'TextEdit', path: '/System/Applications/TextEdit.app', isDefault: true }, { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', isDefault: false }]
     case 'finder:openWith': finderDone.push(['openWith', args[0], args[1]]); return
@@ -485,6 +498,21 @@ app.whenReady().then(async () => {
     assert.equal(await kpi('Machines'), '5/7|healthy')
     assert.match(await js(`document.querySelector('#hl-kernel').textContent`), /3 people signed in now \(1 on more than one server, counted once\)/)
     assert.equal(await js(`document.querySelectorAll('.hl-kpi').length`), 8)
+    // The kernel's memory over time where Prometheus records it: three lines, the restart, a readout; none for 02.
+    await until(`document.querySelectorAll('.hl-kchart svg').length === 1 && document.querySelectorAll('.hl-kline.allocated').length > 0`)
+    assert.ok(await js(`!!document.querySelector('.hl-kchart .hl-chart-restart') && !!document.querySelector('.hl-kchart .hl-kchart-before')`), 'the restart and the start of recording are marked')
+    assert.match(await js(`document.querySelectorAll('.hl-kernel')[0].querySelector('.hl-kernel-mem .hl-metric-note').textContent`), /since the restart at/)
+    assert.match(await js(`document.querySelectorAll('.hl-kernel')[1].querySelector('.hl-kernel-mem').textContent`), /No history for this server/)
+    await js(`(() => { const s = document.querySelector('.hl-kchart svg'); const r = s.getBoundingClientRect(); s.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width * 0.8, clientY: r.top + 50, bubbles: true })) })()`)
+    await until(`!!document.querySelector('.hl-kchart .hl-chart-tip') && document.querySelector('.hl-kchart .hl-chart-tip').textContent.includes('In use') && document.querySelector('.hl-kchart .hl-chart-tip').textContent.includes('Contexts')`)
+    await js(`document.querySelector('#hl-kernel').scrollIntoView()`)
+    await new Promise((r) => setTimeout(r, 300))
+    await screenshot('health-kernel-memory.png')
+    await js(`document.querySelector('.hl-kchart svg').dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }))`)
+    await js(`[...document.querySelectorAll('.hl-kernel-mem .hl-seg button')].find((b) => b.textContent === '7d').click()`)
+    for (let k = 0; k < 100 && !calls.some((c) => c.channel === 'health:kernelMemory' && c.args[1] === 168); k++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'health:kernelMemory' && c.args[1] === 168), 'the week asked for')
+    await js(`document.querySelector('.hl').scrollTop = 0`)
     assert.match(await js(`document.querySelector('.hl-signed-now').textContent`), /2people signed in/)
     assert.ok(await js(`[...document.querySelectorAll('.hl-user.system')].length === 2 && [...document.querySelectorAll('.hl-user.service')].length === 1`), 'system and service accounts set apart')
     // Every machine's memory on one scale, one crosshair through them all.

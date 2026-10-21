@@ -169,6 +169,46 @@ export interface KernelHealth {
 }
 
 /**
+ * One 3DSpace server's kernel over a window (health:kernelMemory), from the enovia_kernel_* metrics its cron script
+ * writes for node_exporter's textfile collector. The series carry a `host` label naming the server they describe, which
+ * is not always the machine that exports them.
+ */
+export interface KernelMemorySeries {
+  ip: string
+  label: string
+  name: string
+  /** The C++ kernel's memory: in use, held from the system, and the peak since it started. */
+  allocated: Spark
+  reserved: Spark
+  highwater: Spark
+  contexts: Spark
+  users: Spark
+  /** When TomEE restarted inside the window (ms): a new pid or start time in enovia_kernel_info. */
+  restarts: number[]
+}
+
+export interface KernelMemoryHistory {
+  env: PlmEnvId
+  hours: number
+  /** ms; one point every `step` seconds. */
+  start: number
+  step: number
+  servers: KernelMemorySeries[]
+}
+
+/**
+ * How a memory series moved over the part of the window it covers, from its first point (or the last restart, when
+ * there is one inside the window) to the latest: plain figures, no forecast, since the history may only be hours old.
+ */
+export function memoryChange(values: Spark, start: number, stepMs: number, since: number | null = null): { from: number; to: number; at: number; min: number; max: number } | null {
+  const pts: [number, number][] = []
+  values.forEach((v, i) => { const t = start + i * stepMs; if (v !== null && Number.isFinite(v) && (since === null || t >= since)) pts.push([t, v]) })
+  if (pts.length < 2) return null
+  const vs = pts.map(([, v]) => v)
+  return { from: pts[0][1], to: pts[pts.length - 1][1], at: pts[0][0], min: Math.min(...vs), max: Math.max(...vs) }
+}
+
+/**
  * Everyone signed in across the 3DSpace servers, each person once: the load balancer can give one person sessions on
  * both servers. `onMany` counts the people seen on more than one.
  */
