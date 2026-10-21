@@ -15,8 +15,18 @@ export const SECTION_NAMES: Record<RailSection, string> = {
   hosts: 'Hosts', overview: 'Overview', health: 'Health', local: 'Terminal', finder: 'Finder', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT'
 }
 
-/** The keys these sections always had. Hosts needs none: ⌘1 is the first tab, which is always Hosts. */
-export const DEFAULT_SHORTCUTS: Partial<Record<RailSection, string>> = { overview: 'cmd+0', local: 'ctrl+`', notes: 'shift+cmd+n' }
+/** What a recorded shortcut can do: show a rail section, or open the radial menu of every section. */
+export type ShortcutTarget = RailSection | 'radial'
+
+export const SHORTCUT_TARGETS: ShortcutTarget[] = [...RAIL_SECTIONS, 'radial']
+
+export const TARGET_NAMES: Record<ShortcutTarget, string> = { ...SECTION_NAMES, radial: 'Radial menu' }
+
+/**
+ * The keys these always had. Hosts needs none: ⌘1 is the first tab, which is always Hosts. ⇧⌘Space for the radial menu
+ * is free in macOS and the app, and holding ⇧⌘ while tapping Space steps round it the way ⌘Tab steps through apps.
+ */
+export const DEFAULT_SHORTCUTS: Partial<Record<ShortcutTarget, string>> = { overview: 'cmd+0', local: 'ctrl+`', notes: 'shift+cmd+n', radial: 'shift+cmd+space' }
 
 /** A key press, from a DOM KeyboardEvent or Electron's before-input-event Input. */
 export interface KeyInput {
@@ -87,17 +97,17 @@ export function formatCombo(combo: string): string {
   return `${mods.has('ctrl') ? '⌃' : ''}${mods.has('alt') ? '⌥' : ''}${mods.has('shift') ? '⇧' : ''}${mods.has('cmd') ? '⌘' : ''}${GLYPHS[key] ?? key.toUpperCase()}`
 }
 
-/** Every section's combination ('' for none): the saved ones, the defaults for the rest. */
-export function sectionKeys(saved: Partial<Record<string, string>> | undefined): Record<RailSection, string> {
-  const out = {} as Record<RailSection, string>
-  for (const s of RAIL_SECTIONS) out[s] = normalizeCombo(saved?.[s] ?? DEFAULT_SHORTCUTS[s] ?? '')
+/** Every target's combination ('' for none): the saved ones, the defaults for the rest. */
+export function sectionKeys(saved: Partial<Record<string, string>> | undefined): Record<ShortcutTarget, string> {
+  const out = {} as Record<ShortcutTarget, string>
+  for (const s of SHORTCUT_TARGETS) out[s] = normalizeCombo(saved?.[s] ?? DEFAULT_SHORTCUTS[s] ?? '')
   return out
 }
 
-export function sectionFor(saved: Partial<Record<string, string>> | undefined, combo: string | null): RailSection | null {
+export function sectionFor(saved: Partial<Record<string, string>> | undefined, combo: string | null): ShortcutTarget | null {
   if (!combo) return null
   const keys = sectionKeys(saved)
-  return RAIL_SECTIONS.find((s) => keys[s] === combo) ?? null
+  return SHORTCUT_TARGETS.find((s) => keys[s] === combo) ?? null
 }
 
 /** Taken by macOS or the app's menu: a shortcut there would never arrive, or would cost copy, paste, undo or quit. */
@@ -163,10 +173,10 @@ export function toolOwns(kind: string | undefined, combo: string | null): boolea
 export type ComboCheck =
   | { ok: false; reason: string }
   /** `from`: the section that had this combination and loses it. `notes`: where a tool keeps it. */
-  | { ok: true; from?: RailSection; notes: string[] }
+  | { ok: true; from?: ShortcutTarget; notes: string[] }
 
 /** Whether `combo` can be the shortcut of `section`; `launcherKey` is the launcher's, which works in every app. */
-export function checkCombo(combo: string, section: RailSection, saved: Partial<Record<string, string>> | undefined, launcherKey = ''): ComboCheck {
+export function checkCombo(combo: string, section: ShortcutTarget, saved: Partial<Record<string, string>> | undefined, launcherKey = ''): ComboCheck {
   const { mods, key } = parts(combo)
   const shown = formatCombo(combo)
   if (launcherKey && normalizeCombo(launcherKey) === combo) return { ok: false, reason: `${shown} opens the launcher, from any app.` }
@@ -177,7 +187,7 @@ export function checkCombo(combo: string, section: RailSection, saved: Partial<R
     return { ok: false, reason: `${shown} is a terminal control key (⌃C stops a command, ⌃R searches history). Add ⌘ or ⌥.` }
   }
   const keys = sectionKeys(saved)
-  const from = RAIL_SECTIONS.find((s) => s !== section && keys[s] === combo)
+  const from = SHORTCUT_TARGETS.find((s) => s !== section && keys[s] === combo)
   const notes = Object.entries(TOOL_KEYS).filter(([, m]) => m[combo]).map(([tool, m]) => `In ${SECTION_NAMES[tool as RailSection]}, ${shown} stays ${m[combo]}.`)
   return { ok: true, from, notes }
 }
@@ -198,7 +208,7 @@ export function checkGlobalCombo(combo: string, saved: Partial<Record<string, st
     return { ok: false, reason: `${shown} is a terminal control key in every terminal. Add ⌘ or ⌥.` }
   }
   const section = sectionFor(saved, combo)
-  if (section) return { ok: false, reason: `${shown} opens ${SECTION_NAMES[section]} in this app; give one of them another key.` }
+  if (section) return { ok: false, reason: `${shown} opens ${section === 'radial' ? 'the radial menu' : SECTION_NAMES[section]} in this app; give one of them another key.` }
   return { ok: true, notes: combo === 'alt+space' ? ['Raycast and Alfred use ⌥Space too: if one of them is on it, only one app gets the key.'] : [] }
 }
 

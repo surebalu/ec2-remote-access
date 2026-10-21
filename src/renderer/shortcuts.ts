@@ -3,7 +3,7 @@
  * window-level key capture, and so a focused terminal still sees them bubble up; TerminalTab tells xterm to ignore
  * the same combinations through isAppShortcut.
  */
-import { comboOf, formatCombo, sectionFor, sectionKeys, toolOwns, type RailSection } from '@shared/keyCombos'
+import { comboOf, formatCombo, sectionFor, sectionKeys, toolOwns, type RailSection, type ShortcutTarget } from '@shared/keyCombos'
 import { isSession, useStore } from './store'
 import { neighbor, type Direction } from './termLayout'
 
@@ -171,8 +171,8 @@ const inSplit = (): boolean => {
 
 const comboOfEvent = (e: KeyboardEvent): string | null => comboOf({ code: e.code, key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey })
 
-/** The rail section whose shortcut (Settings → Keyboard) this key press is, if any. */
-export function sectionOfKey(e: KeyboardEvent): RailSection | null {
+/** The rail section (or the radial menu) whose shortcut (Settings → Keyboard) this key press is, if any. */
+export function sectionOfKey(e: KeyboardEvent): ShortcutTarget | null {
   return sectionFor(useStore.getState().settings?.shortcuts, comboOfEvent(e))
 }
 
@@ -191,7 +191,7 @@ export function replayPageKey(d: PageKey): void {
 }
 
 /** A section's shortcut as menus show it ('⌃⌘C'), or '' when it has none. */
-export function sectionKeyLabel(section: RailSection, saved: Partial<Record<string, string>> | undefined): string {
+export function sectionKeyLabel(section: ShortcutTarget, saved: Partial<Record<string, string>> | undefined): string {
   return formatCombo(sectionKeys(saved)[section])
 }
 
@@ -205,10 +205,19 @@ export function openKeyboardSettings(): void {
 let cameFrom: { section: RailSection; tab: string | null } | null = null
 
 /**
+ * Opens the radial menu (RadialMenu.tsx), which listens for this. `held`: opened by a shortcut whose modifiers are
+ * still down, so letting go of them picks the highlighted section, as ⌘Tab does.
+ */
+export function openRadial(held = false): void {
+  window.dispatchEvent(new CustomEvent('ec2ra:radial', { detail: { held } }))
+}
+
+/**
  * Shows a section, as its rail button does. Pressed again while that section is in front it goes back to the tab
  * the shortcut came from, so a key can flip between, say, a session and Claude.
  */
-export function runSection(section: RailSection): void {
+export function runSection(section: ShortcutTarget, held = false): void {
+  if (section === 'radial') return openRadial(held)
   const st = useStore.getState()
   if (section === 'overview') {
     st.showGrid(!st.gridView)
@@ -251,7 +260,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   if (section && !toolOwns(inFront?.kind, comboOfEvent(e))) {
     e.preventDefault()
     e.stopPropagation()
-    runSection(section)
+    runSection(section, e.metaKey || e.ctrlKey || e.altKey || e.shiftKey)
     return true
   }
   const tabHandler = inFront && !isSession(inFront) ? tabKeys[inFront.kind as KeyedKind] : undefined

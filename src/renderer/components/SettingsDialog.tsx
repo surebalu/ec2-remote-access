@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { AppAbout, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
-import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
+import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, SHORTCUT_TARGETS, sectionKeys, TARGET_NAMES, type RailSection, type ShortcutTarget } from '@shared/keyCombos'
 import { CAN_DICTATE, voice } from '../voice'
 import { useStore } from '../store'
 import Modal from './Modal'
@@ -187,7 +187,7 @@ const SECTION_HINTS: Record<RailSection, string> = {
 const heldMods = (e: KeyboardEvent): string => `${e.ctrlKey ? '⌃' : ''}${e.altKey ? '⌥' : ''}${e.shiftKey ? '⇧' : ''}${e.metaKey ? '⌘' : ''}`
 
 /** What Settings → Keyboard records a key for: a rail section, or the launcher (a key in every app). */
-type KeyTarget = RailSection | 'launcher'
+type KeyTarget = ShortcutTarget | 'launcher'
 
 /**
  * Settings → Keyboard: the launcher's key, which works in every app, and a shortcut for each section of the app
@@ -207,9 +207,9 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
   useEffect(refreshStatus, [])
   const setLauncher = (key: string): void => { void onLauncher(key).then(refreshStatus) }
 
-  const assign = (section: RailSection, combo: string, from?: RailSection): void => {
+  const assign = (section: ShortcutTarget, combo: string, from?: ShortcutTarget): void => {
     const next = { ...(draft.shortcuts ?? {}) }
-    const put = (sec: RailSection, value: string): void => {
+    const put = (sec: ShortcutTarget, value: string): void => {
       if (value === (DEFAULT_SHORTCUTS[sec] ?? '')) delete next[sec]
       else next[sec] = value
     }
@@ -256,7 +256,7 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
       }
       if (recording === 'launcher') setLauncher(combo)
       else assign(recording, combo, check.from)
-      const notes = [...(check.from ? [`Moved from ${SECTION_NAMES[check.from]}, which has no shortcut now.`] : []), ...check.notes]
+      const notes = [...(check.from ? [`Moved from ${TARGET_NAMES[check.from]}, which has no shortcut now.`] : []), ...check.notes]
       setNotice(notes.length ? { section: recording, text: notes.join(' ') } : null)
       stop()
     }
@@ -320,6 +320,14 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
           </Row>
         </Group>
       )}
+      <Group title="Switch sections">
+        <Row label={<span className="flex items-center gap-2"><Icon.radial className="set-key-icon" />Radial menu</span>}
+          hint={hintFor('radial', keys.radial
+            ? `Every section in a ring around the pointer. Hold ${formatCombo(keys.radial).replace(/[^⌃⌥⇧⌘]+$/, '') || 'the keys'} and tap ${formatCombo(keys.radial).replace(/^[⌃⌥⇧⌘]+/, '')} to step round, or point at one, then let go to switch; or tap it once and click.`
+            : 'Every section in a ring around the pointer, to switch in one move. Give it a key to use it.')}>
+          {field('radial', 'the radial menu', keys.radial, DEFAULT_SHORTCUTS.radial ?? '')}
+        </Row>
+      </Group>
       <Group title="App sections">
         {sections.map((sec) => {
           const SecIcon = SECTION_ICONS[sec]
@@ -329,7 +337,7 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
             </Row>
           )
         })}
-        <Row label="Start over" hint={`Back to ${RAIL_SECTIONS.filter((x) => DEFAULT_SHORTCUTS[x]).map((x) => `${formatCombo(DEFAULT_SHORTCUTS[x]!)} ${SECTION_NAMES[x]}`).join(', ')}, and none for the rest.`}>
+        <Row label="Start over" hint={`Back to ${SHORTCUT_TARGETS.filter((x) => DEFAULT_SHORTCUTS[x]).map((x) => `${formatCombo(DEFAULT_SHORTCUTS[x]!)} ${TARGET_NAMES[x]}`).join(', ')}, and none for the rest.`}>
           <button type="button" className="btn" disabled={!customised} onClick={() => { setNotice(null); stop(); onChange({}) }}>Restore defaults</button>
         </Row>
       </Group>

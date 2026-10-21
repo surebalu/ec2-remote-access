@@ -12,6 +12,7 @@ import { Bar, Dot, Empty, Gauge, MARKS, Pill, SectionHead, Spark, StatusRing, lv
 import HeapChart from './HeapChart'
 import MemoryGrid from './MemoryGrid'
 import KernelPanel, { useKernel } from './KernelPanel'
+import { mayPoll, onReturn } from './poll'
 import Honeycombs from './Honeycomb'
 
 /**
@@ -59,14 +60,14 @@ export default function HealthTab({ active }: { tab: Tab; active: boolean }): Re
     }
   }, [])
 
-  // On screen: read now (unless the last picture is fresh) and every 30 s after, while the window is visible.
+  // While it is the tab in front: read now (unless the last picture is fresh) and every 30 s after, also with the
+  // window behind others or on another screen (mayPoll); coming back to the window reads at once if it is stale.
   useEffect(() => {
     if (!active) return
     if (!last || Date.now() - last.at > POLL_MS / 2) void load()
-    const t = setInterval(() => { if (document.visibilityState === 'visible') void load() }, POLL_MS)
-    const vis = (): void => { if (document.visibilityState === 'visible' && last && Date.now() - last.at > POLL_MS) void load() }
-    document.addEventListener('visibilitychange', vis)
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis) }
+    const t = setInterval(() => { if (mayPoll()) void load() }, POLL_MS)
+    const back = onReturn(() => { if (!last || Date.now() - last.at > POLL_MS / 2) void load() })
+    return () => { clearInterval(t); back() }
   }, [active, load])
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 5000)
@@ -377,7 +378,7 @@ function JvmPanel({ j, active }: { j: PlmEnvHealth['jvms'][number]; active: bool
       ).finally(() => { if (!gone) setLoading(false) })
     }
     if (active) load()
-    const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, hours <= 1 ? 15_000 : 60_000)
+    const t = setInterval(() => { if (active && mayPoll()) load() }, hours <= 1 ? 15_000 : 60_000)
     return () => { gone = true; clearInterval(t) }
   }, [key, active, j.reporting]) // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (h: number): void => { setHours(h); try { localStorage.setItem(GC_KEY, String(h)) } catch { /* storage off */ } }

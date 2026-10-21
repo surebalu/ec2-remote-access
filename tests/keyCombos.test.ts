@@ -109,7 +109,10 @@ test('the launcher key works in every app, so it is checked against typing every
   const ok = checkGlobalCombo('alt+space', undefined)
   assert.equal(ok.ok, true)
   assert.match(ok.ok ? ok.notes[0] : '', /Raycast/)
-  for (const combo of ['ctrl+alt+cmd+space', 'shift+cmd+space', 'alt+cmd+l', 'f13', 'ctrl+alt+k']) assert.equal(checkGlobalCombo(combo, undefined).ok, true, combo)
+  for (const combo of ['ctrl+alt+cmd+space', 'alt+cmd+l', 'f13', 'ctrl+alt+k']) assert.equal(checkGlobalCombo(combo, undefined).ok, true, combo)
+  // ⇧⌘Space is the radial menu's by default; free once the radial has another key.
+  assert.match(reason('shift+cmd+space'), /opens the radial menu/)
+  assert.equal(checkGlobalCombo('shift+cmd+space', { radial: 'f6' }).ok, true)
   assert.match(reason('space'), /⌘, ⌃ or ⌥/)
   assert.match(reason('alt+e'), /types a character/)
   assert.match(reason('shift+alt+e'), /types a character/)
@@ -131,4 +134,15 @@ test('combinations become Electron accelerators', () => {
   assert.equal(toAccelerator('ctrl+cmd+up'), 'Control+Command+Up')
   assert.equal(toAccelerator('Cmd+Shift+Enter'), 'Shift+Command+Return')
   assert.equal(toAccelerator(''), '')
+})
+
+test('the radial menu has a shortcut like the sections, ⇧⌘Space unless changed', () => {
+  assert.equal(sectionFor(undefined, 'shift+cmd+space'), 'radial')
+  assert.equal(sectionFor({ radial: '' }, 'shift+cmd+space'), null, 'an empty one turns it off')
+  assert.equal(sectionFor({ radial: 'f6' }, 'f6'), 'radial')
+  assert.equal(sectionKeys(undefined).radial, 'shift+cmd+space')
+  // Giving a section the radial's key takes it from the radial, as between sections.
+  const moved = checkCombo('shift+cmd+space', 'claude', undefined)
+  assert.ok(moved.ok && moved.from === 'radial')
+  assert.equal(checkCombo('cmd+space', 'radial', undefined).ok, false, 'Spotlight stays macOS\'s')
 })

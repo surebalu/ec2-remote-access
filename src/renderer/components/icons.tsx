@@ -380,6 +380,17 @@ export const Icon = {
     </svg>
   ),
   /** A heart with a pulse through it: the Health tab. */
+  radial: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="12" cy="12" r="2.4" />
+      <circle cx="12" cy="4" r="1.6" />
+      <circle cx="18.9" cy="8" r="1.6" />
+      <circle cx="18.9" cy="16" r="1.6" />
+      <circle cx="12" cy="20" r="1.6" />
+      <circle cx="5.1" cy="16" r="1.6" />
+      <circle cx="5.1" cy="8" r="1.6" />
+    </svg>
+  ),
   hexes: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M7.5 3.4l3.98 2.3v4.6L7.5 12.6l-3.98-2.3V5.7zM16.5 3.4l3.98 2.3v4.6l-3.98 2.3-3.98-2.3V5.7zM12 11.2l3.98 2.3v4.6L12 20.4l-3.98-2.3v-4.6z" />
