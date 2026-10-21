@@ -6,17 +6,15 @@
  * their setup is unchanged. Desktop only: the gateway refuses term:* calls, never forwards term:* events, and
  * never loads node-pty (it is imported on first use).
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { homedir, userInfo } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type { IPty } from 'node-pty'
 import type { LocalTermInfo, LocalTermOpen, TerminalState } from '@shared/types'
 import { parseHistory } from '@shared/termIntegration'
 import { host } from './host'
-
-type PtyModule = typeof import('node-pty')
+import { loadPty } from './pty'
 
 interface Session {
   pty: IPty
@@ -25,36 +23,6 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>()
-let ptyModule: Promise<PtyModule> | null = null
-
-/** node-pty 1.1.0's prebuilt spawn-helper ships without the execute bit; packaged apps fix it in build/afterPack.cjs. */
-function ensureSpawnHelper(): void {
-  if (process.platform === 'win32') return
-  try {
-    const dir = dirname(createRequire(import.meta.url).resolve('node-pty/package.json')).replace('app.asar', 'app.asar.unpacked')
-    const helper = join(dir, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')
-    if (existsSync(helper) && !(statSync(helper).mode & 0o111)) chmodSync(helper, 0o755)
-  } catch {
-    /* a helper built from source is executable already */
-  }
-}
-
-const unwrap = (m: unknown): PtyModule => ((m as { default?: PtyModule }).default ?? m) as PtyModule
-
-/**
- * node-pty ships prebuilt binaries for macOS only; on Linux (the Pi gateway, installed without build scripts) its
- * native module is missing, so the API-identical @lydell/node-pty with prebuilt Linux binaries stands in.
- */
-function pty(): Promise<PtyModule> {
-  ptyModule ??= import('node-pty')
-    .then((m) => {
-      ensureSpawnHelper()
-      return unwrap(m)
-    })
-    .catch(() => import('@lydell/node-pty').then(unwrap))
-  ptyModule.catch(() => { ptyModule = null })
-  return ptyModule
-}
 
 // zsh reads $ZDOTDIR/.zshenv, .zprofile, .zshrc, .zlogin in that order for a login shell. Each of ours sources the
 // user's file with ZDOTDIR set back to theirs (their files may move it), and .zlogin hands ZDOTDIR back for good.
@@ -146,7 +114,7 @@ function flush(id: string): void {
 
 export async function openLocal(req: LocalTermOpen): Promise<LocalTermInfo> {
   if (sessions.has(req.id)) throw new Error('That terminal is already open.')
-  const { spawn } = await pty()
+  const { spawn } = await loadPty()
   const shell = process.env.SHELL || userInfo().shell || '/bin/zsh'
   const cwd = req.cwd && isDir(req.cwd) ? req.cwd : homedir()
   const env = shellEnv(req.env)
