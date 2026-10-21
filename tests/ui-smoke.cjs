@@ -94,6 +94,25 @@ const finderFs = {
   '/Users/fixture/Downloads': [], '/Users/fixture/Projects': [fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200)]
 }
 const finderDone = []
+// A JVM's heap over a window: an hour-long saw-tooth from 1.5 to 6 GB, a full collection at each drop, a steady floor.
+const gcFixture = (instance, hours) => {
+  const step = { 1: 15, 6: 60, 24: 240, 72: 600, 168: 1800, 336: 3600 }[hours] ?? 240
+  const n = Math.round((hours * 3600) / step) + 1
+  const GB = 1024 ** 3
+  const start = now - hours * 3600000
+  const phase = (i) => ((i * step) % 3600) / 3600
+  const heapHigh = Array.from({ length: n }, (_, i) => Math.round((1.5 + 4.5 * phase(i)) * GB))
+  const heapLow = heapHigh.map((v) => v - 0.2 * GB)
+  const fullGcs = Array.from({ length: n }, (_, i) => (i > 0 && phase(i) < phase(i - 1) ? 1 : 0))
+  return {
+    instance, hours, start, step, heapMax: 8 * GB, heapHigh, heapLow, afterGc: heapHigh.map(() => 1.5 * GB), fullGcs, startedAt: now - 1.6 * 86400000, lastFullGcAt: now - 1200000,
+    collectors: [{ name: 'global garbage collect', full: true, count: 24, seconds: 0.07, avgMs: 2.9, perHour: 1 }, { name: 'partial gc', full: false, count: 900, seconds: 32, avgMs: 35.6, perHour: 37.5 }],
+    throughputPct: 99.96, allocBytesPerSec: 11 * 1024 ** 2,
+    pools: [{ name: 'balanced-old', used: 4.4 * GB, max: 8 * GB, heap: true }, { name: 'balanced-eden', used: 0.3 * GB, max: 1 * GB, heap: true }, { name: 'class storage', used: 0.2 * GB, max: null, heap: false }],
+    trend: { level: 'ok', text: 'Healthy saw-tooth: after collections the heap drops back to about 1.5 GB (19% of 8.0 GB).', floorBytes: 1.5 * GB, floorPct: 19, slopePerDay: 0, daysToMax: null, line: null },
+    policy: 'OpenJ9 balanced', nonHeapBytes: 0.46 * GB, rssBytes: 11.5 * GB, openFds: 1926
+  }
+}
 // The Health tab's snapshot: three environments of an example platform (HEALTH_SNAPSHOT_JSON renders a captured one).
 const healthFixture = () => {
   const spark = (base, wobble, n = 61) => Array.from({ length: n }, (_, i) => Math.round((base + Math.sin(i / 5) * wobble + (i % 7) * wobble * 0.1) * 100) / 100)
@@ -103,12 +122,16 @@ const healthFixture = () => {
   const host = (role, label, ip, extra = {}) => ({ ip, name: `${role.toLowerCase().replace(/\W+/g, '-')}-${label}`, role, label, level: 'ok', problems: [], state: 'running', reporting: true, os: 'linux', cpu: 18 + Number(label) * 7, mem: 52, memBytes: 16 * 1024 ** 3, disk: { mount: '/', pct: 41 }, load: 0.4, cores: 4, uptimeSec: 3 * 86400, cpuSpark: spark(20, 6), ...extra })
   const env = (id, name, level, headline, issues, services, hosts, extra = {}) => ({
     id, name, level, headline, issues, services, hosts,
-    jvms: [{ label: '01', ip: '10.9.0.11', name: 'space-01', level: 'ok', problems: [], reporting: true, heapUsed: 5.4 * 1024 ** 3, heapMax: 8 * 1024 ** 3, heapPct: 67, gcPct: 0.4, threads: 134, fdsPct: 1.2, cpu: 9, uptimeSec: 1.6 * 86400, heapSpark: spark(62, 8) }],
+    jvms: [{ label: '01', ip: '10.9.0.11', name: 'space-01', promInstance: `${id}-space-01:9404`, level: 'ok', problems: [], reporting: true, heapUsed: 5.4 * 1024 ** 3, heapMax: 8 * 1024 ** 3, heapPct: 67,
+      afterGcBytes: 1.6 * 1024 ** 3, afterGcPct: 20, startedAt: now - 1.6 * 86400000, trend: { level: 'ok', text: 'Healthy saw-tooth: after collections the heap drops back to about 1.6 GB (20% of 8.0 GB).', floorBytes: 1.6 * 1024 ** 3, floorPct: 20, slopePerDay: 0, daysToMax: null, line: null },
+      gcPct: 0.4, threads: 134, fdsPct: 1.2, cpu: 9, uptimeSec: 1.6 * 86400, heapSpark: spark(62, 8) }],
     apaches: [{ label: '01', ip: '10.9.0.21', name: 'web-01', level: 'ok', reporting: true, busy: 11, idle: 139, reqPerSec: 1.6, spark: spark(1.5, 0.5) }],
     storage: [{ mount: '/filestore', device: 'nas:/filestore', shared: true, hosts: ['FCS 01', 'FCS 02'], pct: 86.3, usedBytes: 440e9, sizeBytes: 510e9, level: 'crit' }, { mount: '/', device: '/dev/nvme0n1p4', shared: false, hosts: ['3DSpace 01'], pct: 41, usedBytes: 21e9, sizeBytes: 52e9, level: 'ok' }],
     db: { id: `${id}-db`, engine: 'oracle-se2 19', instanceClass: 'db.m5.2xlarge', status: 'available', multiAz: id === 'prod', level: 'ok', problems: [], cpu: 2.1, connections: 719, freeStorageBytes: 300e9, storageBytes: 700 * 1024 ** 3, freeMemBytes: 9e9, readLatencyMs: 0.6, writeLatencyMs: 2.3, cpuSpark: spark(3, 1, 36), connSpark: spark(700, 20, 36) },
     albs: [{ name: `${id}-alb`, internal: false, level: 'ok', problems: [], requestsPerMin: 54, target5xx: 0, elb5xx: 0, responseMs: 13, healthy: 2, unhealthy: 0, reqSpark: spark(50, 10, 36), latencySpark: spark(14, 4, 36) }],
     certs: ['pass', 'space', 'dash'].map((h) => ({ host: `${h}-${id}.example.com`, days: 106, expires: now + 106 * 86400000, level: 'ok' })),
+    checks: services.flatMap((sv) => [...sv.fronts.map((f) => ({ serviceId: sv.id, service: sv.name, url: f.url, via: 'lb', label: '', level: f.level, status: f.status, ms: f.ms, dnsMs: 0.5, certDays: 106, stopped: false, note: null })),
+      ...sv.nodes.map((nd) => ({ serviceId: sv.id, service: sv.name, url: nd.url, via: 'server', label: nd.label, level: nd.level, status: nd.status, ms: nd.ms, dnsMs: 0.3, certDays: null, stopped: nd.stopped, note: null }))]),
     alerts: [], gaps: [], ...extra
   })
   return {
@@ -253,6 +276,18 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
     case 'health:snapshot': return process.env.HEALTH_SNAPSHOT_JSON ? JSON.parse(readFileSync(process.env.HEALTH_SNAPSHOT_JSON, 'utf8')) : healthFixture()
+    case 'health:memory': {
+      if (process.env.HEALTH_MEM_JSON) return JSON.parse(readFileSync(process.env.HEALTH_MEM_JSON, 'utf8'))[`${args[0]}|${args[1]}`]
+      const env = healthFixture().envs.find((e) => e.id === args[0])
+      const n = { 1: 241, 6: 361, 24: 361, 72: 433, 168: 337, 336: 337 }[args[1]] ?? 361
+      const step = { 1: 15, 6: 60, 24: 240, 72: 600, 168: 1800, 336: 3600 }[args[1]] ?? 240
+      return { env: args[0], hours: args[1], start: now - args[1] * 3600000, step, machines: (env?.hosts ?? []).map((h, k) => ({
+        ip: h.ip, name: h.name, role: h.role, label: h.label, os: h.os, state: h.state, totalBytes: h.memBytes,
+        pct: Array.from({ length: n }, (_, i) => (h.state === 'stopped' && i > n / 2 ? null : Math.round((40 + k * 9 + Math.sin(i / 9) * 8) * 10) / 10)),
+        now: h.state === 'stopped' ? null : 40 + k * 9, peak: 48 + k * 9, avg: 40 + k * 9, level: h.state === 'stopped' ? 'off' : 40 + k * 9 >= 80 ? 'warn' : 'ok'
+      })) }
+    }
+    case 'health:gc': return process.env.HEALTH_GC_JSON ? JSON.parse(readFileSync(process.env.HEALTH_GC_JSON, 'utf8'))[`${args[0]}|${args[1]}`] : gcFixture(args[0], args[1])
     case 'finder:openWithApps': return [{ name: 'TextEdit', path: '/System/Applications/TextEdit.app', isDefault: true }, { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', isDefault: false }]
     case 'finder:openWith': finderDone.push(['openWith', args[0], args[1]]); return
     case 'finder:openWithOther': finderDone.push(['openWithOther', args[0]]); return
@@ -397,13 +432,42 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
     assert.equal(await js(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling')
     assert.ok((await js(`document.querySelector('.hl-alert.lvl-off')`)) === null, 'alerts about stopped servers start hidden')
+    // Every machine's memory on one scale, one crosshair through them all.
+    await until(`document.querySelectorAll('.hl-mem').length === 4`)
+    assert.ok(await js(`[...document.querySelectorAll('.hl-sec-controls .hl-seg button')].some((b) => b.textContent.startsWith('Stopped1'))`), 'stopped machines wait behind a filter')
+    await js(`(() => { const c = document.querySelectorAll('.hl-mem-chart')[1]; const r = c.getBoundingClientRect(); c.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width / 2, clientY: r.top + 20, bubbles: true })) })()`)
+    await until(`document.querySelectorAll('.hl-mem-cross').length === 4 && !!document.querySelector('.hl-mem-tip')`)
+    assert.ok(calls.some((c) => c.channel === 'health:memory' && c.args[0] === 'prod'), 'the environment shown is asked for')
+    // Every health-check URL behind the cards, as Grafana's HTTP monitoring table lists them.
+    await js(`[...document.querySelectorAll('.hl-link')].find((b) => b.textContent.startsWith('All health checks')).click()`)
+    await until(`document.querySelectorAll('.hl-chk').length === 12`)
+    assert.ok(await js(`[...document.querySelectorAll('.hl-chk')].some((r) => r.textContent.includes('pass-prod.example.com/3dpassport/healthcheck') && r.textContent.includes('no answer'))`), 'a failing check reads no answer')
+    assert.ok(await js(`[...document.querySelectorAll('.hl-chk.off')].some((r) => r.textContent.includes('stopped'))`), 'a stopped server\'s check is set aside')
+    await js(`[...document.querySelectorAll('.hl-link')].find((b) => b.textContent.startsWith('Hide health checks')).click()`)
+    // The heap chart: GCeasy's saw-tooth with a triangle at every full collection, a range switch and a readout.
+    await until(`!!document.querySelector('.hl-jvm-panel .hl-heap svg') && document.querySelectorAll('.hl-gc-mark').length >= 20`)
+    assert.match(await js(`document.querySelector('.hl-jvm-panel .hl-verdict').textContent`), /Healthy saw-tooth/)
+    const gcAsks = () => calls.filter((c) => c.channel === 'health:gc').map((c) => c.args[1])
+    assert.ok(gcAsks().includes(24), 'a day by default')
+    await js(`[...document.querySelectorAll('.hl-jvm-panel .hl-seg button')].find((b) => b.textContent === '7d').click()`)
+    await until(`document.querySelector('.hl-jvm-panel .hl-seg button.on').textContent === '7d' && document.querySelectorAll('.hl-gc-tick, .hl-gc-mark').length > 0`)
+    assert.ok(gcAsks().includes(168), 'the week asked for')
+    await js(`document.querySelector('.hl-jvm-panel .hl-seg button').click()`)
+    await until(`document.querySelector('.hl-jvm-panel .hl-seg button.on').textContent === '1h' && document.querySelectorAll('.hl-gc-mark').length >= 1`)
+    assert.ok(gcAsks().includes(1), 'the last hour at full resolution')
+    await js(`(() => { const s = document.querySelector('.hl-jvm-panel .hl-heap svg'); const r = s.getBoundingClientRect(); s.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width * 0.6, clientY: r.top + 60, bubbles: true })) })()`)
+    await until(`!!document.querySelector('.hl-chart-tip') && document.querySelector('.hl-chart-tip').textContent.includes('After GC')`)
+    await js(`document.querySelector('#hl-jvm').scrollIntoView()`)
+    await screenshot('health-gc.png')
+    await js(`[...document.querySelectorAll('.hl-jvm-panel .hl-seg button')].find((b) => b.textContent === '24h').click()`)
+    await js(`document.querySelector('.hl').scrollTop = 0`)
     await screenshot('health-dark.png')
     await js(`document.documentElement.setAttribute('data-theme', 'light')`)
     await screenshot('health-light.png')
     await js(`document.documentElement.setAttribute('data-theme', 'dark')`)
     await js(`[...document.querySelectorAll('.hl-issues button')].find((b) => b.textContent.includes('/filestore')).click()`)
     await until(`document.querySelector('.hl').dataset.flash === 'storage'`)
-    await js(`[...document.querySelectorAll('.hl-seg button')].find((b) => b.textContent.startsWith('Stopped')).click()`)
+    await js(`[...document.querySelectorAll('#hl-servers .hl-seg button')].find((b) => b.textContent.startsWith('Stopped')).click()`)
     await until(`document.querySelectorAll('.hl-srv').length === 1 && document.querySelector('.hl-srv').classList.contains('off')`)
     await js(`[...document.querySelectorAll('.hl-env')].find((b) => b.textContent.startsWith('QA')).click()`)
     await until(`document.querySelector('.hl-headline').textContent === 'All systems operational'`)

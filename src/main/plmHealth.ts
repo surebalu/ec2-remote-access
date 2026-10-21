@@ -15,10 +15,10 @@ import { CloudWatchClient, GetMetricDataCommand, ListMetricsCommand, type Metric
 import { DescribeDBInstancesCommand, RDSClient } from '@aws-sdk/client-rds'
 import type { Instance } from '@shared/types'
 import {
-  ENV_NAMES, ENV_ORDER, LIMITS, ROLES, SERVICE_ORDER, envOf, ipOf, isFrontProbe, levelBelow, levelOf, nodeLabel, probeOk, roleOf, serviceLevel,
-  urlHost, verdict, worst, formatPct, formatMs,
+  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
+  serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
   type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type Endpoint, type HostHealth, type Issue, type JvmHealth,
-  type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
+  type HealthCheck, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
 } from '@shared/plmHealth'
 import { credentialsFor } from './aws/credentials'
 import { log } from './log'
@@ -104,14 +104,14 @@ const instant = async (port: number, query: string): Promise<Sample[]> =>
 const SPARK_MIN = 60
 const SPARK_STEP = 60
 
-async function range(port: number, query: string, end: number): Promise<Series[]> {
-  const start = end - SPARK_MIN * 60
-  const d = await api<{ result: { metric: Labels; values: [number, string][] }[] }>(port, 'query_range', { query, start: String(start), end: String(end), step: String(SPARK_STEP) })
-  const n = Math.round((end - start) / SPARK_STEP) + 1
+async function range(port: number, query: string, end: number, minutes = SPARK_MIN, step = SPARK_STEP): Promise<Series[]> {
+  const start = end - minutes * 60
+  const d = await api<{ result: { metric: Labels; values: [number, string][] }[] }>(port, 'query_range', { query, start: String(start), end: String(end), step: String(step) })
+  const n = Math.round((end - start) / step) + 1
   return d.result.map((r) => {
     const values: Spark = new Array<number | null>(n).fill(null)
     for (const [t, v] of r.values) {
-      const i = Math.round((t - start) / SPARK_STEP)
+      const i = Math.round((t - start) / step)
       const x = Number(v)
       if (i >= 0 && i < n && Number.isFinite(x)) values[i] = Math.round(x * 100) / 100
     }
@@ -126,6 +126,7 @@ const Q = {
   probeOk: 'probe_success',
   probeStatus: 'probe_http_status_code',
   probeSec: 'probe_duration_seconds',
+  probeDns: 'probe_dns_lookup_time_seconds',
   cert: 'probe_ssl_earliest_cert_expiry',
   cpu: '100 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100',
   mem: '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100',
@@ -144,6 +145,9 @@ const Q = {
   heapMax: 'java_lang_memory_heapmemoryusage_max',
   // Heap climbs between collections; its low point over a quarter of an hour is what the JVM cannot get back.
   heapFloor: 'min_over_time((java_lang_memory_heapmemoryusage_used / java_lang_memory_heapmemoryusage_max * 100)[15m:1m])',
+  // What the last collection of each heap pool left (MemoryPool CollectionUsage), summed: the heap after GC.
+  afterGc: 'sum by (instance) (jvm_memory_pool_collection_used_bytes)',
+  jvmStart: 'java_lang_runtime_starttime',
   gc: 'sum by (instance) (rate(jvm_gc_collection_seconds_sum[5m])) * 100',
   threads: 'java_lang_threading_threadcount',
   fds: 'java_lang_operatingsystem_openfiledescriptorcount / java_lang_operatingsystem_maxfiledescriptorcount * 100',
@@ -163,22 +167,27 @@ const RANGE = {
 type Instant = Record<keyof typeof Q, Sample[]>
 type Ranges = Record<keyof typeof RANGE, Series[]>
 interface PromAlert { labels: Labels; annotations?: Labels; state: string; activeAt?: string }
+/** The after-GC floor over the last day (15-minute steps), for each JVM's leak verdict. */
+interface Day { start: number; step: number; afterGc: Series[] }
+const DAY_STEP = 900
 
-async function gather(port: number): Promise<{ q: Instant; r: Ranges; alerts: PromAlert[] }> {
+async function gather(port: number): Promise<{ q: Instant; r: Ranges; alerts: PromAlert[]; day: Day }> {
   const end = Math.floor(Date.now() / 1000)
   const qs = Object.entries(Q) as [keyof typeof Q, string][]
   const rs = Object.entries(RANGE) as [keyof typeof RANGE, string][]
-  const [qv, rv, alerts] = await Promise.all([
+  const [qv, rv, alerts, afterGc] = await Promise.all([
     Promise.all(qs.map(([, query]) => instant(port, query).catch(() => [] as Sample[]))),
     Promise.all(rs.map(([, query]) => range(port, query, end).catch(() => [] as Series[]))),
-    api<{ alerts: PromAlert[] }>(port, 'alerts', {}).then((d) => d.alerts, () => [] as PromAlert[])
+    api<{ alerts: PromAlert[] }>(port, 'alerts', {}).then((d) => d.alerts, () => [] as PromAlert[]),
+    range(port, `sum by (instance) (min_over_time(jvm_memory_pool_collection_used_bytes[${DAY_STEP}s]))`, end, 24 * 60, DAY_STEP).catch(() => [] as Series[])
   ])
   // Every instant query failing means Prometheus itself did not answer.
   if (qv.every((x) => !x.length)) await instant(port, 'up')
   return {
     q: Object.fromEntries(qs.map(([k], i) => [k, qv[i]])) as Instant,
     r: Object.fromEntries(rs.map(([k], i) => [k, rv[i]])) as Ranges,
-    alerts
+    alerts,
+    day: { start: (end - 24 * 3600) * 1000, step: DAY_STEP, afterGc }
   }
 }
 
@@ -241,7 +250,7 @@ const stoppedIn = (inst: Instance | undefined): boolean => !!inst && inst.state 
 
 // ---------- one environment ----------
 
-function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[] }, w: World, cloud: CloudPart | undefined, now: number): PlmEnvHealth {
+function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]; day: Day }, w: World, cloud: CloudPart | undefined, now: number): PlmEnvHealth {
   const { q, r } = d
   const issues: Issue[] = []
   const inEnv = (s: { metric: Labels }): boolean => envsFor(w, s.metric.job ?? '', s.metric.instance ?? '').includes(env)
@@ -342,6 +351,9 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
   const okBy = byInstance(q.probeOk)
   const secs = byInstance(q.probeSec)
   const byRole = new Map<string, { fronts: Endpoint[]; nodes: ServiceNode[] }>()
+  const dns = byInstance(q.probeDns)
+  const certBy = byInstance(q.cert)
+  const checks: HealthCheck[] = []
   for (const s of q.probeOk) {
     const { job = '', instance = '' } = s.metric
     if (!inEnv(s)) continue
@@ -352,6 +364,12 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     const ok = probeOk(code, okBy.get(instance) ?? null)
     const ep: Endpoint = { url: instance, level: ok ? (ms !== null && ms >= LIMITS.albMs[0] ? 'warn' : 'ok') : 'crit', status: code, ms, spark: spark(r.probeMs, instance) }
     const slot = byRole.get(role.id) ?? { fronts: [], nodes: [] }
+    const certExp = certBy.get(instance)
+    const check: HealthCheck = {
+      serviceId: role.id, service: role.name, url: instance, via: isFrontProbe(job, instance) ? 'lb' : 'server', label: '', level: ep.level, status: code, ms,
+      dnsMs: dns.has(instance) ? (dns.get(instance) ?? 0) * 1000 : null, certDays: certExp ? Math.floor((certExp * 1000 - now) / 86_400_000) : null, stopped: false, note: checkNote(instance)
+    }
+    checks.push(check)
     if (isFrontProbe(job, instance)) slot.fronts.push(ep)
     else {
       const ip = ipOf(instance)
@@ -363,8 +381,37 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
       const base = (ip && w.ipLabel.get(ip)) || (hostRole && hostRole !== role.name ? hostRole : 'server')
       const label = /\/internal\//.test(instance) ? `${base} internal` : base
       slot.nodes.push({ ...ep, level: stopped ? 'off' : ep.level, label, ip, name: inst?.name ?? (ip ?? instance), stopped, instanceKey: inst?.key })
+      Object.assign(check, { label, stopped, level: stopped ? 'off' : ep.level })
     }
     byRole.set(role.id, slot)
+  }
+  // A check whose scrape fails (the blackbox exporter down, a module it lacks) has no probe_success at all: show it as
+  // not running rather than letting its service vanish.
+  const scrapeError = new Map<string, string>()
+  for (const s of q.up) {
+    const { job = '', instance = '' } = s.metric
+    if (s.value === 1 || !/^[a-z]+:\/\//i.test(instance) || okBy.has(instance) || !inEnv(s)) continue
+    const role = roleOf(job, instance)
+    if (!role || role.id === 'monitoring' || role.id === 'allinone' || role.id === 'migration') continue
+    const ep: Endpoint = { url: instance, level: 'unknown', status: null, ms: null }
+    const slot = byRole.get(role.id) ?? { fronts: [], nodes: [] }
+    const ip = ipOf(instance)
+    const inst = w.ec2(ip)
+    if (isFrontProbe(job, instance)) slot.fronts.push(ep)
+    else slot.nodes.push({ ...ep, label: (ip && w.ipLabel.get(ip)) || 'server', ip, name: inst?.name ?? (ip ?? instance), stopped: stoppedIn(inst), instanceKey: inst?.key })
+    byRole.set(role.id, slot)
+    scrapeError.set(instance, role.name)
+    checks.push({ serviceId: role.id, service: role.name, url: instance, via: isFrontProbe(job, instance) ? 'lb' : 'server', label: (ip && w.ipLabel.get(ip)) || 'server', level: 'unknown', status: null, ms: null, dnsMs: null, certDays: null, stopped: stoppedIn(inst), note: checkNote(instance), broken: 'The probe itself fails, so this check is not running' })
+  }
+  if (scrapeError.size) {
+    const names = [...new Set(scrapeError.values())]
+    issues.push({ level: 'warn', text: `${names.join(', ')}: ${scrapeError.size === 1 ? 'its health check is' : 'health checks are'} not running (the probe fails)`, section: 'services' })
+  }
+  // Parts of the platform whose servers are monitored but which nothing checks: a card that says so.
+  for (const h of hosts) {
+    const role = ROLES.find((r) => r.name === h.role)
+    if (!role || !SERVICE_ORDER.includes(role.id) || byRole.has(role.id)) continue
+    byRole.set(role.id, { fronts: [], nodes: [] })
   }
   const services: ServiceHealth[] = []
   for (const [id, slot] of byRole) {
@@ -374,14 +421,19 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     slot.nodes.sort((a, b) => a.label.localeCompare(b.label) || a.url.localeCompare(b.url))
     const { level, summary } = serviceLevel(slot.fronts, slot.nodes)
     services.push({ id, name: role.name, blurb: role.blurb, level, summary, fronts: slot.fronts, nodes: slot.nodes })
-    if (level === 'crit' || level === 'warn') issues.push({ level, text: `${role.name}: ${summary.split(' · ')[0].toLowerCase()}`, section: 'services' })
+    if ((level === 'crit' || level === 'warn') && !summary.startsWith('Its health check')) issues.push({ level, text: `${role.name}: ${summary.split(' · ')[0].toLowerCase()}`, section: 'services' })
   }
   services.sort((a, b) => (SERVICE_ORDER.indexOf(a.id) + 1 || 99) - (SERVICE_ORDER.indexOf(b.id) + 1 || 99))
+  const svcRank = (id: string): number => SERVICE_ORDER.indexOf(id) + 1 || 99
+  checks.sort((a, b) => svcRank(a.serviceId) - svcRank(b.serviceId) || Number(a.via === 'server') - Number(b.via === 'server') || a.label.localeCompare(b.label) || a.url.localeCompare(b.url))
 
   // 3DSpace's JVMs (the JMX exporter).
   const heapUsed = byInstance(q.heapUsed)
   const heapMax = byInstance(q.heapMax)
   const heapFloor = byInstance(q.heapFloor)
+  const afterGc = byInstance(q.afterGc)
+  const jvmStart = byInstance(q.jvmStart)
+  const dayTimes = (n: number): number[] => Array.from({ length: n }, (_, i) => d.day.start + i * d.day.step * 1000)
   const gc = byInstance(q.gc)
   const threads = byInstance(q.threads)
   const fds = byInstance(q.fds)
@@ -398,18 +450,27 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
     const max = heapMax.get(instance) ?? null
     const heapPct = used !== null && max && max > 0 ? (used / max) * 100 : null
     const floor = heapFloor.get(instance) ?? null
-    const lh = levelOf(floor ?? heapPct, LIMITS.heap)
+    const after = afterGc.get(instance) ?? null
+    const afterPct = after !== null && max && max > 0 ? (after / max) * 100 : null
+    const startedAt = jvmStart.get(instance) ?? null
+    const daySeries = d.day.afterGc.find((x) => x.metric.instance === instance)?.values
+    const trend = daySeries ? gcTrend(dayTimes(daySeries.length), daySeries, max, startedAt) : undefined
+    // The after-GC floor and its trend say whether memory is being lost; the heap's own level only climbs and falls.
+    const lh = trend && trend.level !== 'unknown' ? trend.level : levelOf(floor ?? heapPct, LIMITS.heap)
     const lg = levelOf(gc.get(instance), LIMITS.gc)
     const lf = levelOf(fds.get(instance), LIMITS.fds)
     const problems: string[] = []
-    if (lh === 'warn' || lh === 'crit') problems.push(`heap stays above ${formatPct(floor ?? heapPct)} even after garbage collection`)
+    if (lh === 'warn' || lh === 'crit') {
+      if (trend && trend.level === lh && trend.daysToMax !== null && (trend.floorPct ?? 0) < 80) problems.push(`heap after GC growing ${formatBytes(trend.slopePerDay)} a day, full in ${Math.max(1, Math.round(trend.daysToMax))} ${Math.round(trend.daysToMax) === 1 ? 'day' : 'days'}: possible memory leak`)
+      else problems.push(`heap stays at ${formatPct(afterPct ?? floor ?? heapPct)} after GC${lh === 'crit' ? ': likely a memory leak' : ''}`)
+    }
     if (lg === 'warn' || lg === 'crit') problems.push(`${formatPct(gc.get(instance))} of the time in garbage collection`)
     if (lf === 'warn' || lf === 'crit') problems.push(`${formatPct(fds.get(instance))} of file handles in use`)
     const level: Level = !reporting ? (stoppedIn(inst) ? 'off' : 'crit') : worst([lh, lg, lf])
     const label = nodeLabel(job) || (ip ? w.ipLabel.get(ip) ?? '' : '')
     jvms.push({
-      label, ip, name: inst?.name ?? instance, level, problems, reporting,
-      heapUsed: used, heapMax: max, heapPct, gcPct: gc.get(instance) ?? null, threads: threads.get(instance) ?? null, fdsPct: fds.get(instance) ?? null,
+      label, ip, name: inst?.name ?? instance, promInstance: instance, level, problems, reporting,
+      heapUsed: used, heapMax: max, heapPct, afterGcBytes: after, afterGcPct: afterPct, trend, startedAt, gcPct: gc.get(instance) ?? null, threads: threads.get(instance) ?? null, fdsPct: fds.get(instance) ?? null,
       cpu: jvmCpu.get(instance) ?? null, uptimeSec: jvmUp.get(instance) ?? null, heapSpark: spark(r.heap, instance), instanceKey: inst?.key
     })
     const who = label ? `3DSpace ${label}` : '3DSpace'
@@ -483,7 +544,7 @@ function buildEnv(env: PlmEnvId, d: { q: Instant; r: Ranges; alerts: PromAlert[]
   const v = verdict(issues, services)
   return {
     id: env, name: ENV_NAMES[env], level: v.level, headline: v.headline, issues: v.issues,
-    services, hosts, jvms, apaches, storage, db: cloud?.db ?? null, albs: cloud?.albs ?? [], certs, alerts, gaps
+    services, checks, hosts, jvms, apaches, storage, db: cloud?.db ?? null, albs: cloud?.albs ?? [], certs, alerts, gaps
   }
 }
 
@@ -675,6 +736,126 @@ async function cloud(env: PlmEnvId, d: { q: Instant }, w: World): Promise<CloudP
   } finally {
     for (const c of clients) c.destroy()
   }
+}
+
+// ---------- one JVM's heap and garbage collection (the heap chart) ----------
+
+const gcCache = new Map<string, { at: number; d: JvmGcDetail }>()
+
+export async function jvmGc(instance: string, hours: number): Promise<JvmGcDetail> {
+  // The label goes into PromQL: only an exporter's host:port.
+  if (typeof instance !== 'string' || !/^[A-Za-z0-9._-]+:\d{2,5}$/.test(instance)) throw new Error('Unknown JVM.')
+  const r = GC_RANGES.find((x) => x.hours === hours) ?? GC_RANGES[1]
+  const key = `${instance}|${r.hours}`
+  const have = gcCache.get(key)
+  if (have && Date.now() - have.at < (r.hours <= 1 ? 12_000 : 50_000)) return have.d
+  const port = await prometheusPort(source())
+  const sel = `instance="${instance}"`
+  const end = Math.floor(Date.now() / 1000)
+  const S = `${r.step}s`
+  const W = `${r.hours}h`
+  const one = async (query: string): Promise<Sample[]> => instant(port, query).catch(() => [] as Sample[])
+  const [high, low, after, full, max, counts, secs, alloc, used, poolMax, collected, started, nonHeap, rss, fds] = await Promise.all([
+    range(port, `max_over_time(java_lang_memory_heapmemoryusage_used{${sel}}[${S}])`, end, r.hours * 60, r.step),
+    range(port, `min_over_time(java_lang_memory_heapmemoryusage_used{${sel}}[${S}])`, end, r.hours * 60, r.step),
+    range(port, `sum(min_over_time(jvm_memory_pool_collection_used_bytes{${sel}}[${S}]))`, end, r.hours * 60, r.step),
+    // Collections per step as the difference from the previous step: exact at any step, where increase() over a window
+    // as short as one scrape would extrapolate.
+    range(port, `clamp_min(jvm_gc_collection_seconds_count{${sel}} - jvm_gc_collection_seconds_count{${sel}} offset ${S}, 0)`, end, r.hours * 60, r.step),
+    one(`java_lang_memory_heapmemoryusage_max{${sel}}`),
+    one(`increase(jvm_gc_collection_seconds_count{${sel}}[${W}])`),
+    one(`increase(jvm_gc_collection_seconds_sum{${sel}}[${W}])`),
+    one(`sum(rate(jvm_memory_pool_allocated_bytes_total{${sel},pool=~"(?i).*(eden|nursery).*"}[${W}]))`),
+    one(`jvm_memory_pool_used_bytes{${sel}}`),
+    one(`jvm_memory_pool_max_bytes{${sel}}`),
+    one(`jvm_memory_pool_collection_used_bytes{${sel}}`),
+    one(`java_lang_runtime_starttime{${sel}}`),
+    one(`java_lang_memory_nonheapmemoryusage_used{${sel}}`),
+    one(`java_lang_operatingsystem_processphysicalmemorysize{${sel}}`),
+    one(`java_lang_operatingsystem_openfiledescriptorcount{${sel}}`)
+  ])
+  const n = Math.round((r.hours * 3600) / r.step) + 1
+  const start = (end - r.hours * 3600) * 1000
+  const empty = (): Spark => new Array<number | null>(n).fill(null)
+  const fullGcs = empty()
+  for (const s of full) {
+    if (!isFullGc(s.metric.gc ?? '')) continue
+    s.values.forEach((v, i) => { if (v !== null) fullGcs[i] = Math.round(((fullGcs[i] ?? 0) + v) * 100) / 100 })
+  }
+  let lastFull: number | null = null
+  fullGcs.forEach((v, i) => { if ((v ?? 0) >= 0.5) lastFull = start + i * r.step * 1000 })
+  const heapMax = max[0]?.value ?? null
+  const startedAt = started[0]?.value ?? null
+  // Time the JVM was up in the window: a restart inside it shortens what the counts cover.
+  const upSec = Math.max(1, Math.min(r.hours * 3600, startedAt ? (Date.now() - startedAt) / 1000 : r.hours * 3600))
+  const secBy = new Map(secs.map((s) => [s.metric.gc ?? '', s.value]))
+  const collectors: GcCollector[] = counts.map((c) => {
+    const name = c.metric.gc ?? ''
+    const count = Math.round(c.value)
+    const seconds = secBy.get(name) ?? 0
+    return { name, full: isFullGc(name), count, seconds, avgMs: count > 0 ? (seconds / count) * 1000 : null, perHour: count / (upSec / 3600) }
+  }).sort((a, b) => Number(b.full) - Number(a.full) || a.name.localeCompare(b.name))
+  const gcSeconds = collectors.reduce((a, c) => a + c.seconds, 0)
+  const heapPools = new Set(collected.map((s) => s.metric.pool))
+  const maxBy = new Map(poolMax.map((s) => [s.metric.pool, s.value]))
+  const pools = used.map((s) => ({ name: s.metric.pool ?? '', used: s.value, max: (maxBy.get(s.metric.pool) ?? -1) > 0 ? maxBy.get(s.metric.pool)! : null, heap: heapPools.has(s.metric.pool) }))
+    .filter((p) => p.name && !(p.heap && p.used === 0 && /reserved/i.test(p.name)))
+    .sort((a, b) => Number(b.heap) - Number(a.heap) || b.used - a.used)
+  const afterGc = after[0]?.values ?? empty()
+  const times = Array.from({ length: n }, (_, i) => start + i * r.step * 1000)
+  const d: JvmGcDetail = {
+    instance, hours: r.hours, start, step: r.step, heapMax,
+    heapHigh: high[0]?.values ?? empty(), heapLow: low[0]?.values ?? empty(), afterGc, fullGcs,
+    startedAt, lastFullGcAt: lastFull, collectors,
+    throughputPct: counts.length ? Math.max(0, 100 - (gcSeconds / upSec) * 100) : null,
+    allocBytesPerSec: alloc[0]?.value ?? null,
+    pools,
+    trend: gcTrend(times, afterGc, heapMax, startedAt),
+    policy: gcPolicy(used.map((s) => s.metric.pool ?? '')),
+    nonHeapBytes: nonHeap[0]?.value ?? null,
+    rssBytes: rss[0]?.value ?? null,
+    openFds: fds[0]?.value ?? null
+  }
+  gcCache.set(key, { at: Date.now(), d })
+  return d
+}
+
+// ---------- every machine's memory over a window (the memory grid) ----------
+
+const memCache = new Map<string, { at: number; d: MemoryHistory }>()
+
+export async function memoryHistory(env: PlmEnvId, hours: number): Promise<MemoryHistory> {
+  if (!ENV_ORDER.includes(env)) throw new Error('Unknown environment.')
+  const r = GC_RANGES.find((x) => x.hours === hours) ?? GC_RANGES[2]
+  const key = `${env}|${r.hours}`
+  const have = memCache.get(key)
+  if (have && Date.now() - have.at < (r.hours <= 1 ? 12_000 : 50_000)) return have.d
+  // Which machines belong to the environment, as the last snapshot sorted them.
+  const hosts = (await plmHealth()).envs.find((e) => e.id === env)?.hosts ?? []
+  const port = await prometheusPort(source())
+  const end = Math.floor(Date.now() / 1000)
+  const [linux, windows] = await Promise.all([
+    range(port, '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100', end, r.hours * 60, r.step).catch(() => [] as Series[]),
+    range(port, '(1 - windows_memory_available_bytes / windows_memory_physical_total_bytes) * 100', end, r.hours * 60, r.step).catch(() => [] as Series[])
+  ])
+  const byIp = new Map<string, Spark>()
+  for (const s of [...linux, ...windows]) { const ip = ipOf(s.metric.instance ?? ''); if (ip) byIp.set(ip, s.values) }
+  const n = Math.round((r.hours * 3600) / r.step) + 1
+  const machines: MachineMemory[] = hosts.map((h) => {
+    const pct = byIp.get(h.ip) ?? new Array<number | null>(n).fill(null)
+    const vals = pct.filter((v): v is number => v !== null)
+    const now = h.reporting ? ([...pct].reverse().find((v) => v !== null) ?? null) : null
+    return {
+      ip: h.ip, name: h.name, role: h.role, label: h.label, os: h.os, state: h.state, totalBytes: h.memBytes, pct, now,
+      peak: vals.length ? Math.max(...vals) : null, avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
+      level: h.state === 'stopped' ? 'off' : !h.reporting ? 'unknown' : levelOf(now, LIMITS.mem), instanceKey: h.instanceKey
+    }
+  })
+  const rank = (m: MachineMemory): number => ({ crit: 0, warn: 1, ok: 2, unknown: 3, off: 4 })[m.level]
+  machines.sort((a, b) => rank(a) - rank(b) || (b.now ?? -1) - (a.now ?? -1))
+  const d: MemoryHistory = { env, hours: r.hours, start: (end - r.hours * 3600) * 1000, step: r.step, machines }
+  memCache.set(key, { at: Date.now(), d })
+  return d
 }
 
 // ---------- the snapshot ----------

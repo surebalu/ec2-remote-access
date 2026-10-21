@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { envOf, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkNote, envOf, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -80,7 +80,8 @@ test('levels follow the thresholds, and stopped or unknown parts never make thin
 })
 
 const ep = (level: Endpoint['level']): Endpoint => ({ url: 'u', level, status: level === 'crit' ? 0 : 200, ms: 10 })
-const node = (level: Endpoint['level'], stopped = false): ServiceNode => ({ ...ep(level), label: '01', ip: '10.0.0.1', name: 'n', stopped })
+let nodeN = 0
+const node = (level: Endpoint['level'], stopped = false): ServiceNode => ({ ...ep(level), label: '01', ip: `10.0.0.${++nodeN}`, name: 'n', stopped })
 
 test('a service is down when users cannot reach it, degraded when one server is, and a stopped server is only noted', () => {
   assert.equal(serviceLevel([ep('crit')], [node('ok')]).level, 'crit')
@@ -109,4 +110,58 @@ test('numbers read the way people say them', () => {
   assert.equal(formatMs(42.4), '42 ms')
   assert.equal(formatPct(86.34), '86%')
   assert.equal(formatPct(4.25), '4.3%')
+})
+
+test('full collections are told from partial and young ones across JVMs', () => {
+  for (const n of ['global garbage collect', 'G1 Old Generation', 'PS MarkSweep', 'ConcurrentMarkSweep', 'MarkSweepCompact']) assert.equal(isFullGc(n), true, n)
+  for (const n of ['partial gc', 'scavenge', 'G1 Young Generation', 'PS Scavenge', 'ParNew', 'Copy']) assert.equal(isFullGc(n), false, n)
+})
+
+const GB = 1024 ** 3
+const hourly = (n: number, f: (i: number) => number): { t: number[]; v: (number | null)[] } => ({ t: Array.from({ length: n }, (_, i) => i * 3_600_000), v: Array.from({ length: n }, (_, i) => f(i)) })
+
+test('the heap after GC tells a healthy saw-tooth from a leak, as on the GCeasy graph', () => {
+  // Drops back to the same level after every collection.
+  const flat = hourly(48, (i) => 1.5 * GB + (i % 3) * 0.02 * GB)
+  const ok = gcTrend(flat.t, flat.v, 8 * GB)
+  assert.equal(ok.level, 'ok')
+  assert.match(ok.text, /Healthy saw-tooth.*1\.5 GB \(19% of 8\.0 GB\)/)
+  // Climbing a GB a day: a leak, with days left until full.
+  const leak = hourly(72, (i) => 2 * GB + (i / 24) * GB)
+  const l = gcTrend(leak.t, leak.v, 8 * GB)
+  assert.equal(l.level, 'warn')
+  assert.match(l.text, /about 1\.0 GB a day.*full in 3 days.*Possible memory leak/)
+  assert.ok(l.line && l.line[3] > l.line[1], 'a rising line to draw')
+  // Stuck near the maximum while collections run: the collector cannot free it.
+  const stuck = hourly(24, () => 7.5 * GB)
+  assert.equal(gcTrend(stuck.t, stuck.v, 8 * GB).level, 'crit')
+  // Caches filling after a restart, then levelling off: not a leak.
+  const warm = hourly(36, (i) => (i < 12 ? 3.2 * GB + i * 0.1 * GB : 4.4 * GB))
+  const w = gcTrend(warm.t, warm.v, 8 * GB, 0)
+  assert.equal(w.level, 'ok')
+  assert.match(w.text, /levelled off/)
+  assert.doesNotMatch(gcTrend(warm.t, warm.v, 8 * GB).text, /restart/, 'no restart on screen, no restart note')
+  // Before the JVM started does not count.
+  const restart = hourly(48, (i) => (i < 24 ? 7.6 * GB : 1.2 * GB))
+  assert.equal(gcTrend(restart.t, restart.v, 8 * GB, 24 * 3_600_000).level, 'ok')
+  assert.equal(gcTrend([1, 2], [1, 2], 8 * GB).level, 'unknown')
+})
+
+test('a service counts machines, not checks, and says when its check is not running or missing', () => {
+  const n = (ip: string, url: string, level: 'ok' | 'crit' | 'unknown' = 'ok', stopped = false): ServiceNode => ({ url, level, status: 200, ms: 5, label: '01', ip, name: ip, stopped })
+  // 3DSpace: two checks on each of two servers.
+  assert.equal(serviceLevel([ep('ok')], [n('a', 'a/3dspace'), n('a', 'a/internal'), n('b', 'b/3dspace'), n('b', 'b/internal')]).summary, '2 servers up')
+  assert.equal(serviceLevel([ep('ok')], [n('a', 'a/3dspace', 'crit'), n('a', 'a/internal', 'crit'), n('b', 'b/3dspace')]).summary, '1 of 2 servers down, still served')
+  assert.deepEqual(serviceLevel([], [n('a', 'a', 'unknown')]), { level: 'unknown', summary: 'Its health check is not running' })
+  assert.equal(serviceLevel([], []).summary, 'Not checked: only its servers are monitored')
+})
+
+test('checks that only load a page are told from real health endpoints', () => {
+  assert.match(checkNote('https://federated-qplm.mainspring.network/federated/manager?query=monitoring') ?? '', /login page/)
+  assert.ok(checkNote('http://10.0.2.58:5001/swagger-ui/index.html#'))
+  assert.ok(checkNote('http://ip-10-0-2-113.us-west-1.compute.internal:8181/enovia/adminui'))
+  assert.ok(checkNote('https://help-qplm.mainspring.network/English'))
+  assert.ok(checkNote('http://ip-10-0-2-217.us-west-1.compute.internal:19000'))
+  assert.ok(checkNote('http://ip-10-0-2-99.us-west-1.compute.internal:80'))
+  for (const u of ['https://pass-pplm.mainspring.network/3dpassport/healthcheck', 'http://ip-10-1-2-194.us-west-1.compute.internal:19010/search-api/isAlive', 'https://space-pplm.mainspring.network/3dspace/servlet/fcs/ping', 'https://dash-pplm.mainspring.network/3ddashboard/test-alive']) assert.equal(checkNote(u), null, u)
 })

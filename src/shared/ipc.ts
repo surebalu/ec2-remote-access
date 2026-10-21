@@ -1,5 +1,5 @@
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
-import type { PlmHealthSnapshot } from './plmHealth'
+import type { JvmGcDetail, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -101,6 +101,10 @@ export interface IpcApi {
   'ec2:health': (instanceKey: string) => Promise<HostHealth>
   /** The Health tab: the 3DEXPERIENCE platform per environment (cached 20 s; `force` reads again). */
   'health:snapshot': (force?: boolean) => Promise<PlmHealthSnapshot>
+  /** One JVM's heap and garbage collection over `hours` (6, 24, 72, 168 or 336), for the heap chart. */
+  'health:gc': (instance: string, hours: number) => Promise<JvmGcDetail>
+  /** Every machine's memory in an environment over `hours`, for the memory grid. */
+  'health:memory': (env: PlmEnvId, hours: number) => Promise<MemoryHistory>
   'ec2:password': (instanceKey: string, pemFile?: string) => Promise<WindowsPasswordResult>
   'ec2:start': (instanceKey: string) => Promise<void>
   'ec2:stop': (instanceKey: string) => Promise<void>
