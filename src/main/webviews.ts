@@ -14,6 +14,7 @@ import type { WebDownload } from '@shared/types'
 import { getSettings } from './store'
 import { isDictating } from './voice'
 import { getPaneTargets } from './browser'
+import { track } from './sessionCookies'
 
 /**
  * Shortcuts the browser tab handles even while a page has focus (pages otherwise swallow them); ⌘\ opens beside. The
@@ -37,6 +38,8 @@ export function initWebviews(win: BrowserWindow): void {
     prefs.sandbox = true
     prefs.webSecurity = true
     if (!params.partition?.startsWith('persist:web-') || !isWebUrl(params.src)) event.preventDefault()
+    // Its session cookies (sign-ins) are kept across restarts from here on.
+    else track(params.partition)
   })
 }
 
