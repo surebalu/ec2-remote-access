@@ -5,11 +5,12 @@ import { hasBrowser } from '../quickConnect'
 import { Icon } from './icons'
 
 /**
- * The radial menu: every section of the app rail as a ring of coloured bubbles around the pointer, opened by its own
- * shortcut (Settings → Keyboard, ⇧⌘Space by default; shortcuts.ts dispatches `ec2ra:radial`). Like ⌘Tab: hold the
- * modifiers and tap the key again to step round, or point in a direction, and let go to switch. Tapped and released at
- * once it stays open for a click, the arrow keys, a number or a first letter. Esc, a click outside or the shortcut
- * again closes it.
+ * The radial menu: every section of the app rail as a small ring of coloured bubbles around the pointer, opened by
+ * its own shortcut (Settings → Keyboard, ⇧⌘Space by default; shortcuts.ts dispatches `ec2ra:radial`). Like ⌘Tab: hold
+ * the modifiers and tap the key again to step round, or point in a direction, and let go to switch. Tapped and released
+ * at once (or sent by a mouse button, which presses and releases the keys together) it stays open for the mouse to
+ * point and click, or the arrow keys, a number or a first letter. Esc, a click outside or the shortcut again closes
+ * it. The middle names the bubble pointed at; the bubbles carry no labels at this size.
  */
 
 interface Item {
@@ -27,13 +28,13 @@ interface Item {
   run: () => void
 }
 
-const R = 168
-const BALL = 58
+const R = 86
+const BALL = 32
 const SIZE = 2 * (R + BALL)
-const DEAD = 46
-/** How far the ring reaches from its centre with the labels outside it: keeps it inside the window. */
-const REACH_X = R + BALL / 2 + 104
-const REACH_Y = R + BALL / 2 + 36
+const DEAD = 20
+/** How far the ring and its caption reach from the centre: keeps them inside the window. */
+const REACH_X = R + BALL / 2 + 60
+const REACH_Y = R + BALL / 2 + 34
 
 const rad = (deg: number): number => (deg * Math.PI) / 180
 
@@ -62,6 +63,7 @@ export default function RadialMenu(): ReactElement | null {
   // The highlight was moved by stepping or pointing, so letting go of the modifiers opens it.
   const moved = useRef(false)
   const pointer = useRef<{ x: number; y: number } | null>(null)
+  const opening = useRef(false)
   const before = useRef<HTMLElement | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const st = useStore.getState
@@ -142,16 +144,23 @@ export default function RadialMenu(): ReactElement | null {
         else close()
         return
       }
-      const w = window.innerWidth
-      const h = window.innerHeight
-      const p = pointer.current ?? { x: w / 2, y: h / 2 }
-      const clamp = (v: number, lo: number, hi: number): number => (hi < lo ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)))
+      if (opening.current) return
+      opening.current = true
       before.current = document.activeElement as HTMLElement | null
       moved.current = false
       setHeld(wantsHold)
       const here = itemsRef.current.findIndex((x) => x.here)
       setHi(here >= 0 ? here : null)
-      setAt({ x: clamp(p.x, REACH_X + 8, w - REACH_X - 8), y: clamp(p.y, REACH_Y + 8, h - REACH_Y - 8) })
+      // The Mac app asks where the pointer really is: over a web page or a remote desktop the page never saw it move.
+      const ask: Promise<{ x: number; y: number } | null> = hasBrowser() ? window.api.invoke('app:pointer').catch(() => null) : Promise.resolve(null)
+      void ask.then((real) => {
+        opening.current = false
+        const w = window.innerWidth
+        const h = window.innerHeight
+        const p = real ?? pointer.current ?? { x: w / 2, y: h / 2 }
+        const clamp = (v: number, lo: number, hi: number): number => (hi < lo ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)))
+        setAt({ x: clamp(p.x, REACH_X + 8, w - REACH_X - 8), y: clamp(p.y, REACH_Y + 8, h - REACH_Y - 8) })
+      })
     }
     window.addEventListener('ec2ra:radial', onOpen)
     return () => window.removeEventListener('ec2ra:radial', onOpen)
@@ -235,58 +244,49 @@ export default function RadialMenu(): ReactElement | null {
   const keyLetter = key.replace(/^[⌃⌥⇧⌘]+/, '')
   const mods = key.slice(0, key.length - keyLetter.length)
   const colour = (it: Item, l: number, a = 1): string => `hsl(${it.hue} ${it.sat ?? 88}% ${l}% / ${a})`
+  const ball = (it: Item): CSSProperties => ({ '--bg': `linear-gradient(140deg, ${colour(it, 66)}, hsl(${it.hue + 18} ${it.sat ?? 84}% 46%))`, '--shadow': `0 6px 14px -5px ${colour(it, 38, 0.65)}`, '--ring': colour(it, 60) } as CSSProperties)
   return (
     <div className="radial" ref={root} tabIndex={-1} role="menu" aria-label="Switch section" onPointerMove={onMove} onPointerDown={onDown} onContextMenu={(e) => { e.preventDefault(); close() }}>
-      <div className="radial-ring" style={{ left: at.x, top: at.y, width: SIZE, height: SIZE }}>
+      <div className="radial-ring" style={{ left: at.x, top: at.y, width: SIZE, height: SIZE, '--ball': `${BALL}px` } as CSSProperties}>
         <svg className="radial-wedges" width={SIZE} height={SIZE} viewBox={`${-SIZE / 2} ${-SIZE / 2} ${SIZE} ${SIZE}`} aria-hidden="true">
-          <circle r={R + BALL / 2 + 16} className="radial-disc" />
+          <circle r={R + BALL / 2 + 9} className="radial-disc" />
           {items.map((it, i) => (
-            <path key={it.id} d={wedge(angleOf(i) - step / 2 + 0.6, angleOf(i) + step / 2 - 0.6, R - BALL / 2 - 16, R + BALL / 2 + 14)}
-              style={{ fill: colour(it, 58, i === hi ? 0.34 : 0.11) }} className={`radial-wedge ${i === hi ? 'on' : ''}`} />
+            <path key={it.id} d={wedge(angleOf(i) - step / 2 + 0.8, angleOf(i) + step / 2 - 0.8, R - BALL / 2 - 8, R + BALL / 2 + 7)}
+              style={{ fill: colour(it, 58, i === hi ? 0.36 : 0.12) }} className={`radial-wedge ${i === hi ? 'on' : ''}`} />
           ))}
         </svg>
         <div className="radial-center" aria-live="polite">
           {cur ? (
             <>
-              <span className="radial-center-ball" style={{ background: `linear-gradient(140deg, ${colour(cur, 64)}, hsl(${cur.hue + 18} ${cur.sat ?? 84}% 46%))`, boxShadow: `0 12px 28px -8px ${colour(cur, 40, 0.6)}` }}>{cur.icon}</span>
+              <span className="radial-center-ball" style={ball(cur)}>{cur.icon}</span>
               <strong>{cur.label}</strong>
-              {cur.keys ? <kbd className="kbd">{cur.keys}</kbd> : <span className="radial-center-none">{cur.here ? 'You are here' : ' '}</span>}
+              {cur.keys && <kbd className="kbd">{cur.keys}</kbd>}
             </>
           ) : (
             <>
               <span className="radial-center-ball plain"><Icon.radial /></span>
               <strong>Switch to…</strong>
-              <span className="radial-center-none">&nbsp;</span>
             </>
           )}
-          <span className="radial-hint">
-            {held && key ? <>Tap {keyLetter} to step · let go of {mods || 'the keys'} to open</> : <>Click, or ← → and ↩ · Esc closes</>}
-          </span>
         </div>
         {items.map((it, i) => {
           const a = rad(angleOf(i))
-          const sx = Math.sin(a)
-          const sy = -Math.cos(a)
-          const style = { '--dx': `${(sx * R).toFixed(1)}px`, '--dy': `${(sy * R).toFixed(1)}px`, '--delay': `${i * 14}ms` } as CSSProperties
-          // The label sits outside the ring, away from the centre, so neighbours never cover it.
-          const out = BALL / 2 + 9
-          const label: CSSProperties = {
-            left: `calc(50% + ${(sx * out).toFixed(1)}px)`, top: `calc(50% + ${(sy * out).toFixed(1)}px)`,
-            transform: `translate(${sx > 0.3 ? '0' : sx < -0.3 ? '-100%' : '-50%'}, ${sy < -0.3 && Math.abs(sx) <= 0.3 ? '-100%' : sy > 0.3 && Math.abs(sx) <= 0.3 ? '0' : '-50%'})`
-          }
+          const style = { '--dx': `${(Math.sin(a) * R).toFixed(1)}px`, '--dy': `${(-Math.cos(a) * R).toFixed(1)}px`, '--delay': `${i * 10}ms` } as CSSProperties
           return (
             <button key={it.id} type="button" role="menuitem" className={`radial-item ${i === hi ? 'on' : ''} ${it.here ? 'here' : ''} ${it.disabled ? 'off' : ''}`} style={style}
-              aria-label={`${it.label}${it.keys ? ` (${it.keys})` : ''}`} aria-disabled={it.disabled || undefined} tabIndex={-1} data-radial={it.id}
+              aria-label={`${it.label}${it.keys ? ` (${it.keys})` : ''}`} title={it.label} aria-disabled={it.disabled || undefined} tabIndex={-1} data-radial={it.id}
               onPointerEnter={() => { if (!it.disabled) { setHi(i); moved.current = true } }}
               onPointerDown={(e) => { e.stopPropagation(); if (e.button === 0) pick(i) }}>
-              <span className="radial-ball" style={{ '--bg': `linear-gradient(140deg, ${colour(it, 66)}, hsl(${it.hue + 18} ${it.sat ?? 84}% 46%))`, '--shadow': `0 10px 22px -8px ${colour(it, 38, 0.65)}`, '--ring': colour(it, 60) } as CSSProperties}>
+              <span className="radial-ball" style={ball(it)}>
                 {it.icon}
                 {it.open && !it.here && <i className="radial-dot" aria-hidden="true" />}
               </span>
-              <span className="radial-label" style={label}>{it.label}</span>
             </button>
           )
         })}
+        <span className="radial-hint" style={{ top: `calc(50% + ${R + BALL / 2 + 16}px)` }}>
+          {held && key ? <>Tap {keyLetter} to step · let go of {mods || 'the keys'}</> : <>Click one · ← → ↩ · Esc</>}
+        </span>
       </div>
     </div>
   )
