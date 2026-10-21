@@ -8,10 +8,11 @@ import { setTabKeys, type TabKey } from '../../shortcuts'
 import { openSshFor } from '../../quickConnect'
 import { Icon } from '../icons'
 import Popover from '../Popover'
-import { Bar, Dot, Empty, Gauge, Pill, SectionHead, Spark, StatusRing, lvl } from './parts'
+import { Bar, Dot, Empty, Gauge, MARKS, Pill, SectionHead, Spark, StatusRing, lvl } from './parts'
 import HeapChart from './HeapChart'
 import MemoryGrid from './MemoryGrid'
 import KernelPanel from './KernelPanel'
+import Honeycomb from './Honeycomb'
 
 /**
  * The Health tab: the 3DEXPERIENCE platform at a glance, one environment at a time, from main/plmHealth.ts. It reads
@@ -25,12 +26,6 @@ const POLL_MS = 30_000
 
 const readEnv = (): PlmEnvId | null => { try { return (localStorage.getItem(ENV_KEY) as PlmEnvId | null) || null } catch { return null } }
 const saveEnv = (e: PlmEnvId): void => { try { localStorage.setItem(ENV_KEY, e) } catch { /* storage off */ } }
-
-/** A letter pair and a hue for each part of the platform, so the cards can be told apart at a glance. */
-const MARKS: Record<string, [string, number]> = {
-  passport: ['Pa', 262], dashboard: ['Da', 214], space: ['Sp', 196], search: ['Se', 26], fcs: ['Fc', 150], index: ['Ft', 44], comment: ['Co', 328],
-  swym: ['Sw', 182], notification: ['No', 4], docs: ['Do', 222], tif: ['Ti', 18], converter: ['Dc', 240], cad: ['Ca', 286], apache: ['Ap', 352]
-}
 
 const isAuthError = (m: string): boolean => /sso|token|expired|sign.?in|credential|login/i.test(m)
 
@@ -178,6 +173,7 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
   const frontMs = front?.responseMs ?? avgFront(services)
   const checks = env.checks ?? []
   const [showChecks, setShowChecks] = useState(false)
+  const [focusHost, setFocusHost] = useState<{ ip: string; n: number } | null>(null)
   return (
     <div className="hl-body" key={env.id}>
       <section className={`hl-hero ${lvl(env.level)}`}>
@@ -201,6 +197,8 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
         </div>
         {env.issues.length > 0 && <Issues issues={env.issues} onJump={onJump} />}
       </section>
+
+      <Honeycomb env={env} onPick={(m) => (m.listed ? setFocusHost({ ip: m.ip, n: Date.now() }) : onJump('services'))} />
 
       <SectionHead id="hl-services" icon={<Icon.layers />} title="Services" sub="Each one's health-check URL, through the load balancer and on each server"
         right={checks.length ? <button type="button" className="hl-link" aria-expanded={showChecks} onClick={() => setShowChecks(!showChecks)}>{showChecks ? 'Hide' : 'All'} health checks ({checks.length})</button> : undefined} />
@@ -240,7 +238,7 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
       )}
 
       <Storage env={env} />
-      <Servers env={env} />
+      <Servers env={env} focus={focusHost} />
       <Alerts env={env} now={now} />
       <Certs env={env} />
     </div>
@@ -598,11 +596,25 @@ function Storage({ env }: { env: PlmEnvHealth }): ReactElement | null {
 
 type ServerFilter = 'all' | 'problems' | 'stopped'
 
-function Servers({ env }: { env: PlmEnvHealth }): ReactElement {
+function Servers({ env, focus }: { env: PlmEnvHealth; focus: { ip: string; n: number } | null }): ReactElement {
   const [filter, setFilter] = useState<ServerFilter>('all')
+  const [lit, setLit] = useState<{ ip: string; n: number } | null>(null)
+  const list = useRef<HTMLDivElement>(null)
   const problems = env.hosts.filter((h) => h.level === 'crit' || h.level === 'warn')
   const stopped = env.hosts.filter((h) => h.state === 'stopped')
   const shown = filter === 'problems' ? problems : filter === 'stopped' ? stopped : env.hosts
+  // A machine picked in the honeycomb: show its row (whatever the filter) and light it up.
+  useEffect(() => {
+    if (!focus) return
+    if (!shown.some((h) => h.ip === focus.ip)) setFilter('all')
+    setLit(focus)
+  }, [focus]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!lit) return
+    list.current?.querySelector(`[data-ip="${CSS.escape(lit.ip)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = setTimeout(() => setLit(null), 1800)
+    return () => clearTimeout(t)
+  }, [lit, filter])
   const chip = (f: ServerFilter, label: string, n: number): ReactElement => (
     <button type="button" className={filter === f ? 'on' : ''} aria-pressed={filter === f} onClick={() => setFilter(f)}>{label}<span>{n}</span></button>
   )
@@ -610,16 +622,16 @@ function Servers({ env }: { env: PlmEnvHealth }): ReactElement {
     <>
       <SectionHead id="hl-servers" icon={<Icon.server />} title="Servers" sub="CPU, memory and disk from each machine"
         right={<div className="hl-seg">{chip('all', 'All', env.hosts.length)}{chip('problems', 'Problems', problems.length)}{chip('stopped', 'Stopped', stopped.length)}</div>} />
-      <div className="hl-card hl-list hl-servers">
+      <div className="hl-card hl-list hl-servers" ref={list}>
         <div className="hl-srv-head" aria-hidden="true"><span>Server</span><span>CPU</span><span>Memory</span><span>Fullest disk</span><span>Load</span><span>Up for</span><span /></div>
-        {shown.map((h) => <ServerRow key={`${h.ip}${h.role}${h.label}`} h={h} />)}
+        {shown.map((h) => <ServerRow key={`${h.ip}${h.role}${h.label}`} h={h} lit={lit?.ip === h.ip} />)}
         {!shown.length && <Empty>{filter === 'problems' ? 'No server needs attention.' : 'No stopped servers.'}</Empty>}
       </div>
     </>
   )
 }
 
-function ServerRow({ h }: { h: HostHealth }): ReactElement {
+function ServerRow({ h, lit }: { h: HostHealth; lit: boolean }): ReactElement {
   const st = useStore.getState
   const off = h.state === 'stopped'
   const cell = (label: string, pct: number | null, limits: readonly [number, number], extra?: ReactNode): ReactElement => (
@@ -629,7 +641,7 @@ function ServerRow({ h }: { h: HostHealth }): ReactElement {
     </div>
   )
   return (
-    <div className={`hl-row hl-srv ${lvl(h.level)} ${off ? 'off' : ''}`}>
+    <div className={`hl-row hl-srv ${lvl(h.level)} ${off ? 'off' : ''} ${lit ? 'lit' : ''}`} data-ip={h.ip}>
       <div className="hl-srv-name min-w-0">
         <div className="hl-row-title"><Dot level={h.level} /><span className="truncate">{h.role}{h.label ? ` ${h.label}` : ''}</span>{h.os === 'windows' && <Icon.windows />}</div>
         <div className="hl-row-sub truncate" title={`${h.name} · ${h.ip}${h.instanceType ? ` · ${h.instanceType}` : ''}`}>{h.name} · {h.ip}</div>

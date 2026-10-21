@@ -648,6 +648,102 @@ export function verdict(issues: Issue[], services: ServiceHealth[]): { level: Le
   return { level: sorted.length ? level : 'ok', headline, issues: sorted }
 }
 
+// ---------- machines (the honeycomb) ----------
+
+/** One health check that runs on a machine. */
+export interface MachineCheck {
+  service: string
+  url: string
+  level: Level
+  status: number | null
+  ms: number | null
+}
+
+/** One machine in an environment: its own readings (node or Windows exporter) joined with every check that runs on it. */
+export interface MachineCell {
+  ip: string
+  name: string
+  /** "3DSpace 01", "All-in-one server". */
+  title: string
+  roleId: string | null
+  label: string
+  level: Level
+  state: HostHealth['state']
+  /** Null when no exporter runs on it, so only its checks are known. */
+  reporting: boolean | null
+  os: HostHealth['os'] | null
+  cpu: number | null
+  mem: number | null
+  disk: HostHealth['disk']
+  checks: MachineCheck[]
+  problems: string[]
+  instanceKey?: string
+  instanceType?: string
+  /** Has a row under Servers (an exporter runs on it). */
+  listed: boolean
+}
+
+const roleRank = (id: string | null): number => {
+  const i = id ? SERVICE_ORDER.indexOf(id) : -1
+  return i < 0 ? SERVICE_ORDER.length : i
+}
+
+/**
+ * Every machine in an environment, once, for the honeycomb. A machine is unhealthy when it stops reporting, a health
+ * check on it fails, or its CPU, memory or disk is over the limit; stopped in EC2 is set apart, never unhealthy. Sorted
+ * by the services' order, then label, so a machine keeps its place when its colour changes.
+ */
+export function machines(env: Pick<PlmEnvHealth, 'hosts' | 'services'>): MachineCell[] {
+  const byIp = new Map<string, MachineCell>()
+  for (const h of env.hosts) {
+    const had = byIp.get(h.ip)
+    if (had) {
+      // The same machine under two exporters' jobs: one cell, the worse reading.
+      had.level = worst([had.level, h.level])
+      had.problems.push(...h.problems)
+      continue
+    }
+    byIp.set(h.ip, {
+      ip: h.ip, name: h.name, title: `${h.role}${h.label ? ` ${h.label}` : ''}`, roleId: ROLES.find((r) => r.name === h.role)?.id ?? null, label: h.label,
+      level: h.level, state: h.state, reporting: h.reporting, os: h.os, cpu: h.cpu, mem: h.mem, disk: h.disk, checks: [], problems: [...h.problems],
+      instanceKey: h.instanceKey, instanceType: h.instanceType, listed: true
+    })
+  }
+  const unlisted = new Map<string, Set<string>>()
+  for (const s of env.services) {
+    for (const n of s.nodes) {
+      if (!n.ip) continue
+      let m = byIp.get(n.ip)
+      if (!m) {
+        // Checked but not monitored itself (no exporter): known only by its checks.
+        const label = n.label === 'server' || n.label === n.ip ? '' : n.label
+        m = {
+          ip: n.ip, name: n.name, title: `${s.name}${label ? ` ${label}` : ''}`, roleId: s.id, label, level: 'unknown', state: n.stopped ? 'stopped' : 'unknown',
+          reporting: null, os: null, cpu: null, mem: null, disk: null, checks: [], problems: [], instanceKey: n.instanceKey, listed: false
+        }
+        byIp.set(n.ip, m)
+      }
+      if (!m.listed) unlisted.set(n.ip, (unlisted.get(n.ip) ?? new Set()).add(s.id))
+      if (!m.checks.some((c) => c.url === n.url)) m.checks.push({ service: s.name, url: n.url, level: n.stopped ? 'off' : n.level, status: n.status, ms: n.ms })
+    }
+  }
+  for (const m of byIp.values()) {
+    // An unmonitored machine that serves several services is named by its EC2 name, not the first service found.
+    if (!m.listed && (unlisted.get(m.ip)?.size ?? 0) > 1) { m.title = m.name; m.roleId = null; m.label = '' }
+    if (!m.listed && m.checks.length && m.checks.every((c) => c.level === 'off')) m.state = 'stopped'
+    if (m.state === 'stopped') { m.level = 'off'; m.problems = []; continue }
+    const live = m.checks.filter((c) => c.level !== 'off')
+    for (const c of live) {
+      if (c.level === 'crit') m.problems.push(`${c.service} check fails: ${c.status ? `HTTP ${c.status}` : 'no answer'}`)
+      else if (c.level === 'warn') m.problems.push(`${c.service} check is slow: ${formatMs(c.ms)}`)
+    }
+    m.problems = [...new Set(m.problems)]
+    m.level = worst([m.level, ...live.map((c) => c.level)])
+  }
+  return [...byIp.values()].sort((a, b) =>
+    roleRank(a.roleId) - roleRank(b.roleId) || a.title.localeCompare(b.title, undefined, { numeric: true }) || a.ip.localeCompare(b.ip, undefined, { numeric: true }))
+}
+
 // ---------- formatting ----------
 
 export function formatBytes(n: number | null | undefined, digits = 1): string {

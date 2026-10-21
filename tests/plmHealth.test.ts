@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkNote, envOf, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkNote, envOf, machines, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -192,4 +192,54 @@ test('a server whose check is not running is counted apart, never as up', () => 
   assert.deepEqual(serviceLevel([], [n('a', 'ok'), n('b', 'unknown')]), { level: 'ok', summary: 'Up · 1 not checked' })
   assert.equal(serviceLevel([], [n('a', 'crit'), n('b', 'unknown')]).level, 'crit')
   assert.equal(serviceLevel([], [n('a', 'unknown'), n('b', 'unknown')]).summary, 'Its health check is not running')
+})
+
+test('the honeycomb has each machine once, red when it stops reporting or a check on it fails, grey when stopped', () => {
+  const host = (role: string, label: string, ip: string, extra: Partial<HostHealth> = {}): HostHealth => ({
+    ip, name: `${role}-${label}`, role, label, level: 'ok', problems: [], state: 'running', reporting: true, os: 'linux', cpu: 10, mem: 40, memBytes: null,
+    disk: { mount: '/', pct: 30 }, load: null, cores: null, uptimeSec: null, ...extra
+  })
+  const nd = (ip: string, url: string, level: ServiceNode['level'] = 'ok', stopped = false, label = '01'): ServiceNode => ({ url, level, status: level === 'crit' ? 503 : 200, ms: 40, label, ip, name: `ec2-${ip}`, stopped })
+  const svc = (id: string, name: string, nodes: ServiceNode[]): ServiceHealth => ({ id, name, blurb: '', level: 'ok', summary: '', fronts: [], nodes })
+  const cells = machines({
+    hosts: [
+      host('3DSpace', '02', '10.0.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }),
+      host('3DSpace', '01', '10.0.0.11'),
+      host('3DPassport', '01', '10.0.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }),
+      host('3DPassport', '02', '10.0.0.32', { level: 'off', state: 'stopped', reporting: false })
+    ],
+    services: [
+      svc('space', '3DSpace', [nd('10.0.0.11', 'a/3dspace'), nd('10.0.0.11', 'a/internal'), nd('10.0.0.12', 'b/3dspace', 'crit'), nd('10.0.0.12', 'b/internal', 'crit')]),
+      svc('passport', '3DPassport', [nd('10.0.0.31', 'p1', 'crit'), nd('10.0.0.32', 'p2', 'crit', true)]),
+      svc('dashboard', '3DDashboard', [nd('10.0.0.41', 'd1', 'ok', false, '10.0.0.41'), nd('10.0.0.42', 'd2', 'unknown', false, '02')]),
+      svc('fcs', 'File Collaboration Server', [nd('10.0.0.51', 'f1', 'ok', true)])
+    ]
+  })
+  // In the services' order, then by label, whatever their status.
+  assert.deepEqual(cells.map((c) => c.title), ['3DPassport 01', '3DPassport 02', '3DDashboard', '3DDashboard 02', '3DSpace 01', '3DSpace 02', 'File Collaboration Server 01'])
+  const by = (t: string) => cells.find((c) => c.title === t)!
+  assert.equal(by('3DSpace 01').level, 'ok')
+  assert.equal(by('3DSpace 01').checks.length, 2, 'both checks on the machine')
+  // A failing check makes the machine red even though its own readings only warn; the same failure is said once.
+  assert.equal(by('3DSpace 02').level, 'crit')
+  assert.deepEqual(by('3DSpace 02').problems, ['Memory at 83%', '3DSpace check fails: HTTP 503'])
+  assert.equal(by('3DPassport 01').level, 'crit')
+  assert.ok(by('3DPassport 01').problems.includes('Not reporting'))
+  // Stopped in EC2: grey, with no problems, though its check fails.
+  assert.deepEqual([by('3DPassport 02').level, by('3DPassport 02').problems], ['off', []])
+  assert.deepEqual([by('File Collaboration Server 01').level, by('File Collaboration Server 01').state], ['off', 'stopped'])
+  // Machines only the checks know: no row under Servers; a check that is not running says nothing either way.
+  assert.deepEqual([by('3DDashboard').level, by('3DDashboard').listed, by('3DDashboard').reporting], ['ok', false, null])
+  assert.equal(by('3DDashboard 02').level, 'unknown')
+  assert.equal(by('3DSpace 01').roleId, 'space')
+})
+
+test('an unmonitored machine that serves several services goes by its EC2 name', () => {
+  const nd = (url: string): ServiceNode => ({ url, level: 'ok', status: 200, ms: 5, label: 'server', ip: '10.0.0.9', name: 'MSDEV-AllInOne', stopped: false })
+  const cells = machines({ hosts: [], services: [
+    { id: 'passport', name: '3DPassport', blurb: '', level: 'ok', summary: '', fronts: [], nodes: [nd('a')] },
+    { id: 'space', name: '3DSpace', blurb: '', level: 'ok', summary: '', fronts: [], nodes: [nd('b')] }
+  ] })
+  assert.equal(cells.length, 1)
+  assert.deepEqual([cells[0].title, cells[0].roleId, cells[0].checks.length], ['MSDEV-AllInOne', null, 2])
 })
