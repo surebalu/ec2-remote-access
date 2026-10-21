@@ -1830,7 +1830,7 @@ html.launcher-page, html.launcher-page body { background: transparent; }
 .hl-body { display: block; animation: hl-in .35s var(--ease) both; }
 
 /* The verdict */
-.hl-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 18px 24px; padding: 22px 24px; overflow: hidden;
+.hl-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 18px 24px; padding: 22px 24px; overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--lvl) 30%, var(--border)); border-radius: 18px;
   background: radial-gradient(140% 160% at 0% 0%, var(--lvl-soft), transparent 55%), var(--panel); box-shadow: var(--shadow-md); }
 .hl-hero::after { content: ''; position: absolute; inset: auto -40px -60px auto; width: 240px; height: 240px; border-radius: 50%; background: var(--lvl-soft); filter: blur(40px); opacity: .7; pointer-events: none; }
@@ -1843,7 +1843,8 @@ html.launcher-page, html.launcher-page body { background: transparent; }
 .hl-ring svg { width: 30px; height: 30px; }
 .hl-ring-halo { position: absolute; inset: -7px; border: 2px solid var(--lvl); border-radius: 50%; opacity: 0; }
 .hl-ring.lvl-crit .hl-ring-halo, .hl-ring.lvl-warn .hl-ring-halo { animation: hl-breathe 2.4s var(--ease) infinite; }
-.hl-kpis { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-content: center; }
+.hl-kpis { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; align-content: center; }
+.hl-kpi-note { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .hl-kpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px 9px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel) 72%, transparent); text-align: left;
   transition: transform .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease); }
 .hl-kpi:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--lvl) 45%, var(--border)); box-shadow: var(--shadow-md); }

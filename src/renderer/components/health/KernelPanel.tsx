@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import { ago, formatBytes, formatDuration, formatPct, levelOf, type KernelHealth, type KernelServer, type PlmEnvId } from '@shared/plmHealth'
+import { ago, formatBytes, formatDuration, formatPct, levelOf, signedInPeople, type KernelHealth, type KernelServer, type PlmEnvId } from '@shared/plmHealth'
 import { Icon } from '../icons'
 import { Bar, Dot, Empty, Pill, SectionHead, Spark, lvl } from './parts'
 
@@ -11,7 +11,8 @@ import { Bar, Dot, Empty, Pill, SectionHead, Spark, lvl } from './parts'
 
 const seen = new Map<PlmEnvId, KernelHealth>()
 
-export default function KernelPanel({ env, active }: { env: PlmEnvId; active: boolean }): ReactElement {
+/** The kernel reading for an environment, every 30 s while on screen; shared by the banner and the panel. */
+export function useKernel(env: PlmEnvId, active: boolean): { d: KernelHealth | null; error: string | null } {
   const [d, setD] = useState<KernelHealth | null>(seen.get(env) ?? null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
@@ -27,11 +28,16 @@ export default function KernelPanel({ env, active }: { env: PlmEnvId; active: bo
     const t = setInterval(() => { if (active && document.visibilityState === 'visible') load() }, 30_000)
     return () => { gone = true; clearInterval(t) }
   }, [env, active])
+  return { d, error }
+}
 
-  const people = d?.servers.reduce((n, s) => n + s.people.length, 0) ?? 0
+export default function KernelPanel({ d, error }: { d: KernelHealth | null; error: string | null }): ReactElement {
+  const { people, onMany } = signedInPeople(d?.servers ?? [])
+  const n = people.length
   return (
     <>
-      <SectionHead id="hl-kernel" icon={<Icon.layers />} title="3DSpace kernel and sign-ins" sub={d ? `${people} ${people === 1 ? 'person' : 'people'} signed in now · read live from each server's kernel` : 'Read live from each server\'s kernel'} />
+      <SectionHead id="hl-kernel" icon={<Icon.layers />} title="3DSpace kernel and sign-ins"
+        sub={d ? `${n} ${n === 1 ? 'person' : 'people'} signed in now${onMany ? ` (${onMany} on more than one server, counted once)` : ''} · read live from each server's kernel` : 'Read live from each server\'s kernel'} />
       {!d && !error && <div className="hl-kernel-grid">{[0, 1].map((i) => <div key={i} className="hl-card hl-skel" style={{ height: 260 }} />)}</div>}
       {!d && error && <Empty>{error}</Empty>}
       {d && (

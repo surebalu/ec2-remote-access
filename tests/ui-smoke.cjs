@@ -293,7 +293,11 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return { env: args[0], at: Date.now(), start: now - 86400000, step: 300, gaps: [],
         servers: [{ ip: '10.9.0.11', label: '01', name: 'space-01', reachable: true, people: ['alex.example', 'sam.example'], service: ['svc_sync'], system: ['ADMINISTRATION', 'User Agent'], reported: 5,
           allocatedBytes: 205 * MB, reservedBytes: 135 * MB, highwaterBytes: 663 * MB, limitBytes: 8192 * MB, contexts: 544, dbConnections: 87, dbExceeded: 0, exceptions: 527, uptimeSec: 175000, version: 'R2025x HotFix 10',
-          usersSpark: Array.from({ length: 289 }, (_, i) => 4 + Math.round(10 * Math.max(0, Math.sin((i - 100) / 46)))), usersPeak: 14, level: 'ok' }],
+          usersSpark: Array.from({ length: 289 }, (_, i) => 4 + Math.round(10 * Math.max(0, Math.sin((i - 100) / 46)))), usersPeak: 14, level: 'ok' },
+        // The same person can be signed in to both servers; the banner counts people once.
+        { ip: '10.9.0.12', label: '02', name: 'space-02', reachable: true, people: ['sam.example', 'riley.example'], service: [], system: [], reported: 2,
+          allocatedBytes: 180 * MB, reservedBytes: 120 * MB, highwaterBytes: 600 * MB, limitBytes: 8192 * MB, contexts: 300, dbConnections: 60, dbExceeded: 0, exceptions: 12, uptimeSec: 90000, version: 'R2025x HotFix 10',
+          usersSpark: Array.from({ length: 289 }, () => 2), usersPeak: 2, level: 'ok' }],
         license: { at: now - 720000, status: 'RUNNING', type: 'MANAGED', version: '6.428.3', offline: 'Enabled', level: 'ok', nodes: [{ host: 'lic-1.example.com', ip: '192.0.2.1', port: '443', rttMs: 3 }, { host: 'lic-2.example.com', ip: '192.0.2.2', port: '443', rttMs: 4 }] } }
     }
     case 'health:gc': return process.env.HEALTH_GC_JSON ? JSON.parse(readFileSync(process.env.HEALTH_GC_JSON, 'utf8'))[`${args[0]}|${args[1]}`] : gcFixture(args[0], args[1])
@@ -473,7 +477,14 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelectorAll('.hl-hex.dim').length`), 0)
     await js(`document.querySelector('.hl').scrollTop = 0`)
     // Who is signed in and the kernel's own memory, live from each 3DSpace server; the license server beside them.
-    await until(`!!document.querySelector('.hl-kernel') && document.querySelectorAll('.hl-user').length === 5 && !!document.querySelector('.hl-license')`)
+    await until(`!!document.querySelector('.hl-kernel') && document.querySelectorAll('.hl-user').length === 7 && !!document.querySelector('.hl-license')`)
+    // The banner counts each person once across the servers; the machines tile matches the honeycomb.
+    const kpi = (label) => js(`(() => { const k = [...document.querySelectorAll('.hl-kpi')].find((b) => b.querySelector('.hl-kpi-label').textContent === '${label}'); return k.querySelector('.hl-kpi-value').textContent + '|' + (k.querySelector('.hl-kpi-note')?.textContent ?? '') })()`)
+    assert.equal(await kpi('Signed in'), '3|1 on both servers')
+    assert.equal(await js(`document.querySelector('.hl-kpi-note') && [...document.querySelectorAll('.hl-kpi-note')].every((n) => n.scrollWidth <= n.clientWidth)`), true, 'tile notes fit')
+    assert.equal(await kpi('Machines'), '5/7|healthy')
+    assert.match(await js(`document.querySelector('#hl-kernel').textContent`), /3 people signed in now \(1 on more than one server, counted once\)/)
+    assert.equal(await js(`document.querySelectorAll('.hl-kpi').length`), 8)
     assert.match(await js(`document.querySelector('.hl-signed-now').textContent`), /2people signed in/)
     assert.ok(await js(`[...document.querySelectorAll('.hl-user.system')].length === 2 && [...document.querySelectorAll('.hl-user.service')].length === 1`), 'system and service accounts set apart')
     // Every machine's memory on one scale, one crosshair through them all.

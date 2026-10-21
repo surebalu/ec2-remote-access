@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkNote, envOf, fullestDisk, machines, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkNote, envOf, fullestDisk, machines, signedInPeople, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -251,4 +251,14 @@ test("a machine is judged by its own disks: a shared store it mounts is counted 
   assert.deepEqual(fullestDisk([{ mount: '/', pct: 40, shared: false }, { mount: '/boot', pct: 82, shared: false }], false), { mount: '/boot', pct: 82 })
   assert.deepEqual(fullestDisk([{ mount: '/', pct: 40, shared: false }, { mount: '/boot/efi', pct: 60, shared: false }], false), { mount: '/', pct: 40 })
   assert.equal(fullestDisk([{ mount: '/fcsdata', pct: 90, shared: true }], false), null)
+})
+
+test('people signed in are counted once across the 3DSpace servers', () => {
+  const r = signedInPeople([
+    { reachable: true, people: ['sbalu', 'alee', 'mchen'] },
+    { reachable: true, people: ['alee', 'SBalu', 'jdoe'] },
+    { reachable: false, people: ['ghost'] }
+  ])
+  assert.deepEqual(r, { people: ['alee', 'jdoe', 'mchen', 'sbalu'], onMany: 2 })
+  assert.deepEqual(signedInPeople([]), { people: [], onMany: 0 })
 })

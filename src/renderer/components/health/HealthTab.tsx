@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import {
-  GC_RANGES, LIMITS, ago, formatBytes, formatDuration, formatMs, formatPct, levelOf, worst,
+  GC_RANGES, LIMITS, ago, formatBytes, formatDuration, formatMs, formatPct, levelOf, machines, signedInPeople, worst,
   type AlbHealth, type HealthCheck, type HostHealth, type Issue, type JvmGcDetail, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth
 } from '@shared/plmHealth'
 import { useStore, type Tab } from '../../store'
@@ -11,7 +11,7 @@ import Popover from '../Popover'
 import { Bar, Dot, Empty, Gauge, MARKS, Pill, SectionHead, Spark, StatusRing, lvl } from './parts'
 import HeapChart from './HeapChart'
 import MemoryGrid from './MemoryGrid'
-import KernelPanel from './KernelPanel'
+import KernelPanel, { useKernel } from './KernelPanel'
 import Honeycomb from './Honeycomb'
 
 /**
@@ -174,6 +174,11 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
   const checks = env.checks ?? []
   const [showChecks, setShowChecks] = useState(false)
   const [focusHost, setFocusHost] = useState<{ ip: string; n: number } | null>(null)
+  const kernel = useKernel(env.id, active && env.jvms.length > 0)
+  const signedIn = kernel.d ? signedInPeople(kernel.d.servers) : null
+  const kernelServers = kernel.d?.servers.filter((s) => s.reachable).length ?? 0
+  const cells = useMemo(() => machines(env), [env])
+  const runningCells = cells.filter((c) => c.level !== 'off')
   return (
     <div className="hl-body" key={env.id}>
       <section className={`hl-hero ${lvl(env.level)}`}>
@@ -189,6 +194,10 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
         </div>
         <div className="hl-kpis">
           <Kpi label="Services" value={`${upServices}/${services.length}`} level={worst(services.map((s) => s.level))} onClick={() => onJump('services')} />
+          <Kpi label="Machines" value={`${runningCells.filter((c) => c.level === 'ok').length}/${runningCells.length}`} note="healthy" level={worst(runningCells.map((c) => c.level))} onClick={() => onJump('machines')} />
+          <Kpi label="Signed in" value={signedIn ? String(signedIn.people.length) : '–'} level={signedIn ? 'ok' : 'unknown'} onClick={() => onJump(env.jvms.length ? 'kernel' : 'services')}
+            note={!env.jvms.length ? 'not read here' : signedIn ? (signedIn.onMany ? `${signedIn.onMany} on both servers` : `unique, ${kernelServers} ${kernelServers === 1 ? 'server' : 'servers'}`) : kernel.error ? 'not answering' : 'reading…'}
+            title={signedIn ? `People signed in to 3DSpace, each counted once across the servers${signedIn.people.length ? `: ${signedIn.people.join(', ')}` : ''}` : undefined} />
           <Kpi label="Response" value={formatMs(frontMs)} level={levelOf(frontMs, LIMITS.albMs)} spark={front?.latencySpark} onClick={() => onJump('alb')} />
           <Kpi label="Requests" value={front?.requestsPerMin !== null && front?.requestsPerMin !== undefined ? `${Math.round(front.requestsPerMin)}/min` : '–'} level="ok" spark={front?.reqSpark} onClick={() => onJump('alb')} />
           <Kpi label="5xx · 15 min" value={errors === null ? '–' : String(Math.round(errors))} level={front?.problems.some((p) => /5xx/.test(p)) ? front.level : errors === null ? 'unknown' : 'ok'} onClick={() => onJump('alb')} />
@@ -215,7 +224,7 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
         </>
       )}
 
-      {env.jvms.length > 0 && <KernelPanel env={env.id} active={active} />}
+      {env.jvms.length > 0 && <KernelPanel d={kernel.d} error={kernel.error} />}
 
       <MemoryGrid env={env.id} active={active} />
 
@@ -273,11 +282,12 @@ const avgFront = (services: ServiceHealth[]): number | null => {
   return ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : null
 }
 
-function Kpi({ label, value, level, spark, sparkMax, onClick }: { label: string; value: string; level: Level; spark?: (number | null)[]; sparkMax?: number; onClick: () => void }): ReactElement {
+function Kpi({ label, value, level, spark, sparkMax, note, title, onClick }: { label: string; value: string; level: Level; spark?: (number | null)[]; sparkMax?: number; note?: string; title?: string; onClick: () => void }): ReactElement {
   return (
-    <button type="button" className={`hl-kpi ${lvl(level)}`} onClick={onClick}>
+    <button type="button" className={`hl-kpi ${lvl(level)}`} onClick={onClick} title={title}>
       <span className="hl-kpi-label">{label}</span>
       <span className="hl-kpi-value">{value}</span>
+      {note && <span className="hl-kpi-note">{note}</span>}
       {spark && <Spark values={spark} level={level === 'unknown' ? 'ok' : level} min={0} max={sparkMax} height={22} />}
     </button>
   )

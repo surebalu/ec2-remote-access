@@ -168,6 +168,24 @@ export interface KernelHealth {
   gaps: string[]
 }
 
+/**
+ * Everyone signed in across the 3DSpace servers, each person once: the load balancer can give one person sessions on
+ * both servers. `onMany` counts the people seen on more than one.
+ */
+export function signedInPeople(servers: Pick<KernelServer, 'reachable' | 'people'>[]): { people: string[]; onMany: number } {
+  const seen = new Map<string, { name: string; n: number }>()
+  for (const s of servers) {
+    if (!s.reachable) continue
+    for (const p of new Set(s.people.map((x) => x.trim()).filter(Boolean))) {
+      const k = p.toLowerCase()
+      const had = seen.get(k)
+      seen.set(k, { name: had?.name ?? p, n: (had?.n ?? 0) + 1 })
+    }
+  }
+  const all = [...seen.values()]
+  return { people: all.map((x) => x.name).sort((a, b) => a.localeCompare(b)), onMany: all.filter((x) => x.n > 1).length }
+}
+
 /** The kernel's own sessions, never a person. */
 export const SYSTEM_USERS = new Set(['User Agent', 'ADMINISTRATION'])
 export const isServiceAccount = (u: string): boolean => /^svc[_-]/i.test(u)
