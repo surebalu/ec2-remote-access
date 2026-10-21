@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkNote, envOf, fullestDisk, machines, memoryChange, signedInPeople, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
+import { checkCells, checkNote, envOf, fullestDisk, machines, memoryChange, signedInPeople, parseLicense, gcTrend, isFullGc, formatBytes, formatDuration, formatMs, formatPct, ipOf, isFrontProbe, levelBelow, levelOf, LIMITS, nodeLabel, probeOk, roleOf, serviceLevel, verdict, worst, type Endpoint, type HealthCheck, type HostHealth, type ServiceHealth, type ServiceNode } from '../src/shared/plmHealth.ts'
 
 test('addresses come out of node, JMX, Apache and probe labels alike', () => {
   assert.equal(ipOf('10.0.2.175:9100'), '10.0.2.175')
@@ -270,4 +270,32 @@ test('kernel memory change reads from the first point, or the last restart, to t
   // Since a restart at t=4000: the run before it does not count.
   assert.deepEqual(memoryChange(v, 0, 1000, 4000), { from: 90 * MB, to: 110 * MB, at: 4000, min: 90 * MB, max: 110 * MB })
   assert.equal(memoryChange([null, 5, null], 0, 1000), null, 'one point is no change')
+})
+
+test('checks split as Grafana shows them: through the load balancer, and on each server with its machine', () => {
+  const chk = (serviceId: string, service: string, url: string, via: HealthCheck['via'], label = '', extra: Partial<HealthCheck> = {}): HealthCheck => ({
+    serviceId, service, url, via, label, level: 'ok', status: 200, ms: 20, dnsMs: 0.4, certDays: via === 'lb' ? 90 : null, stopped: false, note: null, ...extra
+  })
+  const env = {
+    hosts: [{ ip: '10.1.2.144', name: 'MSPROD-3DSpace', role: '3DSpace', label: '01', level: 'ok' as const, problems: [], state: 'running' as const, reporting: true, os: 'linux' as const,
+      cpu: 5, mem: 40, memBytes: null, disk: { mount: '/', pct: 20 }, load: null, cores: null, uptimeSec: null }],
+    services: [],
+    checks: [
+      chk('space', '3DSpace', 'https://space-pplm.example/internal/servlet/fcs/ping', 'lb'),
+      chk('passport', '3DPassport', 'https://pass-pplm.example/3dpassport/healthcheck', 'lb', '', { level: 'crit', status: 0 }),
+      chk('space', '3DSpace', 'https://space-pplm.example/3dspace/servlet/fcs/ping', 'lb'),
+      chk('space', '3DSpace', 'http://ip-10-1-2-144.us-west-1.compute.internal:8090/3dspace/servlet/fcs/ping', 'server', '01'),
+      chk('passport', '3DPassport', 'http://ip-10-1-2-114.us-west-1.compute.internal:8080/3dpassport/healthcheck', 'server', '02', { level: 'crit', stopped: true }),
+      chk('cad', 'CAD Converter', 'http://10.1.2.174:5001/swagger-ui/index.html#', 'server', 'server', { level: 'unknown', broken: 'HTTP 400' }),
+      // Production's Apache: the exporter's reading, not a probe Grafana runs.
+      chk('apache', 'Apache web tier', 'http://10.1.2.20:9117 (Apache status)', 'server', '01')
+    ]
+  }
+  const lb = checkCells(env, 'lb')
+  assert.deepEqual(lb.map((c) => [c.service, c.label, c.level]), [['3DPassport', '', 'crit'], ['3DSpace', '', 'ok'], ['3DSpace', 'internal', 'ok']])
+  assert.ok(lb.every((c) => c.machine === null))
+  const http = checkCells(env, 'server')
+  assert.deepEqual(http.map((c) => [c.service, c.label, c.level]), [['3DPassport', '02', 'off'], ['3DSpace', '01', 'ok'], ['CAD Converter', 'server', 'unknown']])
+  assert.equal(http[1].machine?.name, 'MSPROD-3DSpace', 'a server check knows its machine')
+  assert.equal(http[0].machine, null, 'no machine data for a server with no exporter row')
 })

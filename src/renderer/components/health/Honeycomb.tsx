@@ -1,20 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
-import { LIMITS, formatMs, formatPct, levelOf, machines, type Level, type MachineCell, type MachineCheck, type PlmEnvHealth } from '@shared/plmHealth'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
+import { LIMITS, checkCells, formatMs, formatPct, levelOf, type CheckCell, type Level, type PlmEnvHealth } from '@shared/plmHealth'
 import { Icon } from '../icons'
 import { Bar, Dot, MARKS, Pill, SectionHead, lvl } from './parts'
 
 /**
- * Every machine in the environment as one hexagon of a honeycomb: green healthy, amber a warning, red unhealthy (not
- * reporting, a health check on it failing, CPU, memory or disk over the limit), grey stopped in EC2. Pointing at one
- * says which machine it is and why it has its colour; a click goes to its row under Servers (on a touch screen the
- * first tap shows the details and a second one goes). Laid out in the services' order, never by status, so a machine
- * keeps its place when it changes colour.
+ * The health checks as Grafana runs them, as two honeycombs: each service's URL through the load balancer (the
+ * "<Environment> ALB Healthcheck" job) and on each server (the "Service HTTP Healthcheck" jobs and Apache's), one
+ * hexagon per check: green healthy, amber slow, red unhealthy, grey on a server stopped in EC2, dashed when the probe
+ * itself is not running. Pointing at one says what it checks and, for a server check, which machine it is and how that
+ * machine is doing; a click goes to the machine's row under Servers (or the service). On a touch screen the first tap
+ * shows the details and a second one goes. Cells keep the services' order, never status, so a check keeps its place
+ * when it changes colour.
  */
 
-const WORDS: Record<Level, string> = { ok: 'Healthy', warn: 'Warning', crit: 'Unhealthy', off: 'Stopped', unknown: 'No data' }
+const WORDS: Record<Level, string> = { ok: 'Healthy', warn: 'Slow', crit: 'Unhealthy', off: 'Stopped', unknown: 'Not running' }
 const LEGEND: Level[] = ['ok', 'warn', 'crit', 'off', 'unknown']
 const GAP = 6
-const TIP_W = 272
+const TIP_W = 280
 
 /** A pointy-top hexagon of circumradius r centred on 0,0, its corners rounded by `round`. */
 function hexPath(r: number, round: number): string {
@@ -29,19 +31,38 @@ function hexPath(r: number, round: number): string {
   return v.map((c, i) => `${i ? 'L' : 'M'}${toward(c, v[(i + 5) % 6])}Q${c[0].toFixed(2)},${c[1].toFixed(2)} ${toward(c, v[(i + 1) % 6])}`).join('') + 'Z'
 }
 
-const shortLabel = (label: string): string => (label === 'Primary' ? 'Pri' : label === 'Secondary' ? 'Sec' : label)
-const markOf = (m: MachineCell): string => {
-  const known = m.roleId ? MARKS[m.roleId]?.[0] : undefined
+/** What fits under the letters: "01", "Pri", "01 int", "AiO"; nothing for a service's only server. */
+function shortLabel(label: string): string {
+  const one = (l: string): string => (l === 'Primary' ? 'Pri' : l === 'Secondary' ? 'Sec' : l === 'All-in-one server' ? 'AiO' : l === 'server' ? '' : /^0\d$/.test(l) ? l : l.replace(/^3D/, '').slice(0, 4))
+  const internal = /^(.*?)\s*internal$/i.exec(label)
+  return internal ? `${one(internal[1])} int`.trim() : one(label)
+}
+const markOf = (c: CheckCell): string => {
+  const known = MARKS[c.serviceId]?.[0]
   if (known) return known
-  const letters = m.title.replace(/^3D/, '').replace(/[^A-Za-z]/g, '')
+  const letters = c.service.replace(/^3D/, '').replace(/[^A-Za-z]/g, '')
   return letters.slice(0, 1).toUpperCase() + letters.slice(1, 2).toLowerCase()
 }
-const checkWord = (c: MachineCheck): string =>
-  c.level === 'off' ? 'stopped' : c.level === 'unknown' ? 'not running' : `${c.status ? `HTTP ${c.status}` : 'no answer'}${c.ms !== null && c.level !== 'crit' ? ` · ${formatMs(c.ms)}` : ''}`
-const RANK: Record<Level, number> = { crit: 0, warn: 1, unknown: 2, ok: 3, off: 4 }
+const shortUrl = (url: string): string => url.replace(/^https?:\/\//, '').replace(/\.us-west-\d\.compute\.internal/, '')
+const statusWord = (c: CheckCell): string =>
+  c.level === 'off' ? 'Server stopped' : c.level === 'unknown' ? (c.broken ?? 'Probe not running') : c.status ? `HTTP ${c.status}` : 'No answer'
 
-export default function Honeycomb({ env, onPick }: { env: PlmEnvHealth; onPick: (m: MachineCell) => void }): ReactElement | null {
-  const cells = useMemo(() => machines(env), [env])
+export default function Honeycombs({ env, onPick }: { env: PlmEnvHealth; onPick: (c: CheckCell) => void }): ReactElement | null {
+  const alb = useMemo(() => checkCells(env, 'lb'), [env])
+  const http = useMemo(() => checkCells(env, 'server'), [env])
+  if (!alb.length && !http.length) return null
+  return (
+    <>
+      <SectionHead id="hl-checks" icon={<Icon.hexes />} title="Health checks" sub="As Grafana runs them: each URL through the load balancer, and on each server" />
+      <div className="hl-combs">
+        {alb.length > 0 && <Comb kind="alb" title="ALB checks" sub="Through the load balancer, as users reach them" cells={alb} onPick={onPick} />}
+        {http.length > 0 && <Comb kind="http" title="HTTP checks" sub="On each server" cells={http} onPick={onPick} />}
+      </div>
+    </>
+  )
+}
+
+function Comb({ kind, title, sub, cells, onPick }: { kind: 'alb' | 'http'; title: string; sub: string; cells: CheckCell[]; onPick: (c: CheckCell) => void }): ReactElement {
   const board = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
   const pointer = useRef('mouse')
@@ -59,11 +80,11 @@ export default function Honeycomb({ env, onPick }: { env: PlmEnvHealth; onPick: 
     ro.observe(el)
     setWidth(el.clientWidth)
     return () => ro.disconnect()
-  }, [cells.length > 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Smaller cells on a phone, bigger ones when there are only a few machines.
+  // One cell size for both combs (so by the window, not the comb's own width), smaller on a phone.
   const n = cells.length
-  const r = width < 400 ? 25 : width < 700 ? 32 : n <= 3 ? 44 : 38
+  const r = window.innerWidth < 640 || width < 260 ? 25 : 32
   const w = Math.sqrt(3) * r
   const pitch = w + GAP
   const rowH = 1.5 * r + GAP * 0.866
@@ -82,31 +103,22 @@ export default function Honeycomb({ env, onPick }: { env: PlmEnvHealth; onPick: 
   const face = useMemo(() => hexPath(r, r * 0.17), [r])
   const halo = useMemo(() => hexPath(r + 4, r * 0.2), [r])
 
-  // Machines that share a name and have no number (the migration servers) are told apart by their address.
-  const labels = useMemo(() => {
-    const named = new Map<string, number>()
-    for (const c of cells) named.set(c.title, (named.get(c.title) ?? 0) + 1)
-    return new Map(cells.map((c) => [c.ip, c.label ? shortLabel(c.label) : (named.get(c.title) ?? 0) > 1 && /^\d+\.\d+\.\d+\.\d+$/.test(c.ip) ? `.${c.ip.split('.').pop()}` : '']))
-  }, [cells])
-
   const shown = pinned ?? hover
-  const idx = shown ? cells.findIndex((c) => c.ip === shown) : -1
+  const idx = shown ? cells.findIndex((c) => c.url === shown) : -1
   const tip = idx >= 0 ? cells[idx] : null
   useLayoutEffect(() => { if (tipRef.current) setTipH(tipRef.current.offsetHeight) }, [tip, width])
 
-  if (!cells.length) return null
   const count = (l: Level): number => cells.filter((c) => c.level === l).length
-  const running = cells.length - count('off')
+  const running = n - count('off')
   const lit = peek ?? only
-
-  const go = (m: MachineCell): void => { setPinned(null); setHover(null); onPick(m) }
-  const tap = (m: MachineCell): void => {
-    // A touch has no hover: the first tap shows which machine it is, a second one goes to it.
-    if (pointer.current !== 'mouse' && pinned !== m.ip) { setPinned(m.ip); return }
-    go(m)
+  const go = (c: CheckCell): void => { setPinned(null); setHover(null); onPick(c) }
+  const tap = (c: CheckCell): void => {
+    // A touch has no hover: the first tap shows what the check is, a second one goes to it.
+    if (pointer.current !== 'mouse' && pinned !== c.url) { setPinned(c.url); return }
+    go(c)
   }
-  const key = (e: KeyboardEvent, m: MachineCell): void => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(m) }
+  const key = (e: KeyboardEvent, c: CheckCell): void => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(c) }
     if (e.key === 'Escape') { setPinned(null); setHover(null) }
   }
 
@@ -121,107 +133,119 @@ export default function Honeycomb({ env, onPick }: { env: PlmEnvHealth; onPick: 
   }
 
   return (
-    <>
-      <SectionHead id="hl-machines" icon={<Icon.hexes />} title="Machines" sub="One hexagon per machine: point at one to see which it is" />
-      <section className="hl-card hl-hive" aria-label="Machines by health">
-        <div className="hl-hive-sum">
-          <div className="hl-hive-score">
-            <strong>{count('ok')}</strong>
-            <span>of {running} {running === 1 ? 'machine' : 'machines'} healthy</span>
-          </div>
-          <div className="hl-hive-bar" aria-hidden="true">
-            {LEGEND.filter((l) => count(l)).map((l) => <i key={l} className={lvl(l)} style={{ flexGrow: count(l) }} />)}
-          </div>
-          <div className="hl-hive-legend" role="group" aria-label="Show one status">
-            {LEGEND.filter((l) => count(l) || l === 'ok' || l === 'crit').map((l) => (
-              <button key={l} type="button" className={`${lvl(l)} ${only === l ? 'on' : ''}`} aria-pressed={only === l}
-                onPointerEnter={(e) => { if (e.pointerType === 'mouse') setPeek(l) }} onPointerLeave={() => setPeek(null)} onClick={() => setOnly(only === l ? null : l)}>
-                <i className={`hl-hive-swatch ${lvl(l)}`} />
-                <span>{WORDS[l]}</span>
-                <b>{count(l)}</b>
-              </button>
-            ))}
-          </div>
+    <section className={`hl-card hl-hive ${kind}`} aria-label={title}>
+      <div className="hl-hive-head">
+        <div className="min-w-0">
+          <h4>{title}</h4>
+          <span className="hl-card-sub">{sub}</span>
         </div>
-        <div className="hl-hive-board" ref={board} onPointerDown={(e) => { pointer.current = e.pointerType; if (!(e.target as Element).closest('.hl-hex')) setPinned(null) }}>
-          {width > 0 && (
-            <svg width={width} height={height} role="list" aria-label={`${cells.length} machines`}>
-              <defs>
-                <linearGradient id="hl-hex-shine" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#fff" stopOpacity=".26" />
-                  <stop offset=".55" stopColor="#fff" stopOpacity="0" />
-                </linearGradient>
-                <pattern id="hl-hex-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                  <line x1="0" y1="0" x2="0" y2="6" className="hl-hex-hatch" />
-                </pattern>
-              </defs>
-              {cells.map((m, i) => {
-                const p = at(i)
-                const label = labels.get(m.ip) ?? ''
-                return (
-                  <g key={m.ip} role="listitem" transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}>
-                    <g className={`hl-hex ${lvl(m.level)} ${shown === m.ip ? 'on' : ''} ${lit && m.level !== lit ? 'dim' : ''}`} tabIndex={0} role="button" data-ip={m.ip}
-                      aria-label={`${m.title}, ${m.name}, ${m.ip}: ${WORDS[m.level]}${m.problems.length ? `. ${m.problems.join('. ')}` : ''}`}
-                      onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(m.ip) }} onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHover((h) => (h === m.ip ? null : h)) }}
-                      onFocus={() => setHover(m.ip)} onBlur={() => setHover((h) => (h === m.ip ? null : h))} onClick={() => tap(m)} onKeyDown={(e) => key(e, m)}>
-                      {m.level === 'crit' && <path d={halo} className="hl-hex-halo" />}
-                      <g className="hl-hex-face">
-                        <path d={face} className="hl-hex-body" />
-                        {m.level === 'off' && <path d={face} fill="url(#hl-hex-hatch)" />}
-                        {m.level !== 'off' && m.level !== 'unknown' && <path d={face} fill="url(#hl-hex-shine)" />}
-                        <text className="hl-hex-mark" y={label ? -r * 0.13 : 0} style={{ fontSize: r * 0.42 }}>{markOf(m)}</text>
-                        {label && <text className="hl-hex-label" y={r * 0.33} style={{ fontSize: r * 0.3 }}>{label}</text>}
-                      </g>
+        <div className="hl-hive-score">
+          <strong>{count('ok')}</strong>
+          <span>of {running} healthy</span>
+        </div>
+      </div>
+      <div className="hl-hive-bar" aria-hidden="true">
+        {LEGEND.filter((l) => count(l)).map((l) => <i key={l} className={lvl(l)} style={{ flexGrow: count(l) }} />)}
+      </div>
+      <div className="hl-hive-legend" role="group" aria-label={`${title}: show one status`}>
+        {LEGEND.filter((l) => count(l) || l === 'ok' || l === 'crit').map((l) => (
+          <button key={l} type="button" className={`${lvl(l)} ${only === l ? 'on' : ''}`} aria-pressed={only === l}
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') setPeek(l) }} onPointerLeave={() => setPeek(null)} onClick={() => setOnly(only === l ? null : l)}>
+            <i className={`hl-hive-swatch ${lvl(l)}`} />
+            <span>{WORDS[l]}</span>
+            <b>{count(l)}</b>
+          </button>
+        ))}
+      </div>
+      <div className="hl-hive-board" ref={board} onPointerDown={(e) => { pointer.current = e.pointerType; if (!(e.target as Element).closest('.hl-hex')) setPinned(null) }}>
+        {width > 0 && (
+          <svg width={width} height={height} role="list" aria-label={`${n} ${title}`}>
+            <defs>
+              <linearGradient id={`hl-hex-shine-${kind}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#fff" stopOpacity=".26" />
+                <stop offset=".55" stopColor="#fff" stopOpacity="0" />
+              </linearGradient>
+              <pattern id={`hl-hex-hatch-${kind}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="6" className="hl-hex-hatch" />
+              </pattern>
+            </defs>
+            {cells.map((c, i) => {
+              const p = at(i)
+              const label = shortLabel(c.label)
+              const where = c.via === 'lb' ? 'through the load balancer' : `on ${c.machine?.name ?? shortUrl(c.url).split(/[:/]/)[0]}`
+              return (
+                <g key={c.url} role="listitem" transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}>
+                  <g className={`hl-hex ${lvl(c.level)} ${shown === c.url ? 'on' : ''} ${lit && c.level !== lit ? 'dim' : ''}`} tabIndex={0} role="button"
+                    data-url={c.url} data-ip={c.machine?.ip ?? undefined}
+                    aria-label={`${c.service}${c.label ? ` ${c.label}` : ''} ${where}: ${WORDS[c.level]}, ${statusWord(c)}`}
+                    onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(c.url) }} onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHover((h) => (h === c.url ? null : h)) }}
+                    onFocus={() => setHover(c.url)} onBlur={() => setHover((h) => (h === c.url ? null : h))} onClick={() => tap(c)} onKeyDown={(e) => key(e, c)}>
+                    {c.level === 'crit' && <path d={halo} className="hl-hex-halo" />}
+                    <g className="hl-hex-face">
+                      <path d={face} className="hl-hex-body" />
+                      {c.level === 'off' && <path d={face} fill={`url(#hl-hex-hatch-${kind})`} />}
+                      {c.level !== 'off' && c.level !== 'unknown' && <path d={face} fill={`url(#hl-hex-shine-${kind})`} />}
+                      <text className="hl-hex-mark" y={label ? -r * 0.13 : 0} style={{ fontSize: r * 0.42 }}>{markOf(c)}</text>
+                      {label && <text className="hl-hex-label" y={r * 0.33} style={{ fontSize: r * (label.length > 4 ? 0.26 : 0.3) }}>{label}</text>}
                     </g>
                   </g>
-                )
-              })}
-            </svg>
-          )}
-          {tip && tipBox && (
-            <div className={`hl-hex-tip ${lvl(tip.level)}`} ref={tipRef} role="tooltip" style={{ left: tipBox.left, top: tipBox.top, width: Math.min(TIP_W, width) }}>
-              <div className="hl-hex-tip-head">
-                <Dot level={tip.level} />
-                <strong className="min-w-0 flex-1">{tip.title}</strong>
-                {tip.os === 'windows' && <Icon.windows />}
-                <Pill level={tip.level}>{WORDS[tip.level]}</Pill>
+                </g>
+              )
+            })}
+          </svg>
+        )}
+        {tip && tipBox && (
+          <div className={`hl-hex-tip ${lvl(tip.level)}`} ref={tipRef} role="tooltip" style={{ left: tipBox.left, top: tipBox.top, width: Math.min(TIP_W, width) }}>
+            <CheckTip c={tip} />
+            <div className="hl-hex-tip-foot">{pinned ? 'Tap again' : 'Click'} to see {tip.machine?.listed ? 'its server under Servers' : 'its service'}</div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function CheckTip({ c }: { c: CheckCell }): ReactElement {
+  const m = c.machine
+  const stat = (name: string, value: ReactNode): ReactElement => <div className="hl-hex-tip-stat"><span>{name}</span><strong>{value}</strong></div>
+  // Its checks are this tip's subject, and "not reporting" has its own line.
+  const problems = m?.problems.filter((p) => !/check (fails|is slow)|^Not reporting/.test(p)) ?? []
+  return (
+    <>
+      <div className="hl-hex-tip-head">
+        <Dot level={c.level} />
+        <strong className="min-w-0 flex-1">{c.service}{c.label && c.label !== 'server' ? ` ${c.label}` : ''}</strong>
+        <Pill level={c.level}>{WORDS[c.level]}</Pill>
+      </div>
+      <div className="hl-hex-tip-sub">{c.via === 'lb' ? 'Through the load balancer' : m ? m.name : 'On its server'}<span className="hl-hex-tip-url">{shortUrl(c.url)}</span></div>
+      <div className="hl-hex-tip-stats">
+        {stat('Status', statusWord(c))}
+        {stat('Response', formatMs(c.ms))}
+        {c.via === 'lb' ? stat('Certificate', c.certDays === null ? '–' : `${c.certDays} days`) : stat('Address', m?.ip ?? '–')}
+      </div>
+      {c.note && <p className="hl-hex-tip-note">{c.note}</p>}
+      {m && c.via === 'server' && (m.state === 'stopped'
+        ? <p className="hl-hex-tip-note">Its server is stopped in EC2: set aside, not counted as a problem.</p>
+        : (
+          <div className="hl-hex-tip-machine">
+            <span className="hl-mini-label">{m.title}{m.instanceType ? ` · ${m.instanceType}` : ''}</span>
+            {m.reporting ? (
+              <div className="hl-hex-tip-stats">
+                {([['CPU', m.cpu, LIMITS.cpu], ['Memory', m.mem, LIMITS.mem], [m.disk ? `Disk ${m.disk.mount}` : 'Disk', m.disk?.pct ?? null, m.os === 'windows' ? LIMITS.diskWindows : LIMITS.disk]] as const).map(([name, v, limits]) => (
+                  <div key={name} className="hl-hex-tip-stat">
+                    <span className="truncate">{name}</span>
+                    <strong>{formatPct(v)}</strong>
+                    <Bar pct={v} level={levelOf(v, limits)} />
+                  </div>
+                ))}
               </div>
-              <div className="hl-hex-tip-sub">{tip.name}<span>{tip.ip}{tip.instanceType ? ` · ${tip.instanceType}` : ''}</span></div>
-              {tip.level !== 'off' && tip.reporting && (
-                <div className="hl-hex-tip-stats">
-                  {([['CPU', tip.cpu, LIMITS.cpu], ['Memory', tip.mem, LIMITS.mem], [tip.disk ? `Disk ${tip.disk.mount}` : 'Disk', tip.disk?.pct ?? null, tip.os === 'windows' ? LIMITS.diskWindows : LIMITS.disk]] as const).map(([name, v, limits]) => (
-                    <div key={name} className="hl-hex-tip-stat">
-                      <span className="truncate">{name}</span>
-                      <strong>{formatPct(v)}</strong>
-                      <Bar pct={v} level={levelOf(v, limits)} />
-                    </div>
-                  ))}
-                </div>
-              )}
-              {tip.problems.length > 0 && <ul className="hl-hex-tip-problems">{tip.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
-              {tip.sharedStores.filter((d) => d.level === 'warn' || d.level === 'crit').map((d) => (
-                <p key={d.mount} className="hl-hex-tip-note">Shared store {d.mount} is {formatPct(d.pct)} full: counted under Storage, not against this machine.</p>
-              ))}
-              {tip.checks.length > 0 && (
-                <div className="hl-hex-tip-checks">
-                  <span className="hl-mini-label">{tip.checks.length === 1 ? 'Health check on it' : `${tip.checks.length} health checks on it`}</span>
-                  {[...tip.checks].sort((a, b) => RANK[a.level] - RANK[b.level]).slice(0, 6).map((c) => (
-                    <div key={c.url} className="hl-hex-tip-check" title={c.url}>
-                      <Dot level={c.level} />
-                      <span className="min-w-0 flex-1 truncate">{c.service}</span>
-                      <span className="muted">{checkWord(c)}</span>
-                    </div>
-                  ))}
-                  {tip.checks.length > 6 && <span className="muted">{tip.checks.length - 6} more</span>}
-                </div>
-              )}
-              {tip.state === 'stopped' && <p className="hl-hex-tip-note">Stopped in EC2: set aside, not counted as a problem.</p>}
-              {tip.reporting === null && tip.state !== 'stopped' && <p className="hl-hex-tip-note">No exporter on it: only its health checks are known.</p>}
-              <div className="hl-hex-tip-foot">{pinned ? 'Tap again' : 'Click'} to see {tip.listed ? 'it under Servers' : 'its service'}</div>
-            </div>
-          )}
-        </div>
-      </section>
+            ) : m.reporting === false ? <p className="hl-hex-tip-note">The server is not reporting its CPU, memory and disk.</p> : null}
+            {problems.length > 0 && <ul className="hl-hex-tip-problems">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+            {m.sharedStores.filter((d) => d.level === 'warn' || d.level === 'crit').map((d) => (
+              <p key={d.mount} className="hl-hex-tip-note">Shared store {d.mount} is {formatPct(d.pct)} full: counted under Storage, not against this machine.</p>
+            ))}
+          </div>
+        ))}
     </>
   )
 }

@@ -12,7 +12,7 @@ import { Bar, Dot, Empty, Gauge, MARKS, Pill, SectionHead, Spark, StatusRing, lv
 import HeapChart from './HeapChart'
 import MemoryGrid from './MemoryGrid'
 import KernelPanel, { useKernel } from './KernelPanel'
-import Honeycomb from './Honeycomb'
+import Honeycombs from './Honeycomb'
 
 /**
  * The Health tab: the 3DEXPERIENCE platform at a glance, one environment at a time, from main/plmHealth.ts. It reads
@@ -194,7 +194,7 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
         </div>
         <div className="hl-kpis">
           <Kpi label="Services" value={`${upServices}/${services.length}`} level={worst(services.map((s) => s.level))} onClick={() => onJump('services')} />
-          <Kpi label="Machines" value={`${runningCells.filter((c) => c.level === 'ok').length}/${runningCells.length}`} note="healthy" level={worst(runningCells.map((c) => c.level))} onClick={() => onJump('machines')} />
+          <Kpi label="Machines" value={`${runningCells.filter((c) => c.level === 'ok').length}/${runningCells.length}`} note="healthy" level={worst(runningCells.map((c) => c.level))} onClick={() => onJump('servers')} />
           <Kpi label="Signed in" value={signedIn ? String(signedIn.people.length) : '–'} level={signedIn ? 'ok' : 'unknown'} onClick={() => onJump(env.jvms.length ? 'kernel' : 'services')}
             note={!env.jvms.length ? 'not read here' : signedIn ? (signedIn.onMany ? `${signedIn.onMany} on both servers` : `unique, ${kernelServers} ${kernelServers === 1 ? 'server' : 'servers'}`) : kernel.error ? 'not answering' : 'reading…'}
             title={signedIn ? `People signed in to 3DSpace, each counted once across the servers${signedIn.people.length ? `: ${signedIn.people.join(', ')}` : ''}` : undefined} />
@@ -207,7 +207,7 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
         {env.issues.length > 0 && <Issues issues={env.issues} onJump={onJump} />}
       </section>
 
-      <Honeycomb env={env} onPick={(m) => (m.listed ? setFocusHost({ ip: m.ip, n: Date.now() }) : onJump('services'))} />
+      <Honeycombs env={env} onPick={(c) => (c.machine?.listed ? setFocusHost({ ip: c.machine.ip, n: Date.now() }) : onJump('services'))} />
 
       <SectionHead id="hl-services" icon={<Icon.layers />} title="Services" sub="Each one's health-check URL, through the load balancer and on each server"
         right={checks.length ? <button type="button" className="hl-link" aria-expanded={showChecks} onClick={() => setShowChecks(!showChecks)}>{showChecks ? 'Hide' : 'All'} health checks ({checks.length})</button> : undefined} />

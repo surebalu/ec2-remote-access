@@ -819,6 +819,50 @@ export function machines(env: Pick<PlmEnvHealth, 'hosts' | 'services'>): Machine
     roleRank(a.roleId) - roleRank(b.roleId) || a.title.localeCompare(b.title, undefined, { numeric: true }) || a.ip.localeCompare(b.ip, undefined, { numeric: true }))
 }
 
+/** One health check for the checks honeycombs, joined with the machine it runs on (server checks only). */
+export interface CheckCell {
+  url: string
+  via: HealthCheck['via']
+  serviceId: string
+  service: string
+  /** The server it checks ("01", "Primary", "01 internal", "All-in-one server"), '' through the load balancer. */
+  label: string
+  level: Level
+  status: number | null
+  ms: number | null
+  dnsMs: number | null
+  certDays: number | null
+  note: string | null
+  broken?: string
+  machine: MachineCell | null
+}
+
+/** A stand-in check made from an exporter's reading rather than an HTTP probe. */
+export const isExporterCheck = (url: string): boolean => / \(Apache status\)$/.test(url)
+
+/**
+ * The checks as Grafana lists them: through the load balancer (`lb`, the ALB checks) or on each server (`server`, the
+ * HTTP checks), one cell each, in the services' order. A check on a stopped server is `off`, one whose probe fails is
+ * `unknown`; a server check carries its machine so the honeycomb can say which one it is.
+ */
+export function checkCells(env: Pick<PlmEnvHealth, 'hosts' | 'services' | 'checks'>, via: HealthCheck['via']): CheckCell[] {
+  const byIp = new Map(machines(env).map((m) => [m.ip, m]))
+  const rank = (c: HealthCheck): number => roleRank(c.serviceId)
+  return (env.checks ?? [])
+    // Only probes the monitoring server runs: Production's Apache "check" is the Apache exporter's reading
+    // (main/plmHealth.ts), which Grafana does not list among its health checks.
+    .filter((c) => c.via === via && !isExporterCheck(c.url))
+    .sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label, undefined, { numeric: true }) || a.url.localeCompare(b.url))
+    .map((c) => {
+      const ip = via === 'server' ? ipOf(c.url) : null
+      return {
+        url: c.url, via: c.via, serviceId: c.serviceId, service: c.service, label: via === 'lb' ? (/\/internal\//.test(c.url) ? 'internal' : '') : c.label,
+        level: c.stopped ? 'off' : c.broken ? 'unknown' : c.level, status: c.status, ms: c.ms, dnsMs: c.dnsMs, certDays: c.certDays, note: c.note, broken: c.broken,
+        machine: (ip && byIp.get(ip)) || null
+      }
+    })
+}
+
 // ---------- formatting ----------
 
 export function formatBytes(n: number | null | undefined, digits = 1): string {
