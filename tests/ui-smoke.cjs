@@ -275,6 +275,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'finder:recents': return [{ ...fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), lastUsed: Math.max(now - 3600000, today + 2000) }, { ...fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200), lastUsed: Math.max(now - 7200000, today + 1000) }]
     case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
+    case 'app:pointer': return { x: 640, y: 420 }
     case 'health:snapshot': return process.env.HEALTH_SNAPSHOT_JSON ? JSON.parse(readFileSync(process.env.HEALTH_SNAPSHOT_JSON, 'utf8')) : healthFixture()
     case 'health:memory': {
       if (process.env.HEALTH_MEM_JSON) return JSON.parse(readFileSync(process.env.HEALTH_MEM_JSON, 'utf8'))[`${args[0]}|${args[1]}`]
@@ -620,6 +621,16 @@ app.whenReady().then(async () => {
     await keyUp()
     await js(`document.querySelector('[data-radial="hosts"]').dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }))`)
     await until(`!document.querySelector('.radial') && document.querySelector('.rail-item[aria-label="Hosts"]').getAttribute('aria-current') === 'page'`)
+    // A mouse button that sends the shortcut (Razer Synapse) presses and lets go at once, before the ring is drawn: it
+    // opens where the pointer really is (app:pointer), stays open, and the mouse points and clicks.
+    await radialKey(); await keyUp()
+    await until(`!!document.querySelector('.radial')`)
+    assert.equal(await js(`(() => { const r = document.querySelector('.radial-ring').getBoundingClientRect(); return Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2) })()`), '640,420', 'it opens at the pointer')
+    await new Promise((r) => setTimeout(r, 400)) // the bubbles finish flying out
+    await js(`(() => { const b = document.querySelector('[data-radial="health"]').getBoundingClientRect(); const root = document.querySelector('.radial'); const o = { clientX: b.left + b.width / 2, clientY: b.top + b.height / 2, bubbles: true, button: 0 }; root.dispatchEvent(new PointerEvent('pointermove', o)); root.dispatchEvent(new PointerEvent('pointerdown', o)) })()`)
+    await until(`!document.querySelector('.radial') && !!document.querySelector('.hl')`)
+    await key('w', { metaKey: true })
+    await until(`!document.querySelector('.hl')`)
     // Tapped open, the shortcut again closes it.
     await radialKey()
     await until(`!!document.querySelector('.radial')`)

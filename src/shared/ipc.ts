@@ -173,6 +173,8 @@ export interface IpcApi {
   'browser:paneTargets': (targets: { id: string; title: string }[]) => Promise<void>
   /** The macOS emoji picker, for the text field that has the keyboard (the Mac app only). */
   'app:emojiPanel': () => Promise<void>
+  /** Where the mouse pointer is in the window (Mac app only; null outside it or elsewhere), for the radial menu. */
+  'app:pointer': () => Promise<{ x: number; y: number } | null>
   /** The launcher, a search bar over any app (Mac app only; main/launcherWindow.ts): the apps on this Mac. */
   'launcher:apps': () => Promise<LauncherApp[]>
   /** What the launcher opened, how often and how lately, by result id. */

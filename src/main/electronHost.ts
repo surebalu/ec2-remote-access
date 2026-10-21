@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, ShareMenu, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, screen, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Host, LauncherHost, VoiceHost } from './host'
@@ -62,6 +62,15 @@ export const electronHost: Host = {
   cancelDownload,
   fillWebPage: fillPage,
   showEmojiPanel: () => app.showEmojiPanel(),
+  pointer() {
+    const win = mainWindow()
+    if (!win || win.isDestroyed()) return null
+    const p = screen.getCursorScreenPoint()
+    const b = win.getContentBounds()
+    const zoom = win.webContents.getZoomFactor() || 1
+    if (p.x < b.x || p.y < b.y || p.x >= b.x + b.width || p.y >= b.y + b.height) return null
+    return { x: (p.x - b.x) / zoom, y: (p.y - b.y) / zoom }
+  },
   quickLook(path) {
     const win = BrowserWindow.getFocusedWindow() ?? mainWindow()
     win?.previewFile(path)

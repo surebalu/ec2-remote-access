@@ -165,6 +165,7 @@ export const handlers: Handlers = {
   'browser:share': async (url) => /^https?:\/\//.test(url) && host().shareUrl(url),
   'browser:paneTargets': async (targets) => setPaneTargets(targets),
   'app:emojiPanel': async () => host().showEmojiPanel?.(),
+  'app:pointer': async () => host().pointer?.() ?? null,
   'local:open': (path) => host().openPath(path),
   'local:quickLook': async (path) => host().quickLook?.(path),
   'launcher:apps': async () => listApps(),

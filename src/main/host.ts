@@ -47,6 +47,11 @@ export interface Host {
   shareUrl(url: string): boolean
   /** Opens the system emoji picker for the focused text field (macOS). Absent where there is none. */
   showEmojiPanel?(): void
+  /**
+   * Where the mouse pointer is, in the main window's page coordinates (CSS pixels), or null outside it. The page
+   * cannot tell while the pointer is over a web page or a remote desktop, which keep its moves to themselves.
+   */
+  pointer?(): { x: number; y: number } | null
   /** Quick Look for a file (macOS). Absent where there is none. */
   quickLook?(path: string): void
   /** Puts files on the clipboard as Finder's Copy does, so Finder and other apps paste the files themselves (macOS). */
