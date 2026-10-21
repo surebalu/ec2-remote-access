@@ -1,7 +1,7 @@
 // Runs the built renderer with synthetic data and no production main process or AWS access.
 const { app, BrowserWindow, ipcMain, session, webContents } = require('electron')
 const http = require('node:http')
-const { mkdtempSync, writeFileSync } = require('node:fs')
+const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const assert = require('node:assert/strict')
@@ -94,6 +94,43 @@ const finderFs = {
   '/Users/fixture/Downloads': [], '/Users/fixture/Projects': [fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200)]
 }
 const finderDone = []
+// The Health tab's snapshot: three environments of an example platform (HEALTH_SNAPSHOT_JSON renders a captured one).
+const healthFixture = () => {
+  const spark = (base, wobble, n = 61) => Array.from({ length: n }, (_, i) => Math.round((base + Math.sin(i / 5) * wobble + (i % 7) * wobble * 0.1) * 100) / 100)
+  const ep = (url, level = 'ok', ms = 40) => ({ url, level, status: level === 'crit' ? 0 : 200, ms: level === 'crit' ? null : ms, spark: spark(ms, ms / 4) })
+  const node = (label, ip, level = 'ok', stopped = false) => ({ ...ep(`http://${ip}:8080/check`, level), label, ip, name: `plm-${label}`, stopped, level: stopped ? 'off' : level })
+  const svc = (id, name, level, summary, fronts, nodes) => ({ id, name, blurb: `${name} service`, level, summary, fronts, nodes })
+  const host = (role, label, ip, extra = {}) => ({ ip, name: `${role.toLowerCase().replace(/\W+/g, '-')}-${label}`, role, label, level: 'ok', problems: [], state: 'running', reporting: true, os: 'linux', cpu: 18 + Number(label) * 7, mem: 52, memBytes: 16 * 1024 ** 3, disk: { mount: '/', pct: 41 }, load: 0.4, cores: 4, uptimeSec: 3 * 86400, cpuSpark: spark(20, 6), ...extra })
+  const env = (id, name, level, headline, issues, services, hosts, extra = {}) => ({
+    id, name, level, headline, issues, services, hosts,
+    jvms: [{ label: '01', ip: '10.9.0.11', name: 'space-01', level: 'ok', problems: [], reporting: true, heapUsed: 5.4 * 1024 ** 3, heapMax: 8 * 1024 ** 3, heapPct: 67, gcPct: 0.4, threads: 134, fdsPct: 1.2, cpu: 9, uptimeSec: 1.6 * 86400, heapSpark: spark(62, 8) }],
+    apaches: [{ label: '01', ip: '10.9.0.21', name: 'web-01', level: 'ok', reporting: true, busy: 11, idle: 139, reqPerSec: 1.6, spark: spark(1.5, 0.5) }],
+    storage: [{ mount: '/filestore', device: 'nas:/filestore', shared: true, hosts: ['FCS 01', 'FCS 02'], pct: 86.3, usedBytes: 440e9, sizeBytes: 510e9, level: 'crit' }, { mount: '/', device: '/dev/nvme0n1p4', shared: false, hosts: ['3DSpace 01'], pct: 41, usedBytes: 21e9, sizeBytes: 52e9, level: 'ok' }],
+    db: { id: `${id}-db`, engine: 'oracle-se2 19', instanceClass: 'db.m5.2xlarge', status: 'available', multiAz: id === 'prod', level: 'ok', problems: [], cpu: 2.1, connections: 719, freeStorageBytes: 300e9, storageBytes: 700 * 1024 ** 3, freeMemBytes: 9e9, readLatencyMs: 0.6, writeLatencyMs: 2.3, cpuSpark: spark(3, 1, 36), connSpark: spark(700, 20, 36) },
+    albs: [{ name: `${id}-alb`, internal: false, level: 'ok', problems: [], requestsPerMin: 54, target5xx: 0, elb5xx: 0, responseMs: 13, healthy: 2, unhealthy: 0, reqSpark: spark(50, 10, 36), latencySpark: spark(14, 4, 36) }],
+    certs: ['pass', 'space', 'dash'].map((h) => ({ host: `${h}-${id}.example.com`, days: 106, expires: now + 106 * 86400000, level: 'ok' })),
+    alerts: [], gaps: [], ...extra
+  })
+  return {
+    at: Date.now(), source: 'monitoring-01 · Prometheus 10.9.0.5:9090 over SSM',
+    envs: [
+      env('prod', 'Production', 'crit', '3DPassport is down',
+        [{ level: 'crit', text: '3DPassport: unreachable through the load balancer', section: 'services' }, { level: 'crit', text: 'Shared store /filestore is 86% full', section: 'storage' }],
+        [svc('passport', '3DPassport', 'crit', 'Unreachable through the load balancer', [ep('https://pass-prod.example.com/3dpassport/healthcheck', 'crit')], [node('01', '10.9.0.31', 'crit'), node('02', '10.9.0.32', 'crit', true)]),
+          svc('dashboard', '3DDashboard', 'ok', '2 servers up', [ep('https://dash-prod.example.com/3ddashboard/test-alive')], [node('01', '10.9.0.41'), node('02', '10.9.0.42')]),
+          svc('space', '3DSpace', 'warn', '1 of 2 servers down, still served', [ep('https://space-prod.example.com/3dspace/servlet/fcs/ping', 'ok', 22)], [node('01', '10.9.0.11'), node('02', '10.9.0.12', 'crit')]),
+          svc('fcs', 'File Collaboration Server', 'ok', '2 servers up', [ep('https://fcs-prod.example.com/fcs/servlet/fcs/ping')], [node('01', '10.9.0.51'), node('02', '10.9.0.52')])],
+        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11'), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51')],
+        { alerts: [{ name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: 'pass-prod.example.com', since: now - 600000, level: 'crit', muted: false }, { name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: '3DPassport 02', since: now - 7200000, level: 'off', muted: true }] }),
+      env('qa', 'QA', 'ok', 'All systems operational', [],
+        [svc('passport', '3DPassport', 'ok', 'Up · 1 stopped', [ep('https://pass-qa.example.com/3dpassport/healthcheck')], [node('01', '10.8.0.31'), node('02', '10.8.0.32', 'crit', true)])],
+        [host('3DPassport', '01', '10.8.0.31'), host('3DPassport', '02', '10.8.0.32', { level: 'off', state: 'stopped', reporting: false })]),
+      env('dev', 'Development', 'warn', 'Running, with 1 warning', [{ level: 'warn', text: 'All-in-one server / is 82% full', section: 'storage' }],
+        [svc('space', '3DSpace', 'ok', 'Up', [ep('https://space-dev.example.com/3dspace/servlet/fcs/ping')], [node('', '10.7.0.9')])],
+        [host('All-in-one server', '', '10.7.0.9', { level: 'warn', disk: { mount: '/', pct: 82 }, problems: ['/ is 82% full'] })])
+    ]
+  }
+}
 // Run Command: runs the fixture "sent", and how they come back (the production host succeeds, the others fail).
 const runsSent = []
 const runState = (r) => {
@@ -215,6 +252,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'finder:recents': return [{ ...fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), lastUsed: Math.max(now - 3600000, today + 2000) }, { ...fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200), lastUsed: Math.max(now - 7200000, today + 1000) }]
     case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
+    case 'health:snapshot': return process.env.HEALTH_SNAPSHOT_JSON ? JSON.parse(readFileSync(process.env.HEALTH_SNAPSHOT_JSON, 'utf8')) : healthFixture()
     case 'finder:openWithApps': return [{ name: 'TextEdit', path: '/System/Applications/TextEdit.app', isDefault: true }, { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', isDefault: false }]
     case 'finder:openWith': finderDone.push(['openWith', args[0], args[1]]); return
     case 'finder:openWithOther': finderDone.push(['openWithOther', args[0]]); return
@@ -348,6 +386,33 @@ app.whenReady().then(async () => {
     assert.equal(await js(`[...document.querySelectorAll('.act-main, button.act-files')].every((b) => b.scrollWidth <= b.clientWidth)`), true, 'action labels fit their slots')
     assert.equal(await js(`document.querySelector('.titlebar .brand-name').textContent`), 'Remote Access Tool')
     assert.equal(await js(`getComputedStyle(document.querySelector('thead th button')).textTransform`), 'uppercase', 'sortable headers match the others')
+
+    // Health: the platform per environment. An outage leads the headline, environments switch, an issue jumps to its
+    // section, stopped servers are only noted, and the page never scrolls sideways.
+    await js(`document.querySelector('button[aria-label="Health"]').click()`)
+    await until(`!!document.querySelector('.hl-hero') && document.querySelectorAll('.hl-env').length === 3`)
+    assert.equal(await js(`document.querySelector('.hl-headline').textContent`), '3DPassport is down')
+    assert.equal(await js(`document.querySelectorAll('.hl-svc').length`), 4)
+    assert.equal(await js(`document.querySelector('.hl-svc.lvl-warn .hl-pill').textContent`), 'Degraded', 'one server down is degraded, not down')
+    assert.equal(await js(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside')
+    assert.equal(await js(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling')
+    assert.ok((await js(`document.querySelector('.hl-alert.lvl-off')`)) === null, 'alerts about stopped servers start hidden')
+    await screenshot('health-dark.png')
+    await js(`document.documentElement.setAttribute('data-theme', 'light')`)
+    await screenshot('health-light.png')
+    await js(`document.documentElement.setAttribute('data-theme', 'dark')`)
+    await js(`[...document.querySelectorAll('.hl-issues button')].find((b) => b.textContent.includes('/filestore')).click()`)
+    await until(`document.querySelector('.hl').dataset.flash === 'storage'`)
+    await js(`[...document.querySelectorAll('.hl-seg button')].find((b) => b.textContent.startsWith('Stopped')).click()`)
+    await until(`document.querySelectorAll('.hl-srv').length === 1 && document.querySelector('.hl-srv').classList.contains('off')`)
+    await js(`[...document.querySelectorAll('.hl-env')].find((b) => b.textContent.startsWith('QA')).click()`)
+    await until(`document.querySelector('.hl-headline').textContent === 'All systems operational'`)
+    assert.equal(await js(`document.querySelector('.hl-svc .hl-svc-summary').textContent`), 'Up · 1 stopped', 'a stopped server is noted, not counted')
+    await js(`[...document.querySelectorAll('.hl-env')].find((b) => b.textContent.startsWith('Production')).click()`)
+    await until(`document.querySelector('.hl-headline').textContent === '3DPassport is down'`)
+    // ⌘W closes it like any tool tab, back to the hosts.
+    await key('w', { metaKey: true })
+    await until(`!document.querySelector('.hl') && document.querySelectorAll('[data-host-key]').length === 3`)
     assert.equal(await js(`!!document.querySelector('[data-host-key="${stopped.key}"]')`), false, 'running filter initially hides stopped host')
 
     // Text size per section: the sidebar matches the table's 12px; pointing at it and pressing ⌘− shrinks only it,
@@ -1077,7 +1142,7 @@ app.whenReady().then(async () => {
     ssoScenario = true
     phone.setContentSize(430, 932)
     await phone.loadFile(resolve('out/renderer/index.html'), { query: { layout: 'mobile' } })
-    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 3`)
+    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 4`)
     await puntil(`document.body.textContent.includes('corp-prod')`) // profiles loaded and checked: the sign-in banner names the account
     await ptap('More')
     await ptap('Sign in to AWS')
@@ -1095,6 +1160,17 @@ app.whenReady().then(async () => {
     assert.equal(await pjs(`document.body.textContent.includes('Waiting for sign-in')`), false, 'sign-in no longer reported as waiting')
     await pshot('phone-sso-done.png')
     ssoScenario = false
+    // Health on a phone and a tablet: from the tab bar, one column that fits the width.
+    await ptap('Health')
+    await puntil(`!!document.querySelector('.hl-hero') && document.querySelectorAll('.hl-env').length === 3`)
+    assert.equal(await noSideScroll(), true, 'health fits the phone width')
+    assert.equal(await pjs(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling inside health on a phone')
+    await pshot('phone-health.png')
+    phone.setContentSize(1194, 834)
+    await puntil(`innerWidth === 1194 && document.querySelector('.m-app').classList.contains('wide')`)
+    await new Promise((r) => setTimeout(r, 300))
+    assert.equal(await pjs(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling inside health on a tablet')
+    await pshot('ipad-health.png')
     phone.destroy()
 
     // The browser: start page, tabs, command bar, an AWS account space signing in to its console, spaces, persistence.

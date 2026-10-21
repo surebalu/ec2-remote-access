@@ -217,6 +217,14 @@ export interface Settings {
   shortcuts?: Record<string, string>
   /** Opens the launcher from any app (Settings → Keyboard), a combination like 'alt+space'; '' for none, the default. */
   launcherKey?: string
+  /**
+   * Where the Health tab reads the 3DEXPERIENCE platform's metrics: a Prometheus server reached over SSM through
+   * `instanceKey` (default: a running host with "monitor" or "prometheus" in its name), at `host` (default: that
+   * host's private address) and `port` (default 9090).
+   */
+  healthSource?: { instanceKey?: string; host?: string; port?: number }
+  /** The Grafana that shows the same metrics in full, for the Health tab's Open in Grafana. */
+  grafanaUrl?: string
 }
 
 export interface Snippet {

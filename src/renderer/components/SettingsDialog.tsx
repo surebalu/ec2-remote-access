@@ -169,11 +169,12 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
 }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  hosts: Icon.server, overview: Icon.grid, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_HINTS: Record<RailSection, string> = {
   hosts: 'Every account’s hosts. ⌘1 always shows them too (Hosts is the first tab).',
   overview: 'Every open session on one page.',
+  health: 'The 3DEXPERIENCE platform at a glance.',
   local: 'Shells on this Mac.',
   finder: 'The files on this Mac.',
   browser: 'AWS console spaces and web tabs.',

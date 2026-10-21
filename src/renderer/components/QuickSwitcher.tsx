@@ -56,6 +56,7 @@ function commands(): Command[] {
     { id: 'run-command', title: 'Run a command on hosts…', keywords: 'ssm run command send fleet bulk script shell powershell many all', icon: Icon.broadcast, run: () => s.set({ runCommandFor: { keys: filteredInstances(s).filter((i) => !i.manual && i.state === 'running' && i.ssmOnline).map((i) => i.key) } }) },
     { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', hint: keyOf('browser'), icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
     { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', hint: keyOf('finder'), icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
+    { id: 'health', title: 'Open health', keywords: '3dexperience platform status monitoring prometheus grafana metrics alerts', hint: keyOf('health'), icon: Icon.health, run: () => s.openTool('health') },
     { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', hint: keyOf('board'), icon: Icon.board, run: () => s.openBoard() },
     { id: 'claude', title: 'Open Claude', keywords: 'ai assistant chat anthropic llm ask', hint: keyOf('claude'), icon: Icon.claude, run: () => s.openTool('claude') },
     { id: 'chatgpt', title: 'Open ChatGPT', keywords: 'ai assistant chat openai gpt llm ask', hint: keyOf('chatgpt'), icon: Icon.chatgpt, run: () => s.openTool('chatgpt') },
@@ -107,7 +108,7 @@ function commands(): Command[] {
 
 const fuzzy = (text: string, q: string): boolean => q.split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
-const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt }
+const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health }
 const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
 
 /**

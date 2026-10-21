@@ -101,6 +101,7 @@ export default function AppRail(): ReactElement {
         onClick: () => st().showGrid(!gridView || !!gridHost),
         onContextMenu: (el) => setMenu({ kind: 'overview', anchor: el })
       })}
+      {tool('health', <Icon.health />, 'Health: the 3DEXPERIENCE platform at a glance, per environment')}
       <span className="rail-divider" />
       {hasBrowser() && tool('local', <Icon.console />, 'Terminal: shells on this Mac')}
       {hasBrowser() && tool('finder', <Icon.finder />, 'Finder: the files on this Mac, with your Finder favorites')}

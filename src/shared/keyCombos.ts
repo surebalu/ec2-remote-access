@@ -6,13 +6,13 @@
  * covers it.
  */
 
-export type RailSection = 'hosts' | 'overview' | 'local' | 'finder' | 'browser' | 'notes' | 'board' | 'claude' | 'chatgpt'
+export type RailSection = 'hosts' | 'overview' | 'health' | 'local' | 'finder' | 'browser' | 'notes' | 'board' | 'claude' | 'chatgpt'
 
 /** Top to bottom, as the rail shows them. */
-export const RAIL_SECTIONS: RailSection[] = ['hosts', 'overview', 'local', 'finder', 'browser', 'notes', 'board', 'claude', 'chatgpt']
+export const RAIL_SECTIONS: RailSection[] = ['hosts', 'overview', 'health', 'local', 'finder', 'browser', 'notes', 'board', 'claude', 'chatgpt']
 
 export const SECTION_NAMES: Record<RailSection, string> = {
-  hosts: 'Hosts', overview: 'Overview', local: 'Terminal', finder: 'Finder', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT'
+  hosts: 'Hosts', overview: 'Overview', health: 'Health', local: 'Terminal', finder: 'Finder', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT'
 }
 
 /** The keys these sections always had. Hosts needs none: ⌘1 is the first tab, which is always Hosts. */
@@ -145,6 +145,7 @@ export const TOOL_KEYS: Partial<Record<RailSection, Record<string, string>>> = {
     'cmd+o': 'Open', 'cmd+[': 'Back', 'cmd+]': 'Forward', 'shift+cmd+n': 'New folder', 'shift+cmd+.': 'Show hidden files', 'cmd+y': 'Quick Look',
     'cmd+d': 'Duplicate', 'alt+cmd+c': 'Copy the path'
   },
+  health: { 'cmd+r': 'Refresh' },
   board: { 'cmd+y': 'Redo', 'cmd+[': 'Send to back', 'cmd+]': 'Bring to front', 'cmd+0': 'Fit everything' },
   notes: {
     'cmd+i': 'Italic', 'shift+cmd+x': 'Strikethrough', 'shift+cmd+h': 'Highlight', 'cmd+e': 'Inline code', 'alt+cmd+1': 'Heading 1', 'alt+cmd+2': 'Heading 2',
