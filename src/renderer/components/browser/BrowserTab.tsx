@@ -806,7 +806,10 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     }
     if (request.partition) {
       const sp = spacesRef.current.find((x) => partitionFor(x.id) === request.partition)
-      if (sp && request.url) openInNewTab(sp.id, request.url, { background: request.background })
+      if (!sp || !request.url) return
+      openInNewTab(sp.id, request.url, { background: request.background })
+      // Chrome closes an extension's popup when the page it opens takes the focus.
+      if (!request.background) setMenu(null)
       return
     }
     let spaceId = request.profile ? spaceIdForProfile(request.profile) : request.space && spacesRef.current.some((x) => x.id === request.space) ? request.space : st.activeSpace

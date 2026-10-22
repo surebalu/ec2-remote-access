@@ -42,6 +42,8 @@ export function initWebviews(win: BrowserWindow): void {
     if (!params.partition?.startsWith('persist:web-') || !(isWebUrl(params.src) || isAllowedExtensionPage(params.src))) event.preventDefault()
     // Its session cookies (sign-ins) are kept across restarts from here on.
     else track(params.partition)
+    // An extension's page reports the size it wants ('preferred-size-changed'): its popup is sized to fit, as Chrome's.
+    if (isAllowedExtensionPage(params.src)) prefs.enablePreferredSizeMode = true
   })
 }
 
@@ -156,6 +158,7 @@ app.on('web-contents-created', (_e, contents) => {
   contents.on('will-navigate', (e, url) => { if (!mayShow(url)) e.preventDefault() })
   contents.on('will-frame-navigate', (e) => { if (e.isMainFrame && !mayShow(e.url)) e.preventDefault() })
 
+  contents.on('preferred-size-changed', (_e, size) => host()?.send('web:preferredSize', { webContentsId: contents.id, width: size.width, height: size.height }))
   contents.on('before-mouse-event', (_e, mouse) => {
     if (mouse.type === 'mouseDown') host()?.send('web:pointer', { webContentsId: contents.id })
   })

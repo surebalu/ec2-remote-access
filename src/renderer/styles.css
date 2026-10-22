@@ -864,6 +864,8 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .ext-foot { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px 0; }
 .ext-view-box { position: relative; max-width: 100%; margin: 0 6px; overflow: hidden; border-radius: 8px; background: #fff; }
 .ext-view { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* An extension's page is sized to fit (Extensions.tsx); the menus' 420 px cap would scroll it a second time. */
+.popover:has(.ext-view-box) { max-height: calc(100vh - 32px); }
 .dl { padding: 2px 0 0; }
 .dl-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px 6px; }
 .dl-clear { padding: 2px 8px; border-radius: 6px; background: var(--panel-2); color: var(--text-2); font-size: 11px; font-weight: 600; }
