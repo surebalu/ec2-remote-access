@@ -616,6 +616,16 @@ app.whenReady().then(async () => {
     await js(`(() => { const c = document.querySelectorAll('.hl-mem-chart')[1]; const r = c.getBoundingClientRect(); c.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + r.width / 2, clientY: r.top + 20, bubbles: true })) })()`)
     await until(`document.querySelectorAll('.hl-mem-cross').length === 4 && !!document.querySelector('.hl-mem-tip')`)
     assert.ok(calls.some((c) => c.channel === 'health:memory' && c.args[0] === 'prod'), 'the environment shown is asked for')
+    // Memory now as a honeycomb above the charts: green under 80%, yellow to 90%, red above; a click finds the chart.
+    await until(`document.querySelectorAll('.hl-hive.mem .hl-hex').length >= 4`)
+    assert.ok(await js(`[...document.querySelectorAll('.hl-hive.mem .hl-hex')].every((h) => /lvl-(ok|warn|crit|off|unknown)/.test(h.getAttribute('class')))`))
+    const memHex = `[...document.querySelectorAll('.hl-hive.mem .hl-hex')].find((h) => !h.classList.contains('lvl-off'))`
+    await js(`${memHex}.dispatchEvent(new PointerEvent('pointerover', { pointerType: 'mouse', bubbles: true }))`)
+    await until(`!!document.querySelector('.hl-hive.mem .hl-hex-tip') && document.querySelector('.hl-hive.mem .hl-hex-tip').textContent.includes('to see its chart')`)
+    const memIp = await js(`${memHex}.dataset.ip`)
+    await js(`${memHex}.dispatchEvent(new PointerEvent('pointerout', { pointerType: 'mouse', bubbles: true }))`)
+    await js(`(() => { const g = ${memHex}; g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
+    await until(`!!document.querySelector('.hl-mem.lit[data-ip="${memIp}"]')`)
     // Every health-check URL behind the cards, as Grafana's HTTP monitoring table lists them.
     await js(`[...document.querySelectorAll('.hl-link')].find((b) => b.textContent.startsWith('All health checks')).click()`)
     await until(`document.querySelectorAll('.hl-chk').length === 12`)
@@ -1536,7 +1546,7 @@ app.whenReady().then(async () => {
     assert.equal(await pjs(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling inside health on a phone')
     await pshot('phone-health.png')
     // A touch has no hover: the first tap on a hexagon says which machine it is, the second goes to its row.
-    await puntil(`document.querySelectorAll('.hl-hex').length === 12`)
+    await puntil(`document.querySelectorAll('.hl-hive.alb .hl-hex, .hl-hive.http .hl-hex').length === 12`)
     await pjs(`document.querySelector('#hl-checks').scrollIntoView()`)
     await new Promise((r) => setTimeout(r, 500))
     const tapHex = (ip) => pjs(`(() => { const g = document.querySelector('.hl-hex[data-ip="${ip}"]'); g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
