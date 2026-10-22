@@ -9,7 +9,7 @@ import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
 import HostFilters, { ScanNotice } from './HostFilters'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
-import HostWorkspaceHeader from './HostWorkspaceHeader'
+import HomeDeck from './HomeDeck'
 import SavedHostViews from './SavedHostViews'
 
 type SortKey = 'name' | 'profile' | 'state' | 'osHint' | 'address' | 'instanceType'
@@ -139,7 +139,7 @@ export default function InstanceTable(): ReactElement {
 
   return (
     <div className={`hosts-page flex h-full flex-col ${s.settings?.hostDensity === 'compact' ? 'density-compact' : ''}`} onClick={() => setMenu(null)}>
-      <HostWorkspaceHeader />
+      <HomeDeck />
       <SavedHostViews />
       <div className="host-toolbar flex flex-wrap items-center gap-2 px-4 py-2.5">
         <div className="relative min-w-52 flex-1 max-w-sm">

@@ -731,7 +731,8 @@ app.whenReady().then(async () => {
     await until(`document.documentElement.style.getPropertyValue('--zoom-hosts') === '1.2'`)
     await screenshot('section-zoom.png')
     await key('Escape')
-    // The right-click menu lands at the pointer even inside the zoomed hosts list.
+    // The right-click menu lands at the pointer even inside the zoomed hosts list (on a row in view, as a person would).
+    await js(`document.querySelector('[data-host-key="${running.key}"]').scrollIntoView({ block: 'center' })`)
     await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]'); const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 10 })) })()`)
     await until(`!!document.querySelector('body > .panel.modal.fixed')`)
     assert.equal(await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]').getBoundingClientRect(); const m = document.querySelector('body > .panel.modal.fixed').getBoundingClientRect(); const y = row.top + 10; const expectedTop = y + m.height > innerHeight - 8 ? Math.max(8, y - m.height) : y; return Math.abs(m.left - (row.left + 200)) < 3 && Math.abs(m.top - expectedTop) < 3 && m.bottom <= innerHeight })()`), true, 'context menu opens at the pointer or flips up to fit the window')
