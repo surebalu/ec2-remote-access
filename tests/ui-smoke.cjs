@@ -363,7 +363,11 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return { env: args[0], hours: args[1], start: now - args[1] * 3600000, step, machines: (env?.hosts ?? []).map((h, k) => ({
         ip: h.ip, name: h.name, role: h.role, label: h.label, os: h.os, state: h.state, totalBytes: h.memBytes,
         pct: Array.from({ length: n }, (_, i) => (h.state === 'stopped' && i > n / 2 ? null : Math.round((40 + k * 9 + Math.sin(i / 9) * 8) * 10) / 10)),
-        now: h.state === 'stopped' ? null : 40 + k * 9, peak: 48 + k * 9, avg: 40 + k * 9, level: h.state === 'stopped' ? 'off' : 40 + k * 9 >= 80 ? 'warn' : 'ok'
+        now: h.state === 'stopped' ? null : 40 + k * 9, peak: 48 + k * 9, avg: 40 + k * 9, level: h.state === 'stopped' ? 'off' : 40 + k * 9 >= 80 ? 'warn' : 'ok',
+        // CPU runs the other way round, so the busiest CPU is not the fullest memory.
+        cpu: Array.from({ length: n }, (_, i) => (h.state === 'stopped' && i > n / 2 ? null : Math.round((92 - k * 20 + Math.sin(i / 7) * 5) * 10) / 10)),
+        cpuNow: h.state === 'stopped' ? null : Math.max(3, 92 - k * 20), cpuPeak: Math.max(8, 97 - k * 20), cpuAvg: Math.max(3, 92 - k * 20), cores: 8,
+        cpuLevel: h.state === 'stopped' ? 'off' : 92 - k * 20 >= 90 ? 'crit' : 92 - k * 20 >= 80 ? 'warn' : 'ok'
       })) }
     }
     case 'health:kernel': {
@@ -673,11 +677,24 @@ app.whenReady().then(async () => {
     assert.ok(await js(`[...document.querySelectorAll('.hl-hive.mem .hl-hex')].every((h) => /lvl-(ok|warn|crit|off|unknown)/.test(h.getAttribute('class')))`))
     const memHex = `[...document.querySelectorAll('.hl-hive.mem .hl-hex')].find((h) => !h.classList.contains('lvl-off'))`
     await js(`${memHex}.dispatchEvent(new PointerEvent('pointerover', { pointerType: 'mouse', bubbles: true }))`)
-    await until(`!!document.querySelector('.hl-hive.mem .hl-hex-tip') && document.querySelector('.hl-hive.mem .hl-hex-tip').textContent.includes('to see its chart')`)
+    await until(`!!document.querySelector('.hl-hive.mem .hl-hex-tip') && document.querySelector('.hl-hive.mem .hl-hex-tip').textContent.includes('to see its memory chart')`)
     const memIp = await js(`${memHex}.dataset.ip`)
     await js(`${memHex}.dispatchEvent(new PointerEvent('pointerout', { pointerType: 'mouse', bubbles: true }))`)
     await js(`(() => { const g = ${memHex}; g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
     await until(`!!document.querySelector('.hl-mem.lit[data-ip="${memIp}"]')`)
+    // CPU now beside it with the same bands; a click turns the charts to CPU and finds the machine's.
+    await until(`document.querySelectorAll('.hl-hive.cpu .hl-hex').length >= 4`)
+    assert.match(await js(`document.querySelector('.hl-hive.cpu').textContent`), /green under 80%, yellow to 90%, red above/)
+    const cpuHex = `document.querySelector('.hl-hive.cpu .hl-hex.lvl-crit')`
+    assert.ok(await js(`!!${cpuHex}`), 'a machine at 92% CPU is red')
+    const cpuIp = await js(`${cpuHex}.dataset.ip`)
+    await js(`(() => { const g = ${cpuHex}; g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
+    await until(`!!document.querySelector('.hl-mem.lit[data-ip="${cpuIp}"]') && [...document.querySelectorAll('.hl-sec-controls .hl-seg button.on')].some((b) => b.textContent === 'CPU')`)
+    assert.match(await js(`document.querySelector('.hl-mem[data-ip="${cpuIp}"] .hl-mem-now').textContent`), /\d+%of 8 cores/, 'CPU of its cores, not memory of its gigabytes')
+    assert.equal(await js(`document.querySelector('.hl-mem').dataset.ip`), cpuIp, 'the busiest CPU comes first')
+    await js(`document.getElementById('hl-memory').scrollIntoView()`)
+    await screenshot('health-cpu-comb.png')
+    await js(`[...document.querySelectorAll('.hl-sec-controls .hl-seg button')].find((b) => b.textContent === 'Memory').click()`)
     // Every health-check URL behind the cards, as Grafana's HTTP monitoring table lists them.
     await js(`[...document.querySelectorAll('.hl-link')].find((b) => b.textContent.startsWith('All health checks')).click()`)
     await until(`document.querySelectorAll('.hl-chk').length === 12`)
