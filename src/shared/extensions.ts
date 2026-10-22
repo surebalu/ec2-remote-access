@@ -2,9 +2,11 @@
  * Browser extensions (main/extensions.ts, components/browser/Extensions.tsx): Chrome extensions from the Chrome Web
  * Store or a folder, loaded with Electron's own extension support into every Browser space (no third-party library,
  * so no licence to pay or follow). Electron gives extensions content scripts, background service workers, popups,
- * storage, scripting, declarativeNetRequest, webRequest and alarms, but not context menus, notifications, cookies,
- * keyboard commands or opening tabs and windows, so extensions that work on the page (Dark Reader, uBlock Origin Lite,
- * JSON viewers) work and some toolbar popups do not. This is the pure part: tests/extensions.test.ts.
+ * storage, scripting, declarativeNetRequest, webRequest, alarms, idle and the toolbar action's state, but not context
+ * menus, notifications, cookies, keyboard commands, downloads or talking to a Mac app (native messaging). Their
+ * workers get stand-ins that accept those calls and do nothing (src/shared/extensionApis.ts), so an extension that
+ * uses them still starts; opening tabs and windows works, as Browser tabs. This is the pure part:
+ * tests/extensions.test.ts.
  */
 
 export interface ExtensionInfo {
@@ -21,6 +23,8 @@ export interface ExtensionInfo {
   popup: string | null
   /** Its options page, relative to the extension. */
   options: string | null
+  /** Its background runs as a service worker, so a click on it reaches the extension even with no popup set. */
+  worker: boolean
   enabled: boolean
   source: 'store' | 'folder'
   path: string
@@ -60,6 +64,11 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : nul
 /** The popup page (Manifest V3 `action`, V2 `browser_action` or `page_action`). */
 export function popupOf(m: Manifest): string | null {
   return str(obj(m.action).default_popup) ?? str(obj(m.browser_action).default_popup) ?? str(obj(m.page_action).default_popup)
+}
+
+/** Whether its background is a (Manifest V3) service worker. */
+export function hasWorker(m: Manifest): boolean {
+  return !!str(obj(m.background).service_worker)
 }
 
 export function optionsOf(m: Manifest): string | null {

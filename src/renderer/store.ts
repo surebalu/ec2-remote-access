@@ -53,6 +53,10 @@ export interface BrowserRequest {
   profile?: string
   space?: string
   tab?: string
+  /** Only in the space with this partition, or nowhere (an extension's page needs the session it runs in). */
+  partition?: string
+  /** Open it without bringing the Browser or the new tab forward. */
+  background?: boolean
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
@@ -424,7 +428,7 @@ export const useStore = create<State>((set, get) => ({
   openBrowser: (req) => {
     const id = get().toolTab('browser')
     if (req?.url || req?.profile || req?.space || req?.tab) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
-    get().setActive(id)
+    if (!req?.background) get().setActive(id)
   },
   openNotes: (path, opts) => {
     const id = get().toolTab('notes')
@@ -580,6 +584,7 @@ export const useStore = create<State>((set, get) => ({
     if (cached) set({ instances: cached.instances, scanErrors: cached.errors, scannedAt: cached.scannedAt })
     window.api.on('scan:progress', (p) => set((s) => ({ progress: { ...s.progress, [`${p.profile}/${p.region}`]: p } })))
     window.api.on('tunnels:changed', (tunnels) => set({ tunnels }))
+    window.api.on('ext:openTab', (d) => get().openBrowser({ url: d.url, partition: d.partition, background: d.background }))
     window.api.on('profiles:status', (st) => {
       if (st.profile.startsWith('sso-session:')) {
         if (st.state === 'error') {

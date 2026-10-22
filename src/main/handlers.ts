@@ -248,6 +248,7 @@ export const handlers: Handlers = {
   'ext:addFolder': () => extensionsHost().addFolder(),
   'ext:setEnabled': (id, on) => extensionsHost().setEnabled(id, on),
   'ext:remove': async (id) => extensionsHost().remove(id),
+  'ext:action': (id, partition, tabId) => extensionsHost().action(id, partition, tabId),
   'clipboard:write': async (text) => {
     if (!host().clipboardWrite(text)) throw new Error('No clipboard on this host')
   },

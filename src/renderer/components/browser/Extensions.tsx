@@ -6,12 +6,22 @@ import { Icon } from '../icons'
 /**
  * The Browser's extensions (the puzzle button): what is installed, on or off, each one's popup shown here in the space
  * it runs in, its options page, and adding one from the Chrome Web Store (a link, or the store page open in this
- * Browser) or a folder. main/extensions.ts loads them; src/shared/extensions.ts says what Electron lets them do.
+ * Browser) or a folder. Choosing one is Chrome's toolbar click: main asks the extension for its popup, and one with
+ * none set gets the click instead and the panel closes (1Password, signed out, opens its sign-in page in a tab).
+ * main/extensions.ts loads them; src/shared/extensions.ts says what Electron lets them do.
  */
 
-type View = { kind: 'list' } | { kind: 'page'; ext: ExtensionInfo; page: string; title: string }
+type View = { kind: 'list' } | { kind: 'page'; ext: ExtensionInfo; url: string; title: string; wide: boolean }
 
-export default function Extensions({ partition, pageUrl, onBrowseStore, onWidth }: { partition: string; pageUrl: string; onBrowseStore: () => void; onWidth: (px: number | null) => void }): ReactElement {
+export default function Extensions({ partition, pageUrl, tabId, onBrowseStore, onWidth, onClose }: {
+  partition: string
+  pageUrl: string
+  /** The page on screen (its webContents id), handed to an extension that takes the click itself. */
+  tabId: number | null
+  onBrowseStore: () => void
+  onWidth: (px: number | null) => void
+  onClose: () => void
+}): ReactElement {
   const toast = useStore((s) => s.toast)
   const [list, setList] = useState<ExtensionInfo[] | null>(null)
   const [view, setView] = useState<View>({ kind: 'list' })
@@ -47,6 +57,19 @@ export default function Extensions({ partition, pageUrl, onBrowseStore, onWidth 
   const toggle = async (x: ExtensionInfo): Promise<void> => {
     try { setList(await window.api.invoke('ext:setEnabled', x.id, !x.enabled)) } catch (e) { setError((e as Error).message) }
   }
+  const press = async (x: ExtensionInfo): Promise<void> => {
+    setError(null)
+    setBusy(x.id)
+    try {
+      const url = await window.api.invoke('ext:action', x.id, partition, tabId)
+      if (url) setView({ kind: 'page', ext: x, url, title: x.name, wide: false })
+      else onClose()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
   const remove = async (x: ExtensionInfo): Promise<void> => {
     if (!window.confirm(`Remove ${x.name}? Its settings in every space go with it.`)) return
     try { setList(await window.api.invoke('ext:remove', x.id)) } catch (e) { setError((e as Error).message) }
@@ -60,7 +83,7 @@ export default function Extensions({ partition, pageUrl, onBrowseStore, onWidth 
           {view.ext.icon ? <img className="ext-icon" src={view.ext.icon} alt="" /> : <Icon.puzzle />}
           <span className="min-w-0 flex-1 truncate font-semibold">{view.title}</span>
         </div>
-        <ExtensionPage partition={partition} url={`chrome-extension://${view.ext.runtimeId}/${view.page.replace(/^\//, '')}`} wide={view.page === view.ext.options} onWidth={onWidth} />
+        <ExtensionPage partition={partition} url={view.url} wide={view.wide} onWidth={onWidth} />
       </div>
     )
   }
@@ -85,15 +108,15 @@ export default function Extensions({ partition, pageUrl, onBrowseStore, onWidth 
         {list?.map((x) => (
           <div key={x.id} className={`ext-row ${x.enabled ? '' : 'off'}`}>
             {x.icon ? <img className="ext-icon" src={x.icon} alt="" /> : <span className="ext-icon blank"><Icon.puzzle /></span>}
-            <button type="button" className="ext-main" disabled={!x.enabled || !x.popup || !x.runtimeId} title={x.popup ? `Open ${x.name}` : `${x.name} has no popup; it works on the pages themselves`}
-              onClick={() => x.popup && setView({ kind: 'page', ext: x, page: x.popup, title: x.name })}>
+            <button type="button" className="ext-main" disabled={!x.enabled || !(x.popup || x.worker) || !x.runtimeId || !!busy} title={x.popup || x.worker ? `Open ${x.name}` : `${x.name} has no popup; it works on the pages themselves`}
+              onClick={() => void press(x)}>
               <span className="op-title">{x.name} <span className="muted">{x.version}</span></span>
               <span className="op-sub" title={x.missing.length ? `Electron does not give extensions: ${x.missing.join(', ')}` : undefined}>
                 {x.access.all ? 'Reads and changes every site' : x.access.hosts.length ? `Reads and changes ${x.access.hosts.slice(0, 2).join(', ')}${x.access.hosts.length > 2 ? ` and ${x.access.hosts.length - 2} more` : ''}` : 'No site access'}
                 {x.source === 'folder' ? ' · from a folder' : ''}{x.missing.length ? ` · no ${x.missing[0]}${x.missing.length > 1 ? '…' : ''}` : ''}
               </span>
             </button>
-            {x.options && x.enabled && x.runtimeId && <button type="button" className="web-ico sm" title="Options" aria-label={`${x.name} options`} onClick={() => setView({ kind: 'page', ext: x, page: x.options!, title: `${x.name} options` })}><Icon.settings /></button>}
+            {x.options && x.enabled && x.runtimeId && <button type="button" className="web-ico sm" title="Options" aria-label={`${x.name} options`} onClick={() => setView({ kind: 'page', ext: x, url: `chrome-extension://${x.runtimeId}/${x.options!.replace(/^\//, '')}`, title: `${x.name} options`, wide: true })}><Icon.settings /></button>}
             <label className="ext-switch" title={x.enabled ? 'On in every space' : 'Off'}>
               <input type="checkbox" checked={x.enabled} aria-label={`${x.name} on`} onChange={() => void toggle(x)} />
             </label>

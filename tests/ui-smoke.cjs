@@ -160,7 +160,7 @@ const healthFixture = () => {
 // Service control jobs the fixture "runs": running, then active, then the health check, then done.
 const serviceJobs = []
 // Browser extensions: one installed; what the panel asked main to do.
-let extList = [{ id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', runtimeId: null, name: 'Dark Reader', version: '4.9.133', description: 'Dark mode for every website', icon: '', popup: null, options: null, enabled: true, source: 'store', path: '/fixture/extensions/dark', manifestVersion: 3, access: { all: true, hosts: [] }, missing: ['right-click menu items'], installedAt: 0 }]
+let extList = [{ id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', runtimeId: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', name: 'Dark Reader', version: '4.9.133', description: 'Dark mode for every website', icon: '', popup: null, options: null, worker: true, enabled: true, source: 'store', path: '/fixture/extensions/dark', manifestVersion: 3, access: { all: true, hosts: [] }, missing: ['right-click menu items'], installedAt: 0 }]
 // Sessions ended in the Database locks dialog.
 const dbKilled = []
 const jobNow = (j) => {
@@ -260,6 +260,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     }
     case 'ext:setEnabled': extList = extList.map((x) => (x.id === args[0] ? { ...x, enabled: args[1] } : x)); return extList
     case 'ext:remove': extList = extList.filter((x) => x.id !== args[0]); return extList
+    case 'ext:action': return null // no popup set: the extension took the click itself
     // Service control: a running 3DSpace unit and a failed TIF unit; a job steps through its phases over a few seconds.
     case 'services:status': return args[0].map((key) => {
       const i = [running, stopped, stale].find((x) => x.key === key)
@@ -2084,6 +2085,26 @@ app.whenReady().then(async () => {
     // Extensions (the puzzle button): what is installed and what it can reach, turning one off, adding by link.
     await bjs(`document.querySelector('.web-side-top [aria-label="Extensions"]').click()`)
     await buntil(`document.querySelectorAll('.ext-row').length === 1 && document.querySelector('.ext-row').textContent.includes('Dark Reader') && document.querySelector('.ext-row').textContent.includes('Reads and changes every site')`, 'extensions list')
+    // Choosing one is Chrome's toolbar click: with no popup set the extension takes it (on the page on screen) and the
+    // panel closes; a page it asks for opens as a tab in the space it runs in, and nowhere for an unknown session.
+    await bjs(`document.querySelector('.ext-row .ext-main').click()`)
+    await buntil(`!document.querySelector('.ext')`, 'the extension took the click')
+    const extPress = calls.filter((c) => c.channel === 'ext:action').at(-1).args
+    assert.deepEqual(extPress.slice(0, 2), ['eimadpbcbfnmbkopoojfekhnkhdbieeh', 'persist:web-general'])
+    assert.equal(extPress[2], guestAt('/one').id, 'the page on screen')
+    const extTabs = await bjs(`document.querySelectorAll('.web-tab').length`)
+    bwin.webContents.send('ext:openTab', { partition: 'persist:web-nowhere', url: page('/ext-elsewhere'), background: false })
+    bwin.webContents.send('ext:openTab', { partition: 'persist:web-general', url: page('/ext-signin'), background: false })
+    await buntil(`document.querySelectorAll('.web-tab').length === ${extTabs + 1}`, 'the extension\'s page opens in a tab')
+    for (let i = 0; i < 50 && !guestAt('/ext-signin'); i++) await new Promise((r) => setTimeout(r, 100))
+    assert.ok(guestAt('/ext-signin'), 'in a tab of the General space')
+    assert.ok(!guestAt('/ext-elsewhere'), 'not in another space')
+    await bkey('w')
+    await buntil(`document.querySelectorAll('.web-tab').length === ${extTabs}`, 'closed again')
+    await bjs(`document.querySelector('.web-fav').click()`)
+    await buntil(`!!document.querySelector('.web-fav.on')`, 'page one (a favorite) in front again')
+    await bjs(`document.querySelector('.web-side-top [aria-label="Extensions"]').click()`)
+    await buntil(`document.querySelectorAll('.ext-row').length === 1`, 'extensions list again')
     await bjs(`document.querySelector('.ext-row input[type="checkbox"]').click()`)
     await buntil(`document.querySelector('.ext-row').classList.contains('off')`, 'turned off')
     assert.ok(calls.some((c) => c.channel === 'ext:setEnabled' && c.args[0] === 'eimadpbcbfnmbkopoojfekhnkhdbieeh' && c.args[1] === false))

@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, Menu, shell, webContents, type DownloadItem, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
 import { isWebUrl, loginMatches } from '@shared/browser'
-import { isAllowedExtensionPage } from './extensions'
+import { isAllowedExtensionPage, openFromExtension } from './extensions'
 import { isDictationKey } from '@shared/dictation'
 import { comboOf, sectionFor } from '@shared/keyCombos'
 import type { WebDownload } from '@shared/types'
@@ -145,11 +145,16 @@ app.on('web-contents-created', (_e, contents) => {
   else contents.once('did-start-loading', () => { const h = host(); if (h) prepareSession(contents.session, h) })
 
   contents.setWindowOpenHandler(({ url, disposition }) => {
-    if (isWebUrl(url)) host()?.send('web:window', { webContentsId: contents.id, url, background: disposition === 'background-tab' })
+    const background = disposition === 'background-tab'
+    // An extension's own page (its popup, which is no tab, or a page of it in a tab) opens links in the space it runs in.
+    if (contents.getURL().startsWith('chrome-extension://')) openFromExtension(contents.session, contents.getURL(), url, !background)
+    else if (isWebUrl(url)) host()?.send('web:window', { webContentsId: contents.id, url, background })
     return { action: 'deny' }
   })
-  contents.on('will-navigate', (e, url) => { if (!isWebUrl(url)) e.preventDefault() })
-  contents.on('will-frame-navigate', (e) => { if (e.isMainFrame && !isWebUrl(e.url)) e.preventDefault() })
+  // Web pages, and the pages of an enabled extension (its sign-in page moving on to the next step).
+  const mayShow = (url: string): boolean => isWebUrl(url) || isAllowedExtensionPage(url)
+  contents.on('will-navigate', (e, url) => { if (!mayShow(url)) e.preventDefault() })
+  contents.on('will-frame-navigate', (e) => { if (e.isMainFrame && !mayShow(e.url)) e.preventDefault() })
 
   contents.on('before-mouse-event', (_e, mouse) => {
     if (mouse.type === 'mouseDown') host()?.send('web:pointer', { webContentsId: contents.id })
