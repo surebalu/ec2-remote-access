@@ -32,6 +32,7 @@ import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
 import VoiceHud from './components/VoiceHud'
 import RadialMenu from './components/RadialMenu'
+import { installToolUsage } from './toolUsage'
 import { installVoice } from './voice'
 
 export default function App(): ReactElement {
@@ -112,6 +113,9 @@ export default function App(): ReactElement {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
+
+  // Which tools come to the front, for the home page's Tools (most used first).
+  useEffect(() => installToolUsage(), [])
 
   // The menu-bar icon (src/main/tray.ts) and the launcher (src/renderer/launcher) ask the window to connect to a host,
   // find one, rescan, or show something of the app's.

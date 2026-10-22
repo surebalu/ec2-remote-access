@@ -17,7 +17,7 @@ export const UI_FONTS: UiFont[] = [
   { id: 'Avenir Next', label: 'Avenir Next', stack: "'Avenir Next', Avenir, -apple-system, sans-serif", mono: false }
 ]
 
-export const DEFAULT_UI_FONT = 'Monaco'
+export const DEFAULT_UI_FONT = 'System'
 
 const fontOf = (id: string | undefined): UiFont => UI_FONTS.find((f) => f.id === id) ?? UI_FONTS.find((f) => f.id === DEFAULT_UI_FONT)!
 

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, HostShell, PaneNode } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
+import { captureHostFilters, upsertHostView, type HostView, type HostViewFilters } from '@shared/hostViews'
 import { ssoWaitOutcome } from '@shared/ssoWait'
 import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
@@ -186,6 +187,9 @@ interface State {
   deleteWorkspace: (id: string) => Promise<void>
   shortcutsOpen: boolean
   clearFilters: () => void
+  applyHostView: (filters: HostViewFilters) => void
+  saveHostView: (name: string, id?: string, filters?: HostViewFilters) => Promise<void>
+  deleteHostView: (id: string) => Promise<void>
   revealHost: (key: string) => void
   /** `beside`: where the new session opens, next to another tab. */
   connectFor: { kind: 'ssh' | 'rdp' | 'sftp'; key: string; beside?: Beside } | null
@@ -462,6 +466,18 @@ export const useStore = create<State>((set, get) => ({
   },
   shortcutsOpen: false,
   clearFilters: () => set({ ...clearHostFilters }),
+  applyHostView: (filters) => {
+    get().setActive('hosts')
+    set({ ...captureHostFilters(filters), selectedKey: null, detailsFor: null })
+  },
+  saveHostView: async (name, id, filters) => {
+    // Paired browsers on plain HTTP do not expose randomUUID; this identifier is only a settings key.
+    const view: HostView = { id: id ?? `view-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`, name, filters: captureHostFilters(filters ?? get()) }
+    await get().saveSettings({ hostViews: upsertHostView(get().settings?.hostViews ?? [], view) })
+  },
+  deleteHostView: async (id) => {
+    await get().saveSettings({ hostViews: (get().settings?.hostViews ?? []).filter((v) => v.id !== id) })
+  },
   revealHost: (key) => {
     const st = get()
     const inst = allInstances(st).find((i) => i.key === key)

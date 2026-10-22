@@ -137,6 +137,9 @@ export interface Settings {
   profileDefaults: Record<string, ProfileDefaults>
   /** instance keys pinned to the top of the list */
   favorites: string[]
+  /** Named host filters, shared by the desktop and paired browsers. */
+  hostViews: import('./hostViews').HostView[]
+  hostDensity: 'comfortable' | 'compact'
   manualHosts: ManualHost[]
   /** user-created folders for non-AWS servers (a folder may be empty); color/label live in accountMeta['group:<name>'] */
   manualFolders: string[]
@@ -169,7 +172,7 @@ export interface Settings {
   finderHidden: string[]
   /** A colour theme for the whole app (renderer/appThemes.ts), '' for the default look that follows `theme`. */
   colorTheme: string
-  /** The font of the whole interface (renderer/uiFont.ts); notes and terminals have their own. Default Monaco. */
+  /** The font of the whole interface (renderer/uiFont.ts); notes and terminals have their own. Default System. */
   uiFont: string
   /** Text size of sections of the hosts view (renderer/sectionZoom.ts), 1 = default; keyed 'sidebar' | 'hosts'. */
   sectionZoom: Record<string, number>

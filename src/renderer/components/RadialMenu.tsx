@@ -3,6 +3,7 @@ import { comboOf, formatCombo, sectionKeys } from '@shared/keyCombos'
 import { isDarkMode, isSession, useStore, type ToolKind } from '../store'
 import { hasBrowser } from '../quickConnect'
 import { Icon } from './icons'
+import { LOOKS } from '../toolLooks'
 
 /**
  * The radial menu: every section of the app rail as a small ring of coloured bubbles around the pointer, opened by
@@ -77,21 +78,21 @@ export default function RadialMenu(): ReactElement | null {
   const keys = sectionKeys(shortcuts)
   const items = useMemo<Item[]>(() => {
     const k = (id: keyof typeof keys): string | undefined => formatCombo(keys[id]) || undefined
-    const tool = (kind: ToolKind, label: string, hue: number, icon: ReactNode): Item => ({
-      id: kind, label, hue, icon, keys: k(kind), here: front?.kind === kind, open: tabs.some((t) => t.kind === kind), run: () => st().openTool(kind)
+    const tool = (kind: ToolKind, label: string): Item => ({
+      id: kind, label, hue: LOOKS[kind].hue, icon: LOOKS[kind].icon(), keys: k(kind), here: front?.kind === kind, open: tabs.some((t) => t.kind === kind), run: () => st().openTool(kind)
     })
     const dark = isDarkMode()
     const list: (Item | false)[] = [
-      { id: 'hosts', label: 'Hosts', hue: 212, icon: <Icon.server />, keys: k('hosts') ?? '⌘1', here: !gridView && activeTab === 'hosts', open: false, run: () => st().setActive('hosts') },
-      { id: 'overview', label: 'Overview', hue: 258, icon: <Icon.grid />, keys: k('overview'), here: gridView && !gridHost, open: false, disabled: sessions === 0, run: () => st().showGrid(true) },
-      tool('health', 'Health', 345, <Icon.health />),
-      hasBrowser() && tool('local', 'Terminal', 150, <Icon.console />),
-      hasBrowser() && tool('finder', 'Finder', 196, <Icon.finder />),
-      tool('browser', 'Browser', 26, <Icon.globe />),
-      tool('notes', 'Notes', 88, <Icon.note />),
-      tool('board', 'Whiteboard', 302, <Icon.board />),
-      tool('claude', 'Claude', 14, <Icon.claude />),
-      tool('chatgpt', 'ChatGPT', 168, <Icon.chatgpt />),
+      { id: 'hosts', label: 'Hosts', hue: LOOKS.hosts.hue, icon: LOOKS.hosts.icon(), keys: k('hosts') ?? '⌘1', here: !gridView && activeTab === 'hosts', open: false, run: () => st().setActive('hosts') },
+      { id: 'overview', label: 'Overview', hue: LOOKS.overview.hue, icon: LOOKS.overview.icon(), keys: k('overview'), here: gridView && !gridHost, open: false, disabled: sessions === 0, run: () => st().showGrid(true) },
+      tool('health', 'Health'),
+      hasBrowser() && tool('local', 'Terminal'),
+      hasBrowser() && tool('finder', 'Finder'),
+      tool('browser', 'Browser'),
+      tool('notes', 'Notes'),
+      tool('board', 'Whiteboard'),
+      tool('claude', 'Claude'),
+      tool('chatgpt', 'ChatGPT'),
       hasBrowser() && { id: 'launcher', label: 'Launcher', hue: 278, icon: <Icon.launcher />, keys: formatCombo(launcherKey) || undefined, here: false, open: false, run: () => void window.api.invoke('launcher:show') },
       { id: 'shortcuts', label: 'Shortcuts', hue: 236, icon: <Icon.keyboard />, keys: '⌘/', here: false, open: false, run: () => st().set({ shortcutsOpen: true }) },
       { id: 'theme', label: dark ? 'Light mode' : 'Dark mode', hue: 46, icon: dark ? <Icon.sun /> : <Icon.moon />, here: false, open: false, run: () => void st().setTheme(dark ? 'light' : 'dark') },

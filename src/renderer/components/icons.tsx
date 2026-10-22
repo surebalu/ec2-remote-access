@@ -3,6 +3,9 @@ import type { ReactElement } from 'react'
 const base = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
 
 export const Icon = {
+  list: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+  ),
   linux: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M12 3c-2.5 0-4 2-4 5v3c0 1-.5 2-1.5 3.5S5 17 5 18.5c0 1.5 1 2.5 2.5 2.5h9c1.5 0 2.5-1 2.5-2.5 0-1.5-.5-2.5-1.5-4S16 12 16 11V8c0-3-1.5-5-4-5z" />

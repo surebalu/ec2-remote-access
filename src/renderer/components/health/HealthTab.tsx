@@ -92,6 +92,12 @@ export default function HealthTab({ active }: { tab: Tab; active: boolean }): Re
     setTabKeys('health', (k) => keys.current(k))
     return () => setTabKeys('health', null)
   }, [active])
+  // The home page's Platform card opens Health on the environment clicked.
+  useEffect(() => {
+    const go = (e: Event): void => { const id = (e as CustomEvent<PlmEnvId>).detail; if (id) setEnvId(id) }
+    window.addEventListener('ec2ra:health-env', go)
+    return () => window.removeEventListener('ec2ra:health-env', go)
+  }, [])
 
   const jump = (section: string): void => {
     const el = scroller.current?.querySelector(`#hl-${section}`)

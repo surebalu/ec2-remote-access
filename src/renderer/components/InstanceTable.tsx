@@ -9,6 +9,8 @@ import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
 import HostFilters, { ScanNotice } from './HostFilters'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
+import HomeDeck from './HomeDeck'
+import SavedHostViews from './SavedHostViews'
 
 type SortKey = 'name' | 'profile' | 'state' | 'osHint' | 'address' | 'instanceType'
 
@@ -136,14 +138,16 @@ export default function InstanceTable(): ReactElement {
   }
 
   return (
-    <div className="flex h-full flex-col" onClick={() => setMenu(null)}>
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+    <div className={`hosts-page flex h-full flex-col ${s.settings?.hostDensity === 'compact' ? 'density-compact' : ''}`} onClick={() => setMenu(null)}>
+      <HomeDeck />
+      <SavedHostViews />
+      <div className="host-toolbar flex flex-wrap items-center gap-2 px-4 py-2.5">
         <div className="relative min-w-52 flex-1 max-w-sm">
           <span className="muted pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">
             <Icon.search />
           </span>
           <input
-            className="input !pl-8"
+            className="input host-search !pl-8"
             aria-label="Search hosts"
             placeholder="Search name, IP, region, tag…"
             value={s.search}
@@ -155,6 +159,7 @@ export default function InstanceTable(): ReactElement {
         <button className="btn btn-sm" disabled={!rows.some(canRunCmd)} title="Run a shell command on the hosts listed here, through SSM Run Command" onClick={() => runOn(rows)}>
           <Icon.broadcast /> Run command
         </button>
+        <button className="btn btn-ghost btn-icon density-toggle" aria-label="Compact host rows" aria-pressed={s.settings?.hostDensity === 'compact'} title={s.settings?.hostDensity === 'compact' ? 'Switch to comfortable rows' : 'Switch to compact rows'} onClick={() => void s.saveSettings({ hostDensity: s.settings?.hostDensity === 'compact' ? 'comfortable' : 'compact' }).catch((e: Error) => s.toast('error', e.message))}><Icon.list /></button>
         <span className="muted text-[11px]">
           <span className="mono text-2 font-semibold">{rows.length}</span> of {visibleInstances(s).length}
         </span>
@@ -174,7 +179,7 @@ export default function InstanceTable(): ReactElement {
         )}
       </div>
       <ScanNotice />
-      <div ref={tableRef} className="panel mx-4 mb-3 min-h-0 flex-1 overflow-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+      <div ref={tableRef} className="host-table panel mx-4 mb-3 min-h-0 flex-1 overflow-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
         <table className="w-full text-xs">
           <thead>
             <tr>
