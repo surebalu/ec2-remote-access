@@ -4,7 +4,7 @@ import { formatRate, fullestOwnDisk, peers, portName, technologies, type HostHis
 import type { Instance } from '@shared/types'
 import { allInstances, useStore, type HostPageTab } from '../../store'
 import { metaFor } from '../../colors'
-import { openFilesFor, openInConsole, openSshFor } from '../../quickConnect'
+import { hasBrowser, openFilesFor, openInConsole, openSshFor } from '../../quickConnect'
 import { Icon } from '../icons'
 import { Bar, Spark, lvl } from '../health/parts'
 import LineChart from './LineChart'
@@ -27,7 +27,8 @@ const HISTORY_MS = 60_000
 const snaps = new Map<string, HostSnapshot>()
 const hists = new Map<string, HostHistory>()
 const readHours = (): number => { try { const n = Number(localStorage.getItem(HOURS_KEY)); return GC_RANGES.some((r) => r.hours === n) ? n : 6 } catch { return 6 } }
-const mayRefresh = (): boolean => document.visibilityState === 'visible' && document.hasFocus()
+/** In the Mac app only while its window has focus (each read is an SSM command); a phone or iPad pauses hidden pages itself. */
+export const mayRefresh = (): boolean => document.visibilityState === 'visible' && (!hasBrowser() || document.hasFocus())
 
 export const pctOf = (used: number | null, total: number | null): number | null => (used !== null && total ? (used / total) * 100 : null)
 

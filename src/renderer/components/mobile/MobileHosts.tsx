@@ -125,6 +125,7 @@ function HostActionsSheet({ i, onClose }: { i: Instance; onClose: () => void }):
       {i.platform === 'windows' && <SheetItem icon={<Icon.monitor />} disabled={!reachable} onClick={() => run(() => void openRdpFor(i.key))}>Remote desktop</SheetItem>}
       <SheetItem icon={<Icon.terminal />} disabled={!reachable} onClick={() => run(() => openSshFor(i.key))}>SSH terminal</SheetItem>
       <SheetItem icon={<Icon.folder />} disabled={!reachable} onClick={() => run(() => openFilesFor(i.key))}>Files (SFTP)</SheetItem>
+      <SheetItem icon={<Icon.activity />} onClick={() => run(() => s.openHostPage(i.key))}>Machine details (CPU, memory, disks, processes)</SheetItem>
       {!i.manual && <SheetItem icon={<Icon.globe />} onClick={() => run(() => openInConsole(i))}>AWS console (opens in Safari, signed in)</SheetItem>}
       {!i.manual && <SheetItem icon={<Icon.broadcast />} disabled={!i.ssmOnline || i.state !== 'running'} onClick={() => run(() => s.set({ runCommandFor: { keys: [i.key] } }))}>Run a command…</SheetItem>}
       <SheetItem icon={<Icon.settings />} onClick={() => run(() => s.set({ connectFor: { kind: i.platform === 'windows' ? 'rdp' : 'ssh', key: i.key } }))}>Connect with options…</SheetItem>

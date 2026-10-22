@@ -8,6 +8,7 @@ import AuthBanner from '../AuthBanner'
 import { Icon } from '../icons'
 import { APP_THEMES } from '../../appThemes'
 import MobileHosts from './MobileHosts'
+import HostPage from '../hostpage/HostPage'
 import Sheet, { SheetItem } from './Sheet'
 
 type View = 'hosts' | 'sessions' | 'more'
@@ -57,6 +58,9 @@ export default function MobileApp(): ReactElement {
   // A host grid's transient tabs are tiles, not sessions to list.
   const listed = s.tabs.filter((t) => !t.transient)
   const hostTitle = s.gridHost ? s.tabs.find((t) => t.instanceKey === s.gridHost)?.title.replace(/ @ .*/, '') : undefined
+  // A machine's page (from Health, Services or a host's sheet) takes the stage, as the desktop shows it in place of
+  // the hosts list; the sessions stay mounted underneath. Its own Back leads to where it was opened from.
+  const pageOpen = !!s.hostPage && s.activeTab === 'hosts' && !s.gridView
 
   useEffect(() => trackVisualViewport(), [])
   // The iOS app keeps the screen awake while sessions are open, so a terminal left running doesn't lock the phone.
@@ -68,7 +72,7 @@ export default function MobileApp(): ReactElement {
 
   const title = view === 'hosts' ? 'Hosts' : view === 'sessions' ? 'Sessions' : 'More'
   return (
-    <div className={`m-app ${wide ? 'wide' : ''} ${active ? 'has-session' : ''} ${fullSession ? 'list-hidden' : ''}`}>
+    <div className={`m-app ${wide ? 'wide' : ''} ${active ? 'has-session' : ''} ${pageOpen ? 'has-page' : ''} ${fullSession ? 'list-hidden' : ''}`}>
       <aside className="m-side">
         <header className="m-header">
           <h1>{title}</h1>
@@ -94,7 +98,8 @@ export default function MobileApp(): ReactElement {
         </nav>
       </aside>
       <section className="m-stage">
-        {grid ? (
+        {pageOpen && <div className="m-hostpage"><HostPage /></div>}
+        {pageOpen ? null : grid ? (
           <header className="m-header m-session-header">
             <button className="m-header-btn" aria-label={fullSession ? 'Show host list' : 'Full screen session'} aria-pressed={fullSession} onClick={toggleList}>
               <Icon.panelRight filled={!fullSession} className="-scale-x-100" />
