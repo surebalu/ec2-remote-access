@@ -96,6 +96,9 @@ function commands(): Command[] {
   for (const w of s.settings?.workspaces ?? []) {
     cmds.push({ id: `ws:${w.id}`, title: `Open workspace: ${w.name}`, keywords: 'workspace', hint: `${w.tabs.length} tabs`, icon: Icon.grid, run: () => s.openWorkspace(w.id) })
   }
+  for (const v of s.settings?.hostViews ?? []) {
+    cmds.push({ id: `view:${v.id}`, title: `Host view: ${v.name}`, keywords: `saved filters ${v.filters.search} ${v.filters.profileFilter ?? ''}`, icon: Icon.server, run: () => s.applyHostView(v.filters) })
+  }
   for (const p of s.settings?.portForwards ?? []) {
     cmds.push({ id: `pf:${p.id}`, title: `Forward: ${p.name}`, keywords: 'tunnel port', hint: `:${p.remotePort}`, icon: Icon.plug,
       run: () => void s.openPortForward({ instanceKey: p.instanceKey, remotePort: p.remotePort, localPort: p.localPort, remoteHost: p.remoteHost, name: p.name }) })
@@ -108,7 +111,7 @@ function commands(): Command[] {
   return cmds.filter((c) => c.when !== false)
 }
 
-const fuzzy = (text: string, q: string): boolean => q.split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
+const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
 const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health }
 const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])

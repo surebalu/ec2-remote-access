@@ -21,6 +21,8 @@ function guessPem(): string {
 export const defaultSettings: Settings = {
   profileDefaults: {},
   favorites: [],
+  hostViews: [],
+  hostDensity: 'comfortable',
   manualHosts: [],
   manualFolders: [],
   theme: 'system',
@@ -46,7 +48,7 @@ export const defaultSettings: Settings = {
   phoneTerminals: false,
   menuBarIcon: true,
   colorTheme: '',
-  uiFont: 'Monaco',
+  uiFont: 'System',
   sectionZoom: {},
   notesFont: 'Monaco',
   notesFontSize: 14,
