@@ -2539,3 +2539,7 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
   .svc-step code, .svc-step-msg { grid-column: 2 / -1; }
   .svc-hist { grid-template-columns: minmax(0, 1fr) auto; }
 }
+/* The memory honeycomb above the per-machine charts (MemoryGrid.tsx). */
+.hl-mem-comb { margin-bottom: 12px; }
+.hl-mem.lit { animation: hl-flash 1.8s var(--ease); }
+
