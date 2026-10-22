@@ -13,9 +13,11 @@ import { Icon } from '../icons'
 
 type View = { kind: 'list' } | { kind: 'page'; ext: ExtensionInfo; url: string; title: string; wide: boolean }
 
-export default function Extensions({ partition, pageUrl, tabId, onBrowseStore, onWidth, onClose }: {
+export default function Extensions({ partition, pageUrl, tabId, open, onBrowseStore, onWidth, onClose }: {
   partition: string
   pageUrl: string
+  /** Start on this extension's popup (it asked for it, action.openPopup). */
+  open?: { id: string; url: string }
   /** The page on screen (its webContents id), handed to an extension that takes the click itself. */
   tabId: number | null
   onBrowseStore: () => void
@@ -31,6 +33,10 @@ export default function Extensions({ partition, pageUrl, tabId, onBrowseStore, o
   const storePage = storeIdOf(pageUrl)
 
   useEffect(() => { void window.api.invoke('ext:list').then(setList, (e: Error) => setError(e.message)) }, [])
+  useEffect(() => {
+    const x = open && list?.find((e) => e.id === open.id && e.enabled)
+    if (x && open) setView({ kind: 'page', ext: x, url: open.url, title: x.name, wide: false })
+  }, [open, list])
   useEffect(() => { if (view.kind === 'list') onWidth(null) }, [view.kind]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const install = async (what: string): Promise<void> => {
@@ -83,7 +89,7 @@ export default function Extensions({ partition, pageUrl, tabId, onBrowseStore, o
           {view.ext.icon ? <img className="ext-icon" src={view.ext.icon} alt="" /> : <Icon.puzzle />}
           <span className="min-w-0 flex-1 truncate font-semibold">{view.title}</span>
         </div>
-        <ExtensionPage partition={partition} url={view.url} wide={view.wide} onWidth={onWidth} />
+        <ExtensionPage partition={partition} url={view.url} wide={view.wide} onWidth={onWidth} onClosed={view.wide ? () => setView({ kind: 'list' }) : onClose} />
       </div>
     )
   }
@@ -137,7 +143,9 @@ export default function Extensions({ partition, pageUrl, tabId, onBrowseStore, o
 }
 
 /** An extension's popup or options page, in a webview of the space's own session (where the extension runs). */
-function ExtensionPage({ partition, url, wide, onWidth }: { partition: string; url: string; wide: boolean; onWidth: (px: number) => void }): ReactElement {
+function ExtensionPage({ partition, url, wide, onWidth, onClosed }: { partition: string; url: string; wide: boolean; onWidth: (px: number) => void; onClosed: () => void }): ReactElement {
+  const closed = useRef(onClosed)
+  closed.current = onClosed
   const box = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: wide ? 520 : 340, h: wide ? 460 : 280 })
   useEffect(() => {
@@ -153,6 +161,8 @@ function ExtensionPage({ partition, url, wide, onWidth }: { partition: string; u
       }, () => undefined)
     }
     el.addEventListener('dom-ready', () => { fit(); setTimeout(fit, 400) })
+    // window.close() in the page: Chrome closes a popup that does it (1Password's, once it is unlocked and used).
+    el.addEventListener('close', () => closed.current())
     box.current?.appendChild(el)
     return () => { el.remove() }
   }, [partition, url, wide])

@@ -216,6 +216,9 @@ function listen(ses: Session, versionId: number): ServiceWorkerMain | undefined 
   listening.add(w)
   w.ipc.on('ext-worker:open', (_e, url: unknown, active: unknown) => openFromExtension(ses, w.scope, String(url), active !== false))
   w.ipc.handle('ext-worker:frames', (_e, tabId: unknown) => framesOf(ses, Number(tabId)))
+  w.ipc.on('ext-worker:popup', (_e, url: unknown) => showPopup(ses, w.scope, String(url)))
+  w.ipc.on('ext-worker:setPopup', (_e, url: unknown, tabId: unknown) => setPopup(ses, w.scope, String(url), typeof tabId === 'number' ? tabId : null))
+  w.ipc.handle('ext-worker:getPopup', (_e, tabId: unknown) => popupSet(ses, w.scope, typeof tabId === 'number' ? tabId : null))
   w.ipc.on('ext-worker:clicked', (_e, n: unknown, popup: unknown) => {
     const done = clicks.get(Number(n))
     clicks.delete(Number(n))
@@ -255,6 +258,45 @@ export function openFromExtension(ses: Session, extensionUrl: string, url: strin
   }
   // The Mac's own window only: phones have no Browser.
   mainWindow()?.webContents.send('ext:openTab', { partition, url, background: !active })
+}
+
+/**
+ * The popup each extension set (action.setPopup) per space, for every tab and per tab: the browser's side of the
+ * toolbar, which Electron does not keep, so it outlives the extension's worker as in Chrome. Keyed by partition and
+ * runtime id.
+ */
+const popups = new Map<string, { all?: string; tabs: Map<number, string> }>()
+const popupKey = (ses: Session, extensionUrl: string): string | null => {
+  const rid = /^chrome-extension:\/\/([a-p]{32})\//.exec(extensionUrl)?.[1]
+  const partition = partitionOf(ses)
+  return rid && partition ? `${partition} ${rid}` : null
+}
+
+function setPopup(ses: Session, extensionUrl: string, url: string, tabId: number | null): void {
+  const key = popupKey(ses, extensionUrl)
+  if (!key || (url && !isExtensionPage(url, [key.split(' ')[1]]))) return
+  const p: { all?: string; tabs: Map<number, string> } = popups.get(key) ?? { tabs: new Map() }
+  if (tabId == null) p.all = url
+  else p.tabs.set(tabId, url)
+  popups.set(key, p)
+}
+
+function popupSet(ses: Session, extensionUrl: string, tabId: number | null): string | null {
+  const key = popupKey(ses, extensionUrl)
+  const p = key ? popups.get(key) : undefined
+  return (tabId == null ? undefined : p?.tabs.get(tabId)) ?? p?.all ?? null
+}
+
+/**
+ * action.openPopup, which Electron has no toolbar to show: the Browser opens its Extensions panel on that popup, in the
+ * space the extension runs in. 1Password, locked and not paired with the desktop app, asks for this to be unlocked.
+ */
+function showPopup(ses: Session, extensionUrl: string, url: string): void {
+  const rid = /^chrome-extension:\/\/([a-p]{32})\//.exec(extensionUrl)?.[1]
+  const id = [...runtimeIds].find(([, r]) => r === rid)?.[0]
+  const partition = partitionOf(ses)
+  if (!rid || !id || !partition || !isExtensionPage(url, [rid]) || !isAllowedExtensionPage(url)) return
+  mainWindow()?.webContents.send('ext:openPopup', { partition, id, url })
 }
 
 /**

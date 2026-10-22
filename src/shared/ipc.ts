@@ -297,6 +297,8 @@ export interface IpcEvents {
   'web:window': { webContentsId: number; url: string; background: boolean }
   /** An extension asked for a page (tabs.create, a link in its popup): open it as a tab in the space it runs in. */
   'ext:openTab': { partition: string; url: string; background: boolean }
+  /** An extension asked for its popup (action.openPopup): show it in the Extensions panel of that space. */
+  'ext:openPopup': { partition: string; id: string; url: string }
   /**
    * A browser shortcut, or one of the rail sections' own (Settings → Keyboard), pressed while a page had the keyboard
    * (pages swallow keys before the app sees them). `key` is lower-cased; `code` names the physical key.

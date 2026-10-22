@@ -27,8 +27,18 @@ const PAGE: ExtensionFrame[] = [
   { frameId: 0, parentFrameId: -1, url: 'https://login.example/', processId: 9, errorOccurred: false, documentLifecycle: 'active', frameType: 'outermost_frame' },
   { frameId: 41, parentFrameId: 0, url: `chrome-extension://${ID}/inline/menu/menu.html`, processId: 3, errorOccurred: false, documentLifecycle: 'active', frameType: 'sub_frame' }
 ]
-const fill = (opened: [string, boolean][]): ReturnType<typeof fillExtensionApis> =>
-  fillExtensionApis((url, active) => { opened.push([url, active]) }, async (tabId) => (tabId === 7 ? PAGE : null))
+const popups: string[] = []
+/** main's side: tabs opened, frames, popups shown, and the popup state it keeps (per tab, else for every tab). */
+const fill = (opened: [string, boolean][]): ReturnType<typeof fillExtensionApis> => {
+  const set = new Map<number | null, string>()
+  return fillExtensionApis({
+    openTab: (url, active) => { opened.push([url, active]) },
+    frames: async (tabId) => (tabId === 7 ? PAGE : null),
+    openPopup: (url) => { popups.push(url) },
+    setPopup: (url, tabId) => { set.set(tabId, url) },
+    getPopup: async (tabId) => set.get(tabId) ?? set.get(null) ?? null
+  })
+}
 
 test('does nothing in a website\'s service worker', () => {
   const w = worker({ url: 'https://example.com/sw.js' })
@@ -108,4 +118,27 @@ test('the toolbar click: the popup when one is set, else onClicked', async () =>
   await w.chrome.action.setPopup({ popup: 'popup/index.html' })
   assert.equal(await click(12), `chrome-extension://${ID}/popup/index.html`)
   assert.equal(got.length, 1, 'a popup means no onClicked')
+})
+
+test('openPopup shows the popup set now in the Extensions panel', async () => {
+  const w = worker()
+  fill(w.opened)
+  popups.length = 0
+  await w.chrome.action.openPopup()
+  assert.deepEqual(popups, [], 'none set: nothing to show')
+  // 1Password, locked, sets its popup and asks for it to unlock.
+  await w.chrome.action.setPopup({ popup: 'popup/index.html' })
+  await w.browser.action.openPopup()
+  assert.deepEqual(popups, [`chrome-extension://${ID}/popup/index.html`])
+})
+
+test('the popup is the manifest\'s until the extension sets one, per tab or for all', async () => {
+  const w = worker({ manifest: { action: { default_popup: 'popup.html' } } })
+  fill(w.opened)
+  assert.equal(await w.chrome.action.getPopup({}), `chrome-extension://${ID}/popup.html`, 'Electron answers \'\' here')
+  await w.chrome.action.setPopup({ popup: '', tabId: 3 })
+  assert.equal(await w.chrome.action.getPopup({ tabId: 3 }), '')
+  assert.equal(await w.chrome.action.getPopup({ tabId: 4 }), `chrome-extension://${ID}/popup.html`)
+  await new Promise((resolve) => w.chrome.action.setPopup({ popup: '/other.html' }, resolve))
+  assert.equal(await w.chrome.action.getPopup({}), `chrome-extension://${ID}/other.html`)
 })
