@@ -181,6 +181,8 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
   const checks = env.checks ?? []
   const [showChecks, setShowChecks] = useState(false)
   const [focusHost, setFocusHost] = useState<{ ip: string; n: number } | null>(null)
+  // Servers whose systemd units service control can reach (Linux, running in EC2).
+  const controllable = env.hosts.filter((h) => h.instanceKey && h.os === 'linux' && h.state !== 'stopped').map((h) => ({ key: h.instanceKey!, label: `${h.role}${h.label ? ` ${h.label}` : ''}` }))
   const kernel = useKernel(env.id, active && env.jvms.length > 0)
   const signedIn = kernel.d ? signedInPeople(kernel.d.servers) : null
   const kernelServers = kernel.d?.servers.filter((s) => s.reachable).length ?? 0
@@ -217,7 +219,15 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
       <Honeycombs env={env} onPick={(c) => (c.machine?.listed ? setFocusHost({ ip: c.machine.ip, n: Date.now() }) : onJump('services'))} />
 
       <SectionHead id="hl-services" icon={<Icon.layers />} title="Services" sub="Each one's health-check URL, through the load balancer and on each server"
-        right={checks.length ? <button type="button" className="hl-link" aria-expanded={showChecks} onClick={() => setShowChecks(!showChecks)}>{showChecks ? 'Hide' : 'All'} health checks ({checks.length})</button> : undefined} />
+        right={
+          <div className="hl-sec-controls">
+            {controllable.length > 0 && (
+              <button type="button" className="hl-btn sm" title="Start, stop or restart the services' systemd units on this environment's servers"
+                onClick={() => useStore.getState().set({ servicesFor: { targets: controllable, title: env.name, env: env.id } })}><Icon.layers />Control services</button>
+            )}
+            {checks.length > 0 && <button type="button" className="hl-link" aria-expanded={showChecks} onClick={() => setShowChecks(!showChecks)}>{showChecks ? 'Hide' : 'All'} health checks ({checks.length})</button>}
+          </div>
+        } />
       <div className="hl-grid services">
         {services.map((s) => <ServiceCard key={s.id} s={s} />)}
         {!services.length && <Empty>No service checks for this environment.</Empty>}
@@ -641,14 +651,14 @@ function Servers({ env, focus }: { env: PlmEnvHealth; focus: { ip: string; n: nu
         right={<div className="hl-seg">{chip('all', 'All', env.hosts.length)}{chip('problems', 'Problems', problems.length)}{chip('stopped', 'Stopped', stopped.length)}</div>} />
       <div className="hl-card hl-list hl-servers" ref={list}>
         <div className="hl-srv-head" aria-hidden="true"><span>Server</span><span>CPU</span><span>Memory</span><span>Fullest disk</span><span>Load</span><span>Up for</span><span /></div>
-        {shown.map((h) => <ServerRow key={`${h.ip}${h.role}${h.label}`} h={h} lit={lit?.ip === h.ip} />)}
+        {shown.map((h) => <ServerRow key={`${h.ip}${h.role}${h.label}`} h={h} env={env} lit={lit?.ip === h.ip} />)}
         {!shown.length && <Empty>{filter === 'problems' ? 'No server needs attention.' : 'No stopped servers.'}</Empty>}
       </div>
     </>
   )
 }
 
-function ServerRow({ h, lit }: { h: HostHealth; lit: boolean }): ReactElement {
+function ServerRow({ h, env, lit }: { h: HostHealth; env: PlmEnvHealth; lit: boolean }): ReactElement {
   const st = useStore.getState
   const off = h.state === 'stopped'
   const cell = (label: string, pct: number | null, limits: readonly [number, number], extra?: ReactNode): ReactElement => (
@@ -676,6 +686,7 @@ function ServerRow({ h, lit }: { h: HostHealth; lit: boolean }): ReactElement {
         </>
       )}
       <div className="hl-srv-actions">
+        {h.instanceKey && h.os === 'linux' && !off && <button type="button" className="hl-btn sm" title={`Start, stop or restart the services on ${h.name}`} onClick={() => st().set({ servicesFor: { targets: [{ key: h.instanceKey!, label: `${h.role}${h.label ? ` ${h.label}` : ''}` }], title: `${h.role}${h.label ? ` ${h.label}` : ''}`, env: env.id } })}><Icon.layers />Services</button>}
         {h.instanceKey && h.os === 'linux' && !off && <button type="button" className="hl-btn sm" title={`Open a shell on ${h.name}`} onClick={() => openSshFor(h.instanceKey!)}><Icon.terminal />SSH</button>}
         {h.instanceKey && <button type="button" className="hl-icon-btn sm" title="Show in the host list" aria-label="Show in the host list" onClick={() => st().revealHost(h.instanceKey!)}><Icon.info /></button>}
       </div>

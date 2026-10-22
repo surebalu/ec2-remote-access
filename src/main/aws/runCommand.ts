@@ -26,7 +26,8 @@ function skipReason(inst: Instance): string | null {
   return null
 }
 
-function friendly(e: unknown): string {
+/** An SSM error in words (shared with ssmScript.ts). */
+export function friendly(e: unknown): string {
   const err = e as { name?: string; message?: string }
   const msg = err.message ?? String(e)
   if (err.name === 'AccessDeniedException' || /not authorized|AccessDenied/i.test(msg)) return 'This account’s role may not run commands (it needs ssm:SendCommand and ssm:GetCommandInvocation).'

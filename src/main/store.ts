@@ -63,6 +63,7 @@ export const defaultSettings: Settings = {
   overrides: {},
   snippets: [],
   portForwards: [],
+  serviceCatalog: [],
   workspaces: [],
   sessionLogging: false,
   sessionLogDir: '',

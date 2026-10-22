@@ -26,6 +26,7 @@ import { listTunnels, closeTunnel } from './tunnels'
 import { openPortForward } from './portForward'
 import { hostHealth } from './aws/health'
 import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
+import { cancelServiceJob, serviceHistory, serviceJob, serviceJobs, serviceLogs, serviceStatus, startServiceJob } from './services'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
@@ -246,6 +247,13 @@ export const handlers: Handlers = {
   }),
   'run:start': (req) => startRun(req),
   'run:status': async (id) => runStatus(id),
+  'services:status': (keys) => serviceStatus(keys),
+  'services:run': async (req) => startServiceJob(req),
+  'services:job': async (id) => serviceJob(id),
+  'services:jobs': async () => serviceJobs(),
+  'services:cancel': async (id) => cancelServiceJob(id),
+  'services:logs': (key, unit, lines) => serviceLogs(key, unit, lines),
+  'services:history': async () => serviceHistory(),
   'run:cancel': (id) => cancelRun(id),
   'run:list': async () => listRuns(),
   'app:about': async () => ({

@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { AppAbout, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
+import { DEFAULT_SERVICES, isUnitName, type ServiceDef } from '@shared/services'
 import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, SHORTCUT_TARGETS, sectionKeys, TARGET_NAMES, type RailSection, type ShortcutTarget } from '@shared/keyCombos'
 import { CAN_DICTATE, voice } from '../voice'
 import { useStore } from '../store'
@@ -16,7 +17,7 @@ import { ZOOM_SECTIONS } from '../sectionZoom'
 import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
-type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'keyboard' | 'voice' | 'phone' | 'requirements' | 'about'
+type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'keyboard' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
 
 const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: 'general', label: 'General', blurb: 'Appearance, how hosts are found and how connections are routed.', icon: Icon.settings },
@@ -26,6 +27,7 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
   { id: 'notes', label: 'Notes', blurb: 'Where your Markdown notes live.', icon: Icon.note },
   { id: 'keyboard', label: 'Keyboard', blurb: 'Your own shortcut for each section down the left edge, Claude and ChatGPT included.', icon: Icon.keyboard },
   { id: 'voice', label: 'Voice', blurb: 'Talk instead of typing, wherever you type in the app.', icon: Icon.mic },
+  { id: 'services', label: 'Services', blurb: 'The 3DEXPERIENCE services, and the systemd units service control starts, stops and restarts.', icon: Icon.layers },
   { id: 'phone', label: 'Phone & iPad', blurb: 'Use this Mac’s sessions from your iPhone or iPad.', icon: Icon.phone },
   { id: 'requirements', label: 'Requirements', blurb: 'The command-line tools the app uses, and where they are.', icon: Icon.plug },
   { id: 'about', label: 'About', blurb: 'Version, privacy and where your data is kept.', icon: Icon.info }
@@ -704,7 +706,40 @@ export default function SettingsDialog(): ReactElement | null {
     </>
   )
 
-  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, keyboard, voice: voiceSection, phone, requirements, about: aboutSection }
+  const svcList = draft.serviceCatalog?.length ? draft.serviceCatalog : DEFAULT_SERVICES
+  const setSvc = (list: ServiceDef[]): void => upd('serviceCatalog', list)
+  const servicesSection = (
+    <>
+      <Group title="Services and their units">
+        {svcList.map((d, i) => {
+          const bad = d.units.filter((u) => !isUnitName(u))
+          return (
+            <div key={d.id} className="set-row svc-def">
+              <input className="input" value={d.name} aria-label="Service name" onChange={(e) => setSvc(svcList.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+              <UnitsInput units={d.units} name={d.name} onChange={(units) => setSvc(svcList.map((x, j) => (j === i ? { ...x, units } : x)))} />
+              <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Remove ${d.name}`} title="Remove" onClick={() => setSvc(svcList.filter((_, j) => j !== i))}><Icon.x /></button>
+              {bad.length > 0 && <span className="set-key-error svc-def-error">Not a unit name, so it is left out: {bad.join(', ')}</span>}
+            </div>
+          )
+        })}
+        <div className="set-row">
+          <button type="button" className="btn" onClick={() => setSvc([...svcList, { id: `custom-${Date.now().toString(36)}`, name: 'New service', units: [] }])}><Icon.plus /> Add a service</button>
+          <span className="flex-1" />
+          <button type="button" className="btn" disabled={!draft.serviceCatalog?.length} onClick={() => setSvc([])}>Restore the install sheet’s list</button>
+        </div>
+      </Group>
+      <Group title="How it works">
+        <div className="set-row stack">
+          <ul className="set-list">
+            <li><Icon.check /><span>Services (Health → Control services, a server’s Services button, a host’s menu, or ⌘K) asks each server which of these units it has, through SSM, and shows only those, with their state.</span></li>
+            <li><Icon.check /><span>Restart and Start wait until the unit is active and the server’s own health check (the probe Grafana runs) passes; Restart all, one at a time does a service’s servers in turn, stopping at the first failure.</span></li>
+            <li><Icon.check /><span>Units run as root through the SSM agent: only names like <code>name.service</code> are used, and only the ones listed here. Production asks you to type PROD, and every action is kept in History.</span></li>
+          </ul>
+        </div>
+      </Group>
+    </>
+  )
+  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, keyboard, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
 
   return (
     <Modal title="Settings" onClose={close} width="max-w-[880px]" bare>
@@ -738,3 +773,14 @@ export default function SettingsDialog(): ReactElement | null {
     </Modal>
   )
 }
+
+/** A service's units as text, kept while typing (spaces separate them) and read on leaving the field. */
+function UnitsInput({ units, name, onChange }: { units: string[]; name: string; onChange: (units: string[]) => void }): ReactElement {
+  const [text, setText] = useState(units.join(' '))
+  useEffect(() => setText(units.join(' ')), [units.join(' ')]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input className="input mono" value={text} aria-label={`Units of ${name}`} placeholder="name.service other.service" spellCheck={false}
+      onChange={(e) => setText(e.target.value)} onBlur={() => onChange(text.split(/[\s,]+/).filter(Boolean))} />
+  )
+}
+

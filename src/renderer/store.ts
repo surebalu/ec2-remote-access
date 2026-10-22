@@ -179,6 +179,8 @@ interface State {
   portForwardFor: { key?: string; presetId?: string } | null
   /** Open Run Command dialog: the hosts it starts with (editable there), or a past run to show. */
   runCommandFor: { keys: string[]; runId?: string } | null
+  /** The Services dialog (service control) for these servers; `label` names a server ("3DSpace 01"), `env` its environment. */
+  servicesFor: { targets: { key: string; label?: string }[]; title: string; env?: string } | null
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
   workspaceSaveOpen: boolean
@@ -433,6 +435,7 @@ export const useStore = create<State>((set, get) => ({
   },
   portForwardFor: null,
   runCommandFor: null,
+  servicesFor: null,
   openPortForward: async (req) => {
     try {
       const t = await window.api.invoke('tunnels:open', req)
