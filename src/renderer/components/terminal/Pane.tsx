@@ -241,10 +241,28 @@ export default function Pane({ id, cwd, env, visible, focused, multi, inputMode,
     term.onResize(({ cols, rows }) => { if (opened.current) void window.api.invoke('term:resize', id, cols, rows) })
     term.buffer.onBufferChange((b) => setAlt(b.type === 'alternate'))
 
+    // Output sits against the bottom, by the prompt, as in Warp: while it does not fill the pane the text grid is
+    // moved down by the empty rows under it, so each new line pushes the rest up and `clear` puts the prompt back at
+    // the bottom. Not while scrolled back (those rows are history) or in a full-screen program (alternate screen).
+    // The block outlines measure the grid where it is drawn, so they move with it; so does xterm's own mouse handling.
+    const anchor = (): void => {
+      const b = term.buffer.active
+      let empty = 0
+      if (b.type === 'normal' && b.viewportY === b.baseY) {
+        let used = b.cursorY + 1
+        for (let i = term.rows - 1; i >= used; i--) {
+          if (b.getLine(b.baseY + i)?.translateToString(true).trim()) { used = i + 1; break }
+        }
+        empty = Math.max(0, term.rows - used)
+      }
+      const grid = el.querySelector<HTMLElement>('.xterm-screen')
+      const shift = empty && grid ? Math.round((empty * grid.offsetHeight) / term.rows) : 0
+      el.style.transform = shift ? `translateY(${shift}px)` : ''
+    }
     // Block outlines follow the text as it scrolls; redraw at most once a frame.
     let frame = 0
     const schedule = (): void => {
-      if (!frame) frame = requestAnimationFrame(() => { frame = 0; redraw() })
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; anchor(); redraw() })
     }
     const offRender = term.onRender(schedule)
     const offScroll = term.onScroll(schedule)

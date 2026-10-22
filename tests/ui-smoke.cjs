@@ -2117,6 +2117,16 @@ app.whenReady().then(async () => {
     await tkey('`', { ctrlKey: true, code: 'Backquote' })
     await tuntil(`document.querySelectorAll('.term-tab').length === 1 && !!document.querySelector('.tdock textarea')`, '⌃` opens the Terminal with the input box')
     assert.equal(await tjs(`!!document.querySelector('.term-side .term-tab')`), true, 'tabs are down the side by default')
+    // Output sits against the bottom, by the input box, as in Warp: a fresh shell's prompt is on the last rows of the
+    // pane, with the empty rows above it, not at the top.
+    await tuntil(`(() => { const x = document.querySelector('.term-slot:not([style*="none"]) .tpane-xterm'); return !!x && /translateY\\(\\d+px\\)/.test(x.style.transform) })()`, 'a short output is moved to the bottom')
+    assert.equal(await tjs(`(() => {
+      const pane = document.querySelector('.term-slot:not([style*="none"]) .tpane-term')
+      const rows = [...pane.querySelectorAll('.xterm-rows > div')].filter((r) => r.textContent.trim())
+      const last = rows[rows.length - 1].getBoundingClientRect()
+      const area = pane.getBoundingClientRect()
+      return area.bottom - last.bottom < 40 && rows[0].getBoundingClientRect().top - area.top > 100
+    })()`), true, 'the prompt is at the bottom with empty space above')
     await tuntil(`document.querySelector('.term-side .term-tab.on .term-tab-branch')?.textContent === 'main'`, 'the side list shows the tab\'s Git branch, as in Warp')
     // The ribbon along the bottom of the pane, as in Warp: Git changes, workflows, Finder, the input-box switch, the
     // folder and the branch. With the whole width it has its labels and does not overflow.
