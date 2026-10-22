@@ -7,6 +7,8 @@ import { Icon } from './icons'
 import Popover, { MenuItem, MenuLabel, MenuSep } from './Popover'
 import { APP_THEMES, findAppTheme } from '../appThemes'
 import { endDockDrag, startDockDrag } from './SplitView'
+import { TOOL_GROUPS, TOOL_DESCRIPTIONS } from '../toolCatalog'
+import { LOOKS } from '../toolLooks'
 
 /**
  * The app's sections down the left edge: hosts, all sessions, the built-in tools and the chat assistants, with help,
@@ -88,6 +90,8 @@ export default function AppRail(): ReactElement {
 
   return (
     <nav className="app-rail" aria-label="App sections">
+      <div className="rail-group" role="group" aria-label="Operate">
+      <span className="rail-group-label">Operate</span>
       {item({ label: 'Hosts', icon: <Icon.server />, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), keys: sectionKeyLabel('hosts', shortcuts) || '⌘1', onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
       {item({
         label: 'Overview',
@@ -101,16 +105,12 @@ export default function AppRail(): ReactElement {
         onClick: () => st().showGrid(!gridView || !!gridHost),
         onContextMenu: (el) => setMenu({ kind: 'overview', anchor: el })
       })}
-      {tool('health', <Icon.health />, 'Health: the 3DEXPERIENCE platform at a glance, per environment')}
-      <span className="rail-divider" />
-      {hasBrowser() && tool('local', <Icon.console />, 'Terminal: shells on this Mac')}
-      {hasBrowser() && tool('finder', <Icon.finder />, 'Finder: the files on this Mac, with your Finder favorites')}
-      {tool('browser', <Icon.globe />, 'Browser: AWS console spaces and web tabs')}
-      {tool('notes', <Icon.note />, 'Notes in your Obsidian vault')}
-      {tool('board', <Icon.board />, 'Whiteboard: a scratch pad for brainstorming')}
-      <span className="rail-divider" />
-      {tool('claude', <Icon.claude />, hasBrowser() ? 'Claude: chat beside your sessions, signed in on its own' : 'Claude: opens claude.ai in a new tab')}
-      {tool('chatgpt', <Icon.chatgpt />, hasBrowser() ? 'ChatGPT: chat beside your sessions, signed in on its own' : 'ChatGPT: opens chatgpt.com in a new tab')}
+      {tool('health', <Icon.health />, TOOL_DESCRIPTIONS.health)}
+      </div>
+      {TOOL_GROUPS.filter((g) => g.id !== 'operate').map((group) => <div key={group.id} className="rail-group" role="group" aria-label={group.label}>
+        <span className="rail-group-label">{group.label}</span>
+        {group.tools.filter((kind) => hasBrowser() || !['local', 'finder'].includes(kind)).map((kind) => tool(kind, LOOKS[kind].icon(), TOOL_DESCRIPTIONS[kind]))}
+      </div>)}
       <span className="rail-spacer" />
       {hasBrowser() && item({
         label: 'Launcher',

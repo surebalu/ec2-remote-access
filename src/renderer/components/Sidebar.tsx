@@ -148,7 +148,7 @@ export default function Sidebar(): ReactElement | null {
           [
             ['Hosts', instances.length, 'violet', 'Show every host', s.stateFilter === 'all' && s.reachFilter === 'all', { stateFilter: 'all', reachFilter: 'all' }],
             ['Running', running, 'emerald', 'Show running hosts', s.stateFilter === 'running' && s.reachFilter === 'all', { stateFilter: 'running', reachFilter: 'all' }],
-            ['Reachable', reachable, 'sky', 'Show hosts with a connection route (SSM or direct)', s.reachFilter === 'reachable', { reachFilter: 'reachable' }]
+            ['Routes', reachable, 'sky', 'Show hosts with a connection route (SSM or direct)', s.reachFilter === 'reachable', { reachFilter: 'reachable' }]
           ] as [string, number, string, string, boolean, Parameters<typeof s.set>[0]][]
         ).map(([label, n, color, title, on, patch]) => (
           <span key={label} className="grid" data-accent={color}>
