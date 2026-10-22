@@ -2698,3 +2698,35 @@ button.hp-th:hover, .hp-th.on { color: var(--text); }
 .hp-proc-head { padding-top: 0; }
 .svc-host-link, .hl-srv-link { overflow: hidden; color: inherit; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .svc-host-link:hover, .hl-srv-link:hover { color: var(--c-text, var(--accent)); text-decoration: underline; }
+
+/* Database locks (components/dblocks/DbLocksDialog.tsx): one card per blocking session, its waiters indented under it. */
+.dbl-dbs { display: flex; gap: 6px; padding: 10px 18px 0; overflow-x: auto; }
+.dbl-dbs button { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); font-size: 12px; white-space: nowrap; }
+.dbl-dbs button .muted { font-family: var(--mono-font); font-size: 10.5px; }
+.dbl-dbs button.on { border-color: var(--accent); background: var(--accent-soft); }
+.dbl-dbs button svg { width: 12px; height: 12px; color: var(--warn); }
+.dbl-live { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--muted); }
+.dbl-live.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); animation: dbl-pulse 2s ease-in-out infinite; }
+@keyframes dbl-pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { .dbl-live.on { animation: none; } }
+.dbl-clear { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 16px; border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border)); border-radius: 12px; background: var(--ok-soft); font-size: 12.5px; }
+.dbl-clear > svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--ok); }
+.dbl-clear p { margin-top: 2px; font-size: 11.5px; }
+.dbl-chain { margin-top: 14px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--err) 35%, var(--border)); border-radius: 12px; background: var(--panel); }
+.dbl-root { display: grid; grid-template-columns: auto minmax(160px, 1.2fr) minmax(120px, 1fr) auto; align-items: center; gap: 12px; padding: 11px 12px; background: linear-gradient(180deg, var(--err-soft), transparent); }
+.dbl-badge { padding: 2px 9px; border-radius: 999px; background: var(--err); color: #fff; font-size: 10.5px; font-weight: 800; white-space: nowrap; }
+.dbl-who { display: flex; flex-direction: column; gap: 1px; }
+.dbl-who strong { font-size: 12.5px; }
+.dbl-who span { font-size: 10.5px; }
+.dbl-state { color: var(--text-2); font-size: 11.5px; }
+.dbl-locks { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 8px; }
+.dbl-sql { max-height: 120px; margin: 0 12px 10px; padding: 8px 10px; overflow: auto; border-radius: 8px; background: var(--panel-2); font: 11px/1.45 var(--mono-font); white-space: pre-wrap; word-break: break-word; }
+.dbl-waiters { border-top: 1px solid var(--border); }
+.dbl-waiter { display: grid; grid-template-columns: auto minmax(150px, 1fr) minmax(160px, 1.2fr) minmax(0, 1.4fr); align-items: center; gap: 10px; padding: 7px 12px 7px 10px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+.dbl-waiter:last-child { border-bottom: 0; }
+.dbl-waiter > svg { width: 11px; height: 11px; color: var(--muted); }
+.dbl-wait { color: var(--text-2); }
+.dbl-wait b { color: var(--warn); }
+.dbl-wsql { color: var(--muted); font-size: 10.5px; }
+.dbl-hist { margin-top: 10px; }
+.dbl-hist .svc-row { grid-template-columns: auto minmax(160px, 1fr) minmax(0, 1.6fr) auto; }

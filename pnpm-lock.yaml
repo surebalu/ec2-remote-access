@@ -17,6 +17,9 @@ importers:
       '@aws-sdk/client-rds':
         specifier: ^3.1153.0
         version: 3.1153.0
+      '@aws-sdk/client-secrets-manager':
+        specifier: 3.1135.0
+        version: 3.1135.0
       '@aws-sdk/client-ssm':
         specifier: ^3.1135.0
         version: 3.1135.0
@@ -95,6 +98,9 @@ importers:
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
+      oracledb:
+        specifier: 7.0.1
+        version: 7.0.1
       perfect-freehand:
         specifier: 1.2.3
         version: 1.2.3
@@ -172,6 +178,10 @@ packages:
 
   '@aws-sdk/client-rds@3.1153.0':
     resolution: {integrity: sha512-2wBL1D4hD0JpXyUjqXjsQuDnIs8hxxtoOkuVOioAjVliNSW3HggtIXAVPQsP0J4lp48rDP6cwCC0FQmuQAkkUg==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-secrets-manager@3.1135.0':
+    resolution: {integrity: sha512-sQciXpVRz0rXeHoq0jETBX+rnCiDcLTYTyGTgL8wXa+1qPAA0zaPiZs58KNIeTHP9PZvnTIBw6KwUmjAFWWVEw==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-ssm@3.1135.0':
@@ -2112,6 +2122,10 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
+  oracledb@7.0.1:
+    resolution: {integrity: sha512-xlM0Ceh6A5stQLAdEfKf3pgCSkbOjQLo2ZPEi3+kXklz+KbZD3fLi/nsTSbQeZZNFBSFDNxdn1Ek3+bxG40M8w==}
+    engines: {node: '>=14.17'}
+
   p-cancelable@2.1.1:
     resolution: {integrity: sha512-BZOr3nRQHOntUjTrH8+Lh54smKHoHyur8We1V8DSMVrl5A2malOOwuJRnKRDjSnkoeBh4at6BwEnb5I7Jl31wg==}
     engines: {node: '>=8'}
@@ -2654,6 +2668,17 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
+  '@aws-sdk/client-secrets-manager@3.1135.0':
+    dependencies:
+      '@aws-sdk/core': 3.978.4
+      '@aws-sdk/credential-provider-node': 3.972.87
+      '@aws-sdk/types': 3.974.6
+      '@smithy/core': 3.36.0
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/node-http-handler': 4.12.1
+      '@smithy/types': 4.19.0
+      tslib: 2.8.1
+
   '@aws-sdk/client-ssm@3.1135.0':
     dependencies:
       '@aws-sdk/core': 3.978.0
@@ -2976,11 +3001,11 @@ snapshots:
 
   '@aws-sdk/token-providers@3.1129.0':
     dependencies:
-      '@aws-sdk/core': 3.978.0
-      '@aws-sdk/nested-clients': 3.997.45
-      '@aws-sdk/types': 3.974.5
-      '@smithy/core': 3.34.1
-      '@smithy/types': 4.18.0
+      '@aws-sdk/core': 3.978.4
+      '@aws-sdk/nested-clients': 3.997.49
+      '@aws-sdk/types': 3.974.6
+      '@smithy/core': 3.36.0
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/token-providers@3.1153.0':
@@ -4800,6 +4825,8 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
+
+  oracledb@7.0.1: {}
 
   p-cancelable@2.1.1: {}
 

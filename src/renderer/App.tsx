@@ -34,6 +34,7 @@ import MobileApp from './components/mobile/MobileApp'
 import VoiceHud from './components/VoiceHud'
 import RadialMenu from './components/RadialMenu'
 import ServicesDialog from './components/services/ServicesDialog'
+import DbLocksDialog from './components/dblocks/DbLocksDialog'
 import { installToolUsage } from './toolUsage'
 import { installVoice } from './voice'
 
@@ -69,6 +70,7 @@ export default function App(): ReactElement {
   const shortcutsOpen = useStore((s) => s.shortcutsOpen)
   const runCommandFor = useStore((s) => s.runCommandFor)
   const servicesFor = useStore((s) => s.servicesFor)
+  const dbLocksOpen = useStore((s) => !!s.dbLocksFor)
   const profiles = useStore((s) => s.profiles)
   const manualCount = useStore((s) => s.settings?.manualHosts.length ?? 0)
   const settingsLoaded = useStore((s) => !!s.settings)
@@ -209,6 +211,7 @@ export default function App(): ReactElement {
       {shortcutsOpen && <ShortcutsDialog />}
       {runCommandFor && <RunCommandDialog key={runCommandFor.runId ?? runCommandFor.keys.join('|')} />}
       {servicesFor && <ServicesDialog key={servicesFor.targets.map((t) => t.key).join('|')} />}
+      {dbLocksOpen && <DbLocksDialog />}
       <Toasts />
       <VoiceHud />
       <ZoomBadge />

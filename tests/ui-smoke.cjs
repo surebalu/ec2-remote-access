@@ -156,6 +156,8 @@ const healthFixture = () => {
 }
 // Service control jobs the fixture "runs": running, then active, then the health check, then done.
 const serviceJobs = []
+// Sessions ended in the Database locks dialog.
+const dbKilled = []
 const jobNow = (j) => {
   const t = Date.now() - j.startedAt
   const phase = t < 900 ? 'running' : t < 1800 ? 'verifying' : t < 2700 ? 'checking' : 'done'
@@ -296,6 +298,24 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return { source: 'prometheus', hours: args[1], start: Date.now() - args[1] * 3600000, step: (args[1] * 3600) / (n - 1), cpu: wave(22, 9, 6), memPct: wave(54, 3, 9), memUsed: wave(34e9, 2e9, 9),
         netIn: wave(200000, 60000, 4), netOut: wave(500000, 120000, 5), diskRead: wave(30000, 20000, 3), diskWrite: wave(90000, 40000, 7) }
     }
+    // Database locks: one blocker idle with a transaction open, two waiting behind it (one through the other).
+    case 'db:list': return [
+      { id: 'prod-ms-db', env: 'prod', engine: 'oracle-se2 19', profile: 'production', region: 'us-east-1', endpoint: 'prod-ms-db.example', port: 1521, dbName: 'ORCL', via: { key: running.key, name: running.name }, secret: { name: 'env-refresh/prod-master-pwd', profile: 'production' } },
+      { id: 'qa-ms-db', env: 'qa', engine: 'oracle-se2 19', profile: 'development', region: 'us-east-1', endpoint: 'qa-ms-db.example', port: 1521, dbName: 'ORCL', via: null, secret: null, problem: 'No running server with an online SSM agent in qa-ms-db\'s network.' }
+    ]
+    case 'db:locks': {
+      const sess = (sid, extra) => ({ inst: 1, sid, serial: sid * 7, user: 'X3DSPACE', osUser: 'tomcat', machine: 'ip-10-0-1-15', program: 'JDBC Thin Client', module: null, status: 'ACTIVE', type: 'USER', event: null, waitClass: null, waitSec: null, lastCallSec: 40, logonAt: null, sqlId: null, prevSqlId: null, sqlText: null, prevSqlText: null, blockingInst: null, blockingSid: null, waitObject: null, locked: [], txSince: null, ...extra })
+      const killed = dbKilled.includes(101)
+      const root = sess(101, { status: 'INACTIVE', lastCallSec: 754, prevSqlText: 'UPDATE lxbo_x SET lxstate = :1 WHERE lxoid = :2', locked: [{ object: 'X3DSPACE.LXBO_X', type: 'TABLE', mode: 'Row exclusive' }], txSince: Date.now() - 760000 })
+      const w1 = sess(202, { blockingInst: 1, blockingSid: 101, waitSec: 312, event: 'enq: TX - row lock contention', waitObject: 'X3DSPACE.LXBO_X', sqlText: 'UPDATE lxbo_x SET lxstate = :1 WHERE lxoid = :2' })
+      const w2 = sess(303, { blockingInst: 1, blockingSid: 202, waitSec: 45, event: 'enq: TX - row lock contention', waitObject: 'X3DSPACE.LXBO_X' })
+      return { at: Date.now(), db: args[0], env: 'prod', via: running.name, sessions: { active: 12, inactive: 300, total: 312 }, chains: killed ? [] : [{ root, waiters: [{ s: w1, depth: 1 }, { s: w2, depth: 2 }], longestWaitSec: 312 }] }
+    }
+    case 'db:kill':
+      if (args[0].confirm !== 'PROD') throw new Error('Type PROD to end a session on the production database.')
+      dbKilled.push(args[0].sid)
+      return { message: `Ended session ${args[0].sid},${args[0].serial} (X3DSPACE on ip-10-0-1-15). Its open transaction is rolled back.` }
+    case 'db:history': return dbKilled.map((sid) => ({ at: Date.now(), by: 'fixture.user', db: 'prod-ms-db', sid, serial: sid * 7, user: 'X3DSPACE', machine: 'ip-10-0-1-15', program: 'JDBC Thin Client', result: 'done', message: `Ended session ${sid},${sid * 7}` }))
     case 'run:start': {
       const r = { id: `run-${runsSent.length + 1}`, command: args[0].command, timeoutSec: args[0].timeoutSec ?? 600, startedAt: Date.now(), targets: args[0].keys.map((k) => { const i = [running, stopped, stale].find((x) => x.key === k); return { key: k, name: i.name, profile: i.profile, region: i.region, instanceId: i.instanceId, platform: 'linux', status: 'pending' } }) }
       runsSent.push(r)
@@ -855,6 +875,34 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('.hp-crumb.current')?.textContent === 'web-prod-01'`)
     await js(`[...document.querySelectorAll('.hp-crumb button')].find((b) => b.textContent === 'Hosts').click()`)
     await until(`!document.querySelector('.host-page') && !!document.querySelector('[data-host-key="${running.key}"]')`)
+
+    // Database locks from ⌘K: a blocker idle in a transaction with two sessions behind it; ending it on production needs
+    // PROD typed, and History shows who did it.
+    await key('k', { metaKey: true })
+    await until(`!!document.querySelector('[role="combobox"]')`)
+    await js(`(() => { const input = document.querySelector('[role="combobox"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '>Database locks'); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until(`[...document.querySelectorAll('[role="option"]')].some((o) => o.textContent.includes('Database locks'))`)
+    await js(`[...document.querySelectorAll('[role="option"]')].find((o) => o.textContent.includes('Database locks')).click()`)
+    await until(`!!document.querySelector('.dbl-chain') && document.querySelectorAll('.dbl-waiter').length === 2`)
+    assert.match(await js(`document.querySelector('.svc-head').textContent`), /1 session is blocking 2 others.*312 sessions/)
+    assert.match(await js(`document.querySelector('.dbl-root').textContent`), /Blocking 2.*X3DSPACE.*Idle for 12m with a transaction open/)
+    assert.match(await js(`document.querySelector('.dbl-chain').textContent`), /X3DSPACE\.LXBO_X · Row exclusive[\s\S]*Last statement[\s\S]*UPDATE lxbo_x/)
+    assert.equal(await js(`document.querySelectorAll('.dbl-waiter')[1].style.paddingLeft`), '28px', 'a session waiting behind a waiter sits one step further in')
+    assert.equal(await js(`!!document.querySelector('.dbl-dbs button[aria-selected="false"] svg')`), true, 'a database that cannot be read is marked')
+    await screenshot('db-locks.png')
+    await js(`document.querySelector('.dbl-root .btn-danger').click()`)
+    await until(`!!document.querySelector('.svc-confirm.danger')`)
+    const endBtn = `[...document.querySelectorAll('.svc-confirm button')].find((b) => b.textContent === 'End session')`
+    assert.equal(await js(`${endBtn}.disabled`), true, 'production waits for PROD')
+    await js(`(() => { const i = document.querySelector('.svc-confirm .svc-type'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'PROD'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until(`${endBtn}.disabled === false`)
+    await js(`${endBtn}.click()`)
+    await until(`!!document.querySelector('.dbl-clear') && !document.querySelector('.svc-confirm')`)
+    assert.deepEqual(calls.filter((c) => c.channel === 'db:kill').map((c) => [c.args[0].id, c.args[0].sid, c.args[0].serial, c.args[0].confirm]), [['prod-ms-db', 101, 707, 'PROD']])
+    await js(`[...document.querySelectorAll('.svc-head button')].find((b) => b.textContent.includes('History')).click()`)
+    await until(`document.querySelector('.dbl-hist')?.textContent.includes('fixture.user')`)
+    await js(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
+    await until(`!document.querySelector('.dbl')`)
 
     // Settings → Services lists the install sheet's services and their units.
     await key(',', { metaKey: true })

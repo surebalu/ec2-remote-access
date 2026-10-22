@@ -185,6 +185,8 @@ interface State {
   runCommandFor: { keys: string[]; runId?: string } | null
   /** The Services dialog (service control) for these servers; `label` names a server ("3DSpace 01"), `env` its environment. */
   servicesFor: { targets: { key: string; label?: string }[]; title: string; env?: string } | null
+  /** The Database locks dialog, on this database (or the first of `env`, else the last one shown). */
+  dbLocksFor: { id?: string; env?: string } | null
   /** The host page (in place of the hosts list): one server in depth, `pid` one of its processes. */
   hostPage: HostPageView | null
   /**
@@ -453,6 +455,7 @@ export const useStore = create<State>((set, get) => ({
   portForwardFor: null,
   runCommandFor: null,
   servicesFor: null,
+  dbLocksFor: null,
   hostPage: null,
   trail: [],
   openHostPage: (key, opts = {}) => {
