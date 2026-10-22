@@ -62,8 +62,14 @@ function keepOpen(key: string): void {
 }
 
 /** A local port that reaches host:port from the monitoring host. */
-async function forward(src: Source, host: string, port: number): Promise<number> {
-  const key = `${src.inst.key}|${host}:${port}`
+const forward = (src: Source, host: string, port: number): Promise<number> => forwardVia(src.inst, host, port)
+
+/**
+ * A local port forwarded to host:port through `inst` (SSM), shared and kept open ten minutes after its last use;
+ * also used by the database locks view (main/dbLocks.ts). Closed by closePlmHealth.
+ */
+export async function forwardVia(inst: Instance, host: string, port: number): Promise<number> {
+  const key = `${inst.key}|${host}:${port}`
   const have = tunnels.get(key)
   if (have && have.handle.child.exitCode === null && !have.handle.child.killed) { keepOpen(key); return have.port }
   let p = opening.get(key)
@@ -72,10 +78,10 @@ async function forward(src: Source, host: string, port: number): Promise<number>
       await closeTunnel(key)
       const local = await freePort()
       const self = /^(127\.0\.0\.1|localhost)$/.test(host)
-      const handle = await startPortForward(src.inst, port, local, undefined, self ? undefined : host)
+      const handle = await startPortForward(inst, port, local, undefined, self ? undefined : host)
       tunnels.set(key, { port: local, handle, timer: null })
       handle.child.once('exit', () => { if (tunnels.get(key)?.handle === handle) tunnels.delete(key) })
-      log('health', 'tunnel open', { via: src.inst.name, target: `${host}:${port}`, localPort: local })
+      log('health', 'tunnel open', { via: inst.name, target: `${host}:${port}`, localPort: local })
       return local
     })().finally(() => opening.delete(key))
     opening.set(key, p)

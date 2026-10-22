@@ -175,7 +175,8 @@ function finish(job: ServiceJob, st: ServiceStep, phase: ServiceStep['phase'], m
   void record(job, st)
 }
 
-async function identity(profile: string): Promise<string> {
+/** Who is acting, for audit histories: the AWS identity behind the profile (its role session name), else the Mac user. */
+export async function identity(profile: string): Promise<string> {
   let p = who.get(profile)
   if (!p) {
     p = (async () => {

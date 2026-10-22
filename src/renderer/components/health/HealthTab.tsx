@@ -247,7 +247,8 @@ function EnvView({ env, now, active, onJump }: { env: PlmEnvHealth; now: number;
 
       <div className="hl-split">
         <div className="min-w-0">
-          <SectionHead id="hl-db" icon={<Icon.database />} title="Database" sub={env.db ? `${env.db.engine.replace(/^oracle-se2/i, 'Oracle SE2')} on RDS` : undefined} />
+          <SectionHead id="hl-db" icon={<Icon.database />} title="Database" sub={env.db ? `${env.db.engine.replace(/^oracle-se2/i, 'Oracle SE2')} on RDS` : undefined}
+            right={env.db && /oracle/i.test(env.db.engine) ? <button type="button" className="hl-btn sm" title="Sessions blocking others on this database, and ending one" onClick={() => useStore.getState().set({ dbLocksFor: { id: env.db!.id } })}><Icon.lock />Locks</button> : undefined} />
           {env.db ? <DbCard db={env.db} /> : <Empty>No database found for this environment.</Empty>}
         </div>
         <div className="min-w-0">

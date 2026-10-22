@@ -11,6 +11,7 @@ import { closeAllLocal } from './localterm'
 import { closeAllVoice } from './voice'
 import { closeOnePassword } from './onepassword'
 import { closePlmHealth } from './plmHealth'
+import { closeDbLocks } from './dbLocks'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
@@ -118,7 +119,7 @@ app.on('before-quit', (e) => {
   closeAllLocal()
   closeAllVoice()
   closeOnePassword()
-  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth()])
+  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks()])
     .then(() => stopProxy())
     .catch(() => undefined)
     .finally(() => app.quit())

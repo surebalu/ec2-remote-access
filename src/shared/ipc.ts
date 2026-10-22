@@ -1,3 +1,4 @@
+import type { DbAudit, DbKillRequest, DbTarget, LockReport } from './dbLocks'
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
 import type { HostServices, ServiceAudit, ServiceJob, ServiceJobRequest } from './services'
@@ -226,6 +227,13 @@ export interface IpcApi {
   'services:logs': (key: string, unit: string, lines?: number) => Promise<string>
   /** Finished actions, newest first (who, what, where, how it went). */
   'services:history': () => Promise<ServiceAudit[]>
+  /** The Oracle databases on RDS in the accounts the host list covers, and how each is reached; `force` looks again. */
+  'db:list': (force?: boolean) => Promise<DbTarget[]>
+  /** Who blocks whom on a database now. */
+  'db:locks': (id: string) => Promise<LockReport>
+  /** Ends a session (RDS's kill); production needs `confirm: 'PROD'`. */
+  'db:kill': (req: DbKillRequest & { confirm?: string }) => Promise<{ message: string }>
+  'db:history': () => Promise<DbAudit[]>
   /** The host page (main/hostInsight.ts): a live snapshot of a Linux server through SSM (processes, disks, network). */
   'host:snapshot': (key: string) => Promise<HostSnapshot>
   /** One process on it, sampled over a second. */

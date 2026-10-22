@@ -6,3 +6,5 @@ allowBuilds:
   electron-winstaller: false
   # Ships prebuilt binaries for macOS; the gateway never loads it (no local terminals there).
   node-pty: false
+  # Thin mode only (pure JavaScript): its install script only checks the optional thick-mode binaries.
+  oracledb: false

@@ -27,6 +27,7 @@ import { openPortForward } from './portForward'
 import { hostHealth } from './aws/health'
 import { startRun, runStatus, cancelRun, listRuns } from './aws/runCommand'
 import { hostHistory, hostProcess, hostSnapshot } from './hostInsight'
+import { dbHistory, dbKill, dbList, dbLocks } from './dbLocks'
 import { cancelServiceJob, serviceHistory, serviceJob, serviceJobs, serviceLogs, serviceStatus, startServiceJob } from './services'
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
@@ -255,6 +256,10 @@ export const handlers: Handlers = {
   'services:cancel': async (id) => cancelServiceJob(id),
   'services:logs': (key, unit, lines) => serviceLogs(key, unit, lines),
   'services:history': async () => serviceHistory(),
+  'db:list': (force) => dbList(!!force),
+  'db:locks': (id) => dbLocks(id),
+  'db:kill': (req) => dbKill(req),
+  'db:history': async () => dbHistory(),
   'host:snapshot': (key) => hostSnapshot(key),
   'host:process': (key, pid) => hostProcess(key, pid),
   'host:history': (key, hours) => hostHistory(key, hours),
