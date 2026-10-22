@@ -7,8 +7,10 @@
  * every call and do nothing (events never fire, getters answer "nothing" or "not allowed"), except what the Browser
  * can really do for an extension: open a tab (tabs.create, windows.create with a url), name a page's frames
  * (webNavigation.getFrame / getAllFrames, from main: 1Password's fill menu is an iframe of its own, and picking a login
- * there is passed to the page's frame found this way) and the toolbar click (action.onClicked, which Electron, having
- * no toolbar, never fires).
+ * there is passed to the page's frame found this way) and the toolbar. Electron has none, and its chrome.action keeps
+ * nothing (getPopup answers '' even for the manifest's popup), so the popup an extension sets is kept in main,
+ * onClicked is fired from here and openPopup opens the Browser's Extensions panel: 1Password sets no popup while no
+ * account is signed in (a click opens its sign-in page) and, locked, asks for its popup to be opened to unlock.
  *
  * `fillExtensionApis` is serialized into the worker (contextBridge.executeInMainWorld), so it must not use anything
  * from outside its own body. tests/extensionApis.test.ts runs it against a fake `chrome`.
@@ -16,6 +18,20 @@
 
 /** Presses the toolbar button: the popup page to show (an absolute URL), or '' when the click went to onClicked. */
 export type ExtensionClick = (tabId: number | null) => Promise<string>
+
+/** What the worker asks of main (src/preload/extensionWorker.ts carries it). */
+export interface ExtensionBridge {
+  /** Opens a page as a Browser tab in the extension's space. */
+  openTab: (url: string, active: boolean) => void
+  /** The frames of the page with this tab id, or null when it is no page of this space. */
+  frames: (tabId: number) => Promise<ExtensionFrame[] | null>
+  /** Shows this popup page in the Browser's Extensions panel. */
+  openPopup: (url: string) => void
+  /** action.setPopup: the page (absolute, '' for none), for one tab or (null) every tab. Kept in main. */
+  setPopup: (url: string, tabId: number | null) => void
+  /** What was set for that tab, else for every tab; null when the extension never set one. */
+  getPopup: (tabId: number | null) => Promise<string | null>
+}
 
 /** A frame as webNavigation.getAllFrames gives it: frameId 0 is the top frame, parentFrameId -1 means none. */
 export interface ExtensionFrame {
@@ -33,7 +49,7 @@ export interface ExtensionFrame {
  * namespaces, so a namespace added to one is not on the other). Does nothing outside an extension's worker (the
  * preload runs in websites' service workers too) and returns null there.
  */
-export function fillExtensionApis(openTab: (url: string, active: boolean) => void, frames: (tabId: number) => Promise<ExtensionFrame[] | null>): ExtensionClick | null {
+export function fillExtensionApis(bridge: ExtensionBridge): ExtensionClick | null {
   type Fn = (...args: unknown[]) => unknown
   type Api = Record<string, unknown>
   const g = globalThis as unknown as { chrome?: Record<string, Api | undefined>; browser?: Record<string, Api | undefined>; location?: { protocol: string; href: string } }
@@ -62,7 +78,10 @@ export function fillExtensionApis(openTab: (url: string, active: boolean) => voi
   const setting = (): Api => ({ get: answers({ value: false, levelOfControl: 'not_controllable' }), set: nothing(), clear: nothing(), onChange: event() })
   const settings = (...names: string[]): () => Api => () => Object.fromEntries(names.map((n) => [n, setting()]))
 
-  const manifest = ((chrome.runtime.getManifest as Fn | undefined)?.() ?? {}) as { permissions?: string[]; host_permissions?: string[]; commands?: Record<string, { description?: string }> }
+  const manifest = ((chrome.runtime.getManifest as Fn | undefined)?.() ?? {}) as {
+    permissions?: string[]; host_permissions?: string[]; commands?: Record<string, { description?: string }>
+    action?: { default_popup?: string }; browser_action?: { default_popup?: string }
+  }
   const granted = new Set([...(manifest.permissions ?? []), ...(manifest.host_permissions ?? [])])
   const has = (p: { permissions?: string[]; origins?: string[] } = {}): boolean =>
     (p.permissions ?? []).every((x) => granted.has(x)) && (p.origins ?? []).every((x) => granted.has(x) || granted.has('<all_urls>'))
@@ -71,7 +90,7 @@ export function fillExtensionApis(openTab: (url: string, active: boolean) => voi
     if (typeof url !== 'string' || !url) return null
     let abs: string
     try { abs = new URL(url, here.href).href } catch { return null }
-    openTab(abs, active !== false)
+    bridge.openTab(abs, active !== false)
     return abs
   }
   const WINDOW = { id: 1, focused: true, incognito: false, alwaysOnTop: false, type: 'normal', state: 'normal' }
@@ -128,8 +147,8 @@ export function fillExtensionApis(openTab: (url: string, active: boolean) => voi
     },
     webNavigation: {
       ...events('onBeforeNavigate', 'onCommitted', 'onDOMContentLoaded', 'onCompleted', 'onErrorOccurred', 'onCreatedNavigationTarget', 'onReferenceFragmentUpdated', 'onTabReplaced', 'onHistoryStateUpdated'),
-      getFrame: () => answers(async (d?: { tabId?: number; frameId?: number }) => (await frames(Number(d?.tabId)))?.find((f) => f.frameId === d?.frameId) ?? null),
-      getAllFrames: () => answers((d?: { tabId?: number }) => frames(Number(d?.tabId)))
+      getFrame: () => answers(async (d?: { tabId?: number; frameId?: number }) => (await bridge.frames(Number(d?.tabId)))?.find((f) => f.frameId === d?.frameId) ?? null),
+      getAllFrames: () => answers((d?: { tabId?: number }) => bridge.frames(Number(d?.tabId)))
     },
     // What it was given at load is all it has: nothing can be granted later.
     permissions: {
@@ -153,14 +172,29 @@ export function fillExtensionApis(openTab: (url: string, active: boolean) => voi
   }
 
   // The toolbar button. Electron keeps the popup an extension sets (action.setPopup) but never fires onClicked, so it
-  // is replaced by one this side can fire: a click with no popup set goes to the extension, as in Chrome.
+  // is replaced by one this side can fire: a click with no popup set goes to the extension, as in Chrome. openPopup
+  // shows the popup set now in the Browser's Extensions panel.
   const action = chrome.action ?? chrome.browserAction
   const clicks = new Set<Fn>()
-  if (action) action.onClicked = event(clicks)
+  const declared = (manifest.action ?? manifest.browser_action)?.default_popup ?? ''
+  const popupFor = async (tabId: number | null): Promise<string> => {
+    const popup = (await bridge.getPopup(tabId).catch(() => null)) ?? declared
+    return popup ? new URL(popup, here.href).href : ''
+  }
+  const tabOf = (d?: { tabId?: unknown }): number | null => (typeof d?.tabId === 'number' ? d.tabId : null)
+  if (action) {
+    action.onClicked = event(clicks)
+    action.setPopup = answers((d?: { popup?: string; tabId?: number }) => { bridge.setPopup(d?.popup ? new URL(d.popup, here.href).href : '', tabOf(d)) })
+    action.getPopup = answers((d?: { tabId?: number }) => popupFor(tabOf(d)))
+    action.openPopup = async (): Promise<void> => {
+      const popup = await popupFor(null)
+      if (popup) bridge.openPopup(popup)
+    }
+  }
   return async (tabId) => {
     if (!action) return ''
-    const popup = String(await call(action, 'getPopup', tabId == null ? {} : { tabId }).catch(() => call(action, 'getPopup', {})).catch(() => '') ?? '')
-    if (popup) return new URL(popup, here.href).href
+    const popup = await popupFor(tabId)
+    if (popup) return popup
     const tab = tabId == null ? undefined : await call(chrome.tabs, 'get', tabId).catch(() => undefined)
     for (const f of clicks) {
       try { f(tab ?? { id: tabId ?? -1, windowId: WINDOW.id, active: true }) } catch (e) { console.error(e) }

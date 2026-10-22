@@ -95,7 +95,7 @@ type MenuState =
   | { kind: 'newSpace'; anchor: HTMLElement; edit?: string }
   | { kind: 'editTab'; id: string; anchor: HTMLElement }
   | { kind: 'downloads'; anchor: HTMLElement }
-  | { kind: 'extensions'; anchor: HTMLElement }
+  | { kind: 'extensions'; anchor: HTMLElement; open?: { id: string; url: string } }
   | { kind: 'fill'; anchor: HTMLElement; tabId: string }
   | { kind: 'hosts'; anchor: HTMLElement }
 
@@ -571,6 +571,15 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
       if (anchor) setMenu({ kind: 'fill', anchor, tabId: c.id })
     }, 0)
   }
+  /** Opens the Extensions panel, on one extension's popup when `open` says (it asked for it: action.openPopup). */
+  const openExtensions = (open?: { id: string; url: string }): void => {
+    // The button lives in the sidebar: show it (peek) when the sidebar is hidden.
+    if (stRef.current?.sidebarHidden) setPeek(true)
+    setTimeout(() => {
+      const anchor = document.querySelector<HTMLElement>('.web-side-top [aria-label="Extensions"]')
+      if (anchor) setMenu({ kind: 'extensions', anchor, open })
+    }, 0)
+  }
   const sharePage = (url?: string): void => {
     const u = url ?? currentRef.current?.url
     if (u) void window.api.invoke('browser:share', u).then((shown) => { if (!shown) toast('info', 'Sharing needs the Mac app.') })
@@ -681,6 +690,10 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
       }),
       // A click inside a page never reaches this document; main reports it so open menus close as they would, and so
       // the browser takes the keyboard when it is one pane of a split.
+      window.api.on('ext:openPopup', (d) => {
+        const st0 = stRef.current
+        if (st0 && partitionFor(st0.activeSpace) === d.partition) openExtensions({ id: d.id, url: d.url })
+      }),
       window.api.on('web:pointer', (d) => {
         if (!tabForWc(d.webContentsId)) return
         setMenu(null)
@@ -1412,7 +1425,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
 
       {menu?.kind === 'extensions' && (
         <Popover anchor={menu.anchor} width={extWidth ?? 360} onClose={() => { setMenu(null); setExtWidth(null) }}>
-          <Extensions partition={partitionFor(space.id)} pageUrl={current?.url ?? ''} onWidth={setExtWidth}
+          <Extensions partition={partitionFor(space.id)} pageUrl={current?.url ?? ''} onWidth={setExtWidth} open={menu.open}
             tabId={current ? safely(() => views.current.get(current.id)?.getWebContentsId() ?? null, null) : null}
             onClose={() => { setMenu(null); setExtWidth(null) }}
             onBrowseStore={() => { setMenu(null); go('https://chromewebstore.google.com/category/extensions', true) }} />

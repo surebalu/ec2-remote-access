@@ -2103,7 +2103,10 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelectorAll('.web-tab').length === ${extTabs}`, 'closed again')
     await bjs(`document.querySelector('.web-fav').click()`)
     await buntil(`!!document.querySelector('.web-fav.on')`, 'page one (a favorite) in front again')
-    await bjs(`document.querySelector('.web-side-top [aria-label="Extensions"]').click()`)
+    // An extension asking for its popup (action.openPopup: 1Password's Unlock in a page) gets the panel open on it.
+    bwin.webContents.send('ext:openPopup', { partition: 'persist:web-general', id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', url: 'chrome-extension://eimadpbcbfnmbkopoojfekhnkhdbieeh/popup.html' })
+    await buntil(`document.querySelector('.ext .ext-head')?.textContent.includes('Dark Reader') && document.querySelector('.ext .ext-view')?.getAttribute('src') === 'chrome-extension://eimadpbcbfnmbkopoojfekhnkhdbieeh/popup.html'`, 'the popup it asked for')
+    await bjs(`document.querySelector('.ext .ext-head [aria-label="Back to extensions"]').click()`)
     await buntil(`document.querySelectorAll('.ext-row').length === 1`, 'extensions list again')
     await bjs(`document.querySelector('.ext-row input[type="checkbox"]').click()`)
     await buntil(`document.querySelector('.ext-row').classList.contains('off')`, 'turned off')
