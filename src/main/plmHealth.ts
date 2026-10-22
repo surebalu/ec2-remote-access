@@ -15,7 +15,7 @@ import { CloudWatchClient, GetMetricDataCommand, ListMetricsCommand, type Metric
 import { DescribeDBInstancesCommand, RDSClient } from '@aws-sdk/client-rds'
 import type { Instance } from '@shared/types'
 import {
-  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, fullestDisk, gcTrend, ipOf, isExporterCheck, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
+  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, fullestDisk, gcTrend, ipOf, isExporterCheck, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, peakAvg, probeOk, roleOf,
   serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, isServiceAccount, parseLicense, SYSTEM_USERS, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
   type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type DiskUse, type Endpoint, type HostHealth, type Issue, type JvmHealth,
   type HealthCheck, type KernelHealth, type KernelMemoryHistory, type KernelMemorySeries, type KernelServer, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
@@ -892,21 +892,35 @@ export async function memoryHistory(env: PlmEnvId, hours: number): Promise<Memor
   const hosts = (await plmHealth()).envs.find((e) => e.id === env)?.hosts ?? []
   const port = await prometheusPort(source())
   const end = Math.floor(Date.now() / 1000)
-  const [linux, windows] = await Promise.all([
+  // CPU over two steps (at least a minute), so a point is the step's average rather than one scrape.
+  const w = `[${Math.max(60, r.step * 2)}s]`
+  const [linux, windows, linuxCpu, windowsCpu] = await Promise.all([
     range(port, '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100', end, r.hours * 60, r.step).catch(() => [] as Series[]),
-    range(port, '(1 - windows_memory_available_bytes / windows_memory_physical_total_bytes) * 100', end, r.hours * 60, r.step).catch(() => [] as Series[])
+    range(port, '(1 - windows_memory_available_bytes / windows_memory_physical_total_bytes) * 100', end, r.hours * 60, r.step).catch(() => [] as Series[]),
+    range(port, `100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}${w})))`, end, r.hours * 60, r.step).catch(() => [] as Series[]),
+    range(port, `100 - 100 * avg by (instance) (rate(windows_cpu_time_total{mode="idle"}${w}))`, end, r.hours * 60, r.step).catch(() => [] as Series[])
   ])
-  const byIp = new Map<string, Spark>()
-  for (const s of [...linux, ...windows]) { const ip = ipOf(s.metric.instance ?? ''); if (ip) byIp.set(ip, s.values) }
+  const byIp = (series: Series[]): Map<string, Spark> => {
+    const m = new Map<string, Spark>()
+    for (const s of series) { const ip = ipOf(s.metric.instance ?? ''); if (ip) m.set(ip, s.values.map((v) => (v === null ? null : Math.max(0, Math.min(100, v))))) }
+    return m
+  }
+  const mem = byIp([...linux, ...windows])
+  const cpu = byIp([...linuxCpu, ...windowsCpu])
   const n = Math.round((r.hours * 3600) / r.step) + 1
   const machines: MachineMemory[] = hosts.map((h) => {
-    const pct = byIp.get(h.ip) ?? new Array<number | null>(n).fill(null)
-    const vals = pct.filter((v): v is number => v !== null)
+    const pct = mem.get(h.ip) ?? new Array<number | null>(n).fill(null)
+    const cpuPct = cpu.get(h.ip) ?? new Array<number | null>(n).fill(null)
     const now = h.reporting ? ([...pct].reverse().find((v) => v !== null) ?? null) : null
+    // The same CPU figure as the Servers list, so the comb and the row agree.
+    const cpuNow = h.reporting ? h.cpu : null
+    const off = h.state === 'stopped'
+    const m = peakAvg(pct)
+    const c = peakAvg(cpuPct)
     return {
-      ip: h.ip, name: h.name, role: h.role, label: h.label, os: h.os, state: h.state, totalBytes: h.memBytes, pct, now,
-      peak: vals.length ? Math.max(...vals) : null, avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
-      level: h.state === 'stopped' ? 'off' : !h.reporting ? 'unknown' : levelOf(now, LIMITS.mem), instanceKey: h.instanceKey
+      ip: h.ip, name: h.name, role: h.role, label: h.label, os: h.os, state: h.state, totalBytes: h.memBytes, pct, now, peak: m.peak, avg: m.avg,
+      level: off ? 'off' : !h.reporting ? 'unknown' : levelOf(now, LIMITS.mem), instanceKey: h.instanceKey,
+      cpu: cpuPct, cpuNow, cpuPeak: c.peak, cpuAvg: c.avg, cpuLevel: off ? 'off' : !h.reporting ? 'unknown' : levelOf(cpuNow, LIMITS.machineCpu), cores: h.cores
     }
   })
   const rank = (m: MachineMemory): number => ({ crit: 0, warn: 1, ok: 2, unknown: 3, off: 4 })[m.level]

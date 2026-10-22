@@ -266,6 +266,20 @@ export interface MachineMemory {
   avg: number | null
   level: Level
   instanceKey?: string
+  /** CPU busy, % of all its cores, per step; absent from readings taken before it was added. */
+  cpu?: Spark
+  /** CPU now, as the Servers list shows it (the last five minutes). */
+  cpuNow?: number | null
+  cpuPeak?: number | null
+  cpuAvg?: number | null
+  cpuLevel?: Level
+  cores?: number | null
+}
+
+/** The highest and the mean of a series, leaving gaps out. */
+export function peakAvg(v: Spark): { peak: number | null; avg: number | null } {
+  const xs = v.filter((x): x is number => x !== null && Number.isFinite(x))
+  return { peak: xs.length ? Math.max(...xs) : null, avg: xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null }
 }
 
 export interface MemoryHistory {
@@ -534,6 +548,8 @@ export const SERVICE_ORDER = ['passport', 'dashboard', 'space', 'search', 'fcs',
 export const LIMITS = {
   cpu: [75, 85],
   mem: [80, 90],
+  /** The CPU honeycomb and charts by machine: the same bands as memory's (green under 80%, yellow to 90%, red above). */
+  machineCpu: [80, 90],
   disk: [75, 85],
   diskWindows: [80, 90],
   heap: [85, 95],
