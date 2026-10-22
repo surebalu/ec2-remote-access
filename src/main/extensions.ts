@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { app, session, type ServiceWorkerMain, type Session } from 'electron'
+import { app, session, webContents, type ServiceWorkerMain, type Session, type WebFrameMain } from 'electron'
 import { crxZipOffset, hasWorker, iconPathOf, isExtensionPage, localized, missingFeatures, optionsOf, popupOf, siteAccess, storeIdOf, type ExtensionInfo } from '@shared/extensions'
 import { isWebUrl, partitionFor } from '@shared/browser'
+import type { ExtensionFrame } from '@shared/extensionApis'
 import { host } from './host'
 import { loadBrowserState } from './browser'
 import { log } from './log'
@@ -214,12 +215,29 @@ function listen(ses: Session, versionId: number): ServiceWorkerMain | undefined 
   if (!w || listening.has(w) || !w.scope.startsWith('chrome-extension://')) return w
   listening.add(w)
   w.ipc.on('ext-worker:open', (_e, url: unknown, active: unknown) => openFromExtension(ses, w.scope, String(url), active !== false))
+  w.ipc.handle('ext-worker:frames', (_e, tabId: unknown) => framesOf(ses, Number(tabId)))
   w.ipc.on('ext-worker:clicked', (_e, n: unknown, popup: unknown) => {
     const done = clicks.get(Number(n))
     clicks.delete(Number(n))
     done?.(typeof popup === 'string' ? popup : null)
   })
   return w
+}
+
+/**
+ * webNavigation.getAllFrames, which Electron does not have: the page's frames with the ids Chromium gives extensions
+ * (the tab is the page's webContents id; frame 0 is the top frame, the others go by their frame tree node id, as
+ * `sender.frameId` does). Only pages in the asking worker's own space.
+ */
+function framesOf(ses: Session, tabId: number): ExtensionFrame[] | null {
+  const wc = Number.isInteger(tabId) && tabId > 0 ? webContents.fromId(tabId) : undefined
+  if (!wc || wc.isDestroyed() || !partitionOf(ses) || partitionOf(wc.session) !== partitionOf(ses)) return null
+  const top = wc.mainFrame.frameTreeNodeId
+  const idOf = (f: WebFrameMain | null): number => (!f ? -1 : f.frameTreeNodeId === top ? 0 : f.frameTreeNodeId)
+  return wc.mainFrame.framesInSubtree.filter((f) => !f.detached).map((f) => ({
+    frameId: idOf(f), parentFrameId: idOf(f.parent), url: f.url, processId: f.processId, errorOccurred: false,
+    documentLifecycle: 'active', frameType: f.parent ? 'sub_frame' : 'outermost_frame'
+  }))
 }
 
 /**

@@ -5,8 +5,10 @@
  * script that touches one at start-up throws, the worker never registers, and the extension is dead: 1Password reads
  * chrome.contextMenus.onClicked first thing, and its popup then waits for the background for ever. The stand-ins take
  * every call and do nothing (events never fire, getters answer "nothing" or "not allowed"), except what the Browser
- * can really do for an extension: open a tab (tabs.create, windows.create with a url) and the toolbar click
- * (action.onClicked, which Electron, having no toolbar, never fires).
+ * can really do for an extension: open a tab (tabs.create, windows.create with a url), name a page's frames
+ * (webNavigation.getFrame / getAllFrames, from main: 1Password's fill menu is an iframe of its own, and picking a login
+ * there is passed to the page's frame found this way) and the toolbar click (action.onClicked, which Electron, having
+ * no toolbar, never fires).
  *
  * `fillExtensionApis` is serialized into the worker (contextBridge.executeInMainWorld), so it must not use anything
  * from outside its own body. tests/extensionApis.test.ts runs it against a fake `chrome`.
@@ -15,12 +17,23 @@
 /** Presses the toolbar button: the popup page to show (an absolute URL), or '' when the click went to onClicked. */
 export type ExtensionClick = (tabId: number | null) => Promise<string>
 
+/** A frame as webNavigation.getAllFrames gives it: frameId 0 is the top frame, parentFrameId -1 means none. */
+export interface ExtensionFrame {
+  frameId: number
+  parentFrameId: number
+  url: string
+  processId: number
+  errorOccurred: boolean
+  documentLifecycle: 'active'
+  frameType: 'outermost_frame' | 'sub_frame'
+}
+
 /**
  * Fills the missing APIs in on `chrome` (and Chromium's own `browser`, a second object that shares chrome's
  * namespaces, so a namespace added to one is not on the other). Does nothing outside an extension's worker (the
  * preload runs in websites' service workers too) and returns null there.
  */
-export function fillExtensionApis(openTab: (url: string, active: boolean) => void): ExtensionClick | null {
+export function fillExtensionApis(openTab: (url: string, active: boolean) => void, frames: (tabId: number) => Promise<ExtensionFrame[] | null>): ExtensionClick | null {
   type Fn = (...args: unknown[]) => unknown
   type Api = Record<string, unknown>
   const g = globalThis as unknown as { chrome?: Record<string, Api | undefined>; browser?: Record<string, Api | undefined>; location?: { protocol: string; href: string } }
@@ -115,7 +128,8 @@ export function fillExtensionApis(openTab: (url: string, active: boolean) => voi
     },
     webNavigation: {
       ...events('onBeforeNavigate', 'onCommitted', 'onDOMContentLoaded', 'onCompleted', 'onErrorOccurred', 'onCreatedNavigationTarget', 'onReferenceFragmentUpdated', 'onTabReplaced', 'onHistoryStateUpdated'),
-      getFrame: () => answers(null), getAllFrames: () => answers([])
+      getFrame: () => answers(async (d?: { tabId?: number; frameId?: number }) => (await frames(Number(d?.tabId)))?.find((f) => f.frameId === d?.frameId) ?? null),
+      getAllFrames: () => answers((d?: { tabId?: number }) => frames(Number(d?.tabId)))
     },
     // What it was given at load is all it has: nothing can be granted later.
     permissions: {
