@@ -45,6 +45,13 @@ export default function InstanceTable(): ReactElement {
   const [groupMenu, setGroupMenu] = useState(false)
   const groupBtn = useRef<HTMLButtonElement>(null)
   const tableRef = useRef<HTMLDivElement>(null)
+  // A name opens its host page, but a double-click still connects: the page waits out the second click.
+  const pageTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const openPageSoon = (clicks: number, key: string): void => {
+    clearTimeout(pageTimer.current)
+    s.set({ selectedKey: key })
+    if (clicks <= 1) pageTimer.current = setTimeout(() => useStore.getState().openHostPage(key), 230)
+  }
   useEffect(() => {
     const row = [...(tableRef.current?.querySelectorAll<HTMLElement>('[data-host-key]') ?? [])].find((el) => el.dataset.hostKey === s.selectedKey)
     row?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -273,7 +280,7 @@ export default function InstanceTable(): ReactElement {
                       <Icon.star filled={s.isFavorite(i.key)} />
                     </button>
                     <div className="min-w-0 max-w-[230px]">
-                      <button className="block max-w-full truncate text-left font-medium leading-4 hover:underline" title={`View details for ${i.name}; double-click to connect`} onClick={() => s.set({ selectedKey: i.key, detailsFor: i.key })} onDoubleClick={() => canConnect(i) && openDefaultFor(i.key)}>
+                      <button className="block max-w-full truncate text-left font-medium leading-4 hover:underline" title={`Open ${i.name}'s host page; double-click to connect`} onClick={(e) => openPageSoon(e.detail, i.key)} onDoubleClick={() => { clearTimeout(pageTimer.current); if (canConnect(i)) openDefaultFor(i.key) }}>
                         {i.name}
                       </button>
                       <div className="mono muted truncate text-[10px] leading-4">{i.instanceId}</div>
@@ -461,6 +468,7 @@ function ContextMenu({
   return createPortal(
     <div ref={ref} className="panel modal fixed z-50 min-w-56 border py-1 text-xs" style={{ left: pos.x, top: pos.y, borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>
       <div className="section-title px-3 py-1.5">{i.name}</div>
+      {item('Host page', () => s.openHostPage(i.key))}
       {item('Host details', () => s.revealHost(i.key))}
       {i.platform === 'windows' && item('Remote desktop', () => void openRdpFor(i.key), !reachable)}
       {i.platform !== 'windows' && item('Open SSH', () => openSshFor(i.key), !reachable)}

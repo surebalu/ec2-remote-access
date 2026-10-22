@@ -17,6 +17,7 @@ import Welcome from './components/Welcome'
 import AuthBanner from './components/AuthBanner'
 import SsoWaitDialog from './components/SsoWaitDialog'
 import HostDetails from './components/HostDetails'
+import HostPage from './components/hostpage/HostPage'
 import QuickSwitcher from './components/QuickSwitcher'
 import { Icon } from './components/icons'
 import PortForwardDialog from './components/PortForwardDialog'
@@ -72,6 +73,7 @@ export default function App(): ReactElement {
   const manualCount = useStore((s) => s.settings?.manualHosts.length ?? 0)
   const settingsLoaded = useStore((s) => !!s.settings)
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
+  const hostPageOpen = useStore((s) => !!s.hostPage)
   const showWelcome = settingsLoaded && profiles.length === 0 && manualCount === 0
 
   useEffect(() => {
@@ -240,7 +242,11 @@ export default function App(): ReactElement {
         <div className={browserInFront ? 'hidden' : 'contents'}><Sidebar /></div>
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
           <AuthBanner />
-          <div data-zoom-section="hosts" className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <><div className="min-w-0 flex-1"><InstanceTable /></div><HostDetails /></>}</div>
+          <div data-zoom-section="hosts" className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <>
+            {/* The list stays mounted under a host page, so its scroll and selection are there on the way back. */}
+            <div className={`min-w-0 flex-1 ${hostPageOpen ? 'hidden' : ''}`}><InstanceTable /></div>
+            {hostPageOpen ? <HostPage /> : <HostDetails />}
+          </>}</div>
           <HostGridBar />
           <SessionPanes grid={gridView} />
           <TunnelBar />

@@ -264,6 +264,38 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'services:cancel': return undefined
     case 'services:logs': return `2026-10-21T20:01:02+0000 ip-10-0-1-15 systemd[1]: Started ${args[1]}.\n2026-10-21T20:01:05+0000 ip-10-0-1-15 java[4242]: Server startup in 61234 ms`
     case 'services:history': return serviceJobs.filter((j) => jobNow(j).finishedAt).map((j) => ({ at: Date.now(), by: 'fixture.user', action: j.action, key: j.steps[0].key, name: 'web-prod-01', unit: j.steps[0].unit, result: 'done', message: 'Restarted; active and its health check passes.', seconds: 3 }))
+    // The host page: one server read live (a TomEE, a child mql, an exporter; a peer that is in the inventory) and charts.
+    case 'host:snapshot': return {
+      at: Date.now(), uptimeSec: 3801174, cpus: 8, load: [0.42, 0.38, 0.3], cpuPct: 23.5, memTotal: 64 * 1024 ** 3, memAvailable: 30 * 1024 ** 3, swapTotal: 0, swapFree: 0,
+      os: 'Red Hat Enterprise Linux 9.7 (Plow)', kernel: '5.14.0',
+      disks: [
+        { mount: '/', fs: 'xfs', device: '/dev/nvme0n1p4', size: 50e9, used: 20e9, avail: 30e9, readBps: 0, writeBps: 2048, readIops: 0, writeIops: 1 },
+        { mount: '/apps/DassaultSystemes', fs: 'xfs', device: '/dev/nvme1n1', size: 200e9, used: 172e9, avail: 28e9, readBps: 10240, writeBps: 40960, readIops: 2, writeIops: 5 }
+      ],
+      nets: [{ iface: 'eth0', rxBps: 52000, txBps: 132000, rxPps: 40, txPps: 60, rxErrs: 0, txErrs: 0, rxDrop: 0, txDrop: 0 }],
+      processes: [
+        { pid: 4242, ppid: 1, user: 'tomcat', uptimeSec: 172800, cpuPct: 12.5, rssBytes: 6.1 * 1024 ** 3, threads: 312, comm: 'java', args: '/usr/lib/jvm/bin/java -Dcatalina.base=/usr/DassaultSystemes/tomee org.apache.catalina.startup.Bootstrap start', unit: '3dspace.service', tech: 'Apache TomEE' },
+        { pid: 5150, ppid: 4242, user: 'tomcat', uptimeSec: 3600, cpuPct: 0.4, rssBytes: 900 * 1024 ** 2, threads: 4, comm: 'mql', args: '/usr/DassaultSystemes/R2025x/3DSpace/linux_a64/code/bin/mql', unit: null, tech: '3DEXPERIENCE' },
+        { pid: 880, ppid: 1, user: 'root', uptimeSec: 3800000, cpuPct: 0.1, rssBytes: 16 * 1024 ** 2, threads: 7, comm: 'node_exporter', args: '/opt/node_exporter/node_exporter', unit: 'node_exporter.service', tech: 'Prometheus node exporter' }
+      ],
+      listening: [{ addr: '0.0.0.0', port: 8090, pid: 4242, process: 'java' }, { addr: '0.0.0.0', port: 22, pid: 900, process: 'sshd' }, { addr: '::', port: 9100, pid: 880, process: 'node_exporter' }],
+      connections: [
+        { direction: 'in', localPort: 8090, remote: '10.0.1.15', remotePort: null, pid: 4242, process: 'java', count: 12 },
+        { direction: 'out', localPort: null, remote: '10.0.2.20', remotePort: 1521, pid: 4242, process: 'java', count: 21 }
+      ]
+    }
+    case 'host:process': return {
+      at: Date.now(), gone: false, pid: args[1], ppid: 1, user: 'tomcat', uptimeSec: 172800, started: 'Mon Oct 19 20:01:02 2026', rssBytes: 6.1 * 1024 ** 3, hwmBytes: 6.5 * 1024 ** 3,
+      vszBytes: 20 * 1024 ** 3, swapBytes: 0, threads: 312, state: 'S (sleeping)', comm: 'java', args: '/usr/lib/jvm/bin/java -Dcatalina.base=/usr/DassaultSystemes/tomee org.apache.catalina.startup.Bootstrap start',
+      exe: '/usr/lib/jvm/bin/java', cwd: '/', unit: '3dspace.service', fds: 812, fdLimit: 65536, cpuPct: 12.5, tech: 'Apache TomEE',
+      listening: [{ addr: '0.0.0.0', port: 8090, pid: args[1], process: 'java' }], connections: [{ direction: 'out', localPort: null, remote: '10.0.2.20', remotePort: 1521, pid: args[1], process: 'java', count: 21 }]
+    }
+    case 'host:history': {
+      const n = 61
+      const wave = (base, amp, k) => Array.from({ length: n }, (_, i) => base + amp * Math.sin(i / k))
+      return { source: 'prometheus', hours: args[1], start: Date.now() - args[1] * 3600000, step: (args[1] * 3600) / (n - 1), cpu: wave(22, 9, 6), memPct: wave(54, 3, 9), memUsed: wave(34e9, 2e9, 9),
+        netIn: wave(200000, 60000, 4), netOut: wave(500000, 120000, 5), diskRead: wave(30000, 20000, 3), diskWrite: wave(90000, 40000, 7) }
+    }
     case 'run:start': {
       const r = { id: `run-${runsSent.length + 1}`, command: args[0].command, timeoutSec: args[0].timeoutSec ?? 600, startedAt: Date.now(), targets: args[0].keys.map((k) => { const i = [running, stopped, stale].find((x) => x.key === k); return { key: k, name: i.name, profile: i.profile, region: i.region, instanceId: i.instanceId, platform: 'linux', status: 'pending' } }) }
       runsSent.push(r)
@@ -778,6 +810,52 @@ app.whenReady().then(async () => {
     await until(`document.querySelectorAll('.svc-hist').length >= 1 && document.querySelector('.svc-hist').textContent.includes('3dspace.service')`)
     await js(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
     await until(`!document.querySelector('.svc')`)
+
+    // The host page: a server's name in Services opens it, and Back returns to the dialog as it was.
+    await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]'); row.scrollIntoView({ block: 'center' }); const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 10 })) })()`)
+    await until(`!!document.querySelector('body > .panel.modal.fixed')`)
+    await js(`[...document.querySelectorAll('body > .panel.modal.fixed button')].find((b) => b.textContent === 'Services…').click()`)
+    await until(`!!document.querySelector('.svc-row[data-unit="3dspace.service"] .svc-host-link')`)
+    await js(`document.querySelector('.svc-row[data-unit="3dspace.service"] .svc-host-link').click()`)
+    await until(`!!document.querySelector('.host-page') && !document.querySelector('.svc') && document.querySelectorAll('.hp-tile').length === 6 && document.querySelector('.hp-tile-value')?.textContent === '24%'`)
+    assert.match(await js(`document.querySelector('.hp-crumbs').textContent`), /Services · web-prod-01.*Hosts.*web-prod-01/)
+    assert.equal(await js(`!!document.querySelector('.hosts-workspace .host-details')`), false, 'the page takes the details panel\'s place')
+    await until(`document.querySelectorAll('.hp-chart path.hp-line').length >= 6`)
+    assert.ok(calls.some((c) => c.channel === 'host:history' && c.args[0] === running.key), 'the charts are read')
+    assert.match(await js(`document.querySelector('.hp-tech').textContent`), /Apache TomEE/)
+    assert.match(await js(`document.querySelector('.hp-peers').textContent`), /web-dev-01/, 'a caller that is in the inventory is named')
+    assert.match(await js(`[...document.querySelectorAll('.hp-peers')][1].textContent`), /10\.0\.2\.20.*1521 Oracle/)
+    // The shared crosshair: pointing at one chart shows the same moment in all four.
+    await js(`(() => { const svg = document.querySelector('.hp-chart svg'); const r = svg.getBoundingClientRect(); svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + 40 })) })()`)
+    await until(`document.querySelectorAll('.hp-cross').length === 4 && document.querySelectorAll('.hp-tip').length === 4`)
+    await screenshot('host-page.png')
+    await js(`document.querySelector('.hp-chart svg').dispatchEvent(new PointerEvent('pointerleave'))`)
+    // Processes, then one process; ⌘[ goes back a step.
+    await js(`[...document.querySelectorAll('.hp-tabs button')].find((b) => b.textContent.startsWith('Processes')).click()`)
+    await until(`document.querySelectorAll('.hp-ptable button.hp-tr').length === 3`)
+    await js(`[...document.querySelectorAll('.hp-ptable button.hp-tr')].find((b) => b.textContent.includes('java')).click()`)
+    await until(`document.querySelector('.hp-title')?.textContent === 'java' && document.querySelector('.hp-cmd')?.textContent.includes('catalina')`)
+    assert.ok(calls.some((c) => c.channel === 'host:process' && c.args[1] === 4242), 'the process is read')
+    assert.match(await js(`document.querySelector('.hp-body').textContent`), /Also in 3dspace\.service|Started by it/)
+    await screenshot('host-process.png')
+    await key('[', { metaKey: true })
+    await until(`!!document.querySelector('.hp-ptable') && !document.querySelector('.hp-cmd')`)
+    await js(`document.querySelector('.hp-back').click()`)
+    await until(`!document.querySelector('.host-page') && !!document.querySelector('.svc-row[data-unit="3dspace.service"]')`)
+    await js(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
+    await until(`!document.querySelector('.svc')`)
+    // From the list the name opens the page with no trail; a peer that is one of ours opens its own page, and Back
+    // comes back to the first; the Hosts crumb returns to the list.
+    await js(`document.querySelector('[data-host-key="${running.key}"] button[title^="Open web-prod-01"]').click()`)
+    await until(`!!document.querySelector('.host-page') && !document.querySelector('.hp-crumbs').textContent.includes('Services') && !!document.querySelector('.hp-peers .hp-link')`)
+    await js(`document.querySelector('.hp-peers .hp-link').click()`)
+    await until(`document.querySelector('.hp-crumb.current')?.textContent === 'web-dev-01'`)
+    assert.match(await js(`document.querySelector('.hp-crumbs').textContent`), /web-prod-01.*Hosts.*web-dev-01/)
+    await js(`document.querySelector('.hp-back').click()`)
+    await until(`document.querySelector('.hp-crumb.current')?.textContent === 'web-prod-01'`)
+    await js(`[...document.querySelectorAll('.hp-crumb button')].find((b) => b.textContent === 'Hosts').click()`)
+    await until(`!document.querySelector('.host-page') && !!document.querySelector('[data-host-key="${running.key}"]')`)
+
     // Settings → Services lists the install sheet's services and their units.
     await key(',', { metaKey: true })
     await until(`!!document.querySelector('.settings-nav-item[data-section="services"]')`)
@@ -867,8 +945,9 @@ app.whenReady().then(async () => {
     await until(`!document.querySelector('[role="dialog"]')`)
     assert.equal(await js(`document.activeElement.getAttribute('aria-label')`), 'Open quick switcher')
 
-    // Details fit at the minimum window size in both themes.
-    await click('web-dev-01')
+    // Details fit at the minimum window size in both themes (a row opens them; its name opens the host page).
+    await js(`document.querySelector('[data-host-key="${stale.key}"]').click()`)
+    await until(`document.querySelector('.host-details')?.textContent.includes('web-dev-01')`)
     win.setSize(960, 600)
     await new Promise((r) => setTimeout(r, 100))
     assert.equal(await js(`(() => { const r = document.querySelector('.host-details').getBoundingClientRect(); return r.right <= innerWidth && r.bottom <= innerHeight })()`), true)

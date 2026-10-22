@@ -28,6 +28,7 @@ export const SHORTCUTS: ShortcutInfo[] = [
   { keys: '⌘⇧D', label: 'Duplicate the current session in a new tab' },
   { keys: '⌘⇧I', label: 'Broadcast typing to every pane in the split' },
   { keys: '⌘F', label: 'Find in terminal' },
+  { keys: '⌘[', label: 'Host page: back (a process to its host, then where the page was opened from)' },
   { keys: '⌘B', label: 'Show / hide the sidebar' },
   { keys: '⌘,', label: 'Settings' },
   { keys: '⌘/', label: 'Keyboard shortcuts' }
@@ -312,6 +313,7 @@ export function handleAppShortcut(e: KeyboardEvent): boolean {
   if (k === 'd' && active && active.kind !== 'rdp' && isSession(active)) return go(() => st.duplicateTab(active.id, !e.shiftKey))
   if (k === 'i' && e.shiftKey && st.splitGroup.includes(st.activeTab)) return go(() => st.set({ broadcastInput: !st.broadcastInput }))
   if (k === 'f' && !e.shiftKey && active?.kind === 'ssh') return go(() => terminalAction(active.id, 'find'))
-  if (k === 'f' && !e.shiftKey && st.activeTab === 'hosts') return go(() => document.querySelector<HTMLInputElement>('[aria-label="Search hosts"]')?.focus())
+  if (k === '[' && !e.shiftKey && st.activeTab === 'hosts' && !st.gridView && st.hostPage) return go(() => st.hostBack())
+  if (k === 'f' && !e.shiftKey && st.activeTab === 'hosts' && !st.hostPage) return go(() => document.querySelector<HTMLInputElement>('[aria-label="Search hosts"]')?.focus())
   return false
 }

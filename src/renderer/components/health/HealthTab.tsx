@@ -670,7 +670,9 @@ function ServerRow({ h, env, lit }: { h: HostHealth; env: PlmEnvHealth; lit: boo
   return (
     <div className={`hl-row hl-srv ${lvl(h.level)} ${off ? 'off' : ''} ${lit ? 'lit' : ''}`} data-ip={h.ip}>
       <div className="hl-srv-name min-w-0">
-        <div className="hl-row-title"><Dot level={h.level} /><span className="truncate">{h.role}{h.label ? ` ${h.label}` : ''}</span>{h.os === 'windows' && <Icon.windows />}</div>
+        <div className="hl-row-title"><Dot level={h.level} />{h.instanceKey
+          ? <button type="button" className="hl-srv-link truncate" title={`Open ${h.name}'s host page`} onClick={() => st().openHostPage(h.instanceKey!, { from: `Health · ${env.name}` })}>{h.role}{h.label ? ` ${h.label}` : ''}</button>
+          : <span className="truncate">{h.role}{h.label ? ` ${h.label}` : ''}</span>}{h.os === 'windows' && <Icon.windows />}</div>
         <div className="hl-row-sub truncate" title={`${h.name} · ${h.ip}${h.instanceType ? ` · ${h.instanceType}` : ''}`}>{h.name} · {h.ip}</div>
         {h.problems.length > 0 && !off && <div className="hl-row-problem">{h.problems.join(' · ')}</div>}
       </div>
