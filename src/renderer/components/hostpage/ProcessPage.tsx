@@ -7,7 +7,7 @@ import { useStore } from '../../store'
 import { Icon } from '../icons'
 import { Bar, lvl } from '../health/parts'
 import LineChart from './LineChart'
-import { PeerList, ProcessList } from './HostPage'
+import { PeerList, ProcessList, mayRefresh } from './HostPage'
 
 /**
  * One process on the host page: what it is, its CPU and memory read every ten seconds while the page is in front (the
@@ -60,7 +60,7 @@ export default function ProcessPage({ inst, pid, shown, snap, peerName, onPeer, 
     if (!shown) return
     void load()
     const t = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && document.hasFocus() && !seen.get(key)?.last.gone) void load()
+      if (mayRefresh() && !seen.get(key)?.last.gone) void load()
     }, EVERY_MS)
     return () => window.clearInterval(t)
   }, [key, shown])

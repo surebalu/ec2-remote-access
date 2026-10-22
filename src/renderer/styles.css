@@ -639,6 +639,18 @@ html[data-fold='vertical'] .m-app.wide { background: var(--border); }
 html[data-fold='vertical'] .m-app.wide .m-side, html[data-fold='vertical'] .m-app.wide .m-stage { background: var(--bg); }
 /* Wide screens: hide the list so the session gets the full width (header button or the handle on the divider). */
 .m-app.wide.list-hidden .m-side { display: none; }
+/* A machine's page (HostPage) on the stage: alone on a phone, beside the list on a tablet; the sessions underneath stay mounted. */
+.m-app:not(.wide).has-page .m-side { display: none; }
+.m-app:not(.wide).has-page .m-stage { display: flex; }
+.m-app.has-page .m-main { display: none; }
+.m-hostpage { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-top: env(safe-area-inset-top); background: var(--bg); }
+.m-hostpage .host-page { flex: 1; min-height: 0; }
+.m-hostpage .hp-top { padding: 8px 12px 0; }
+.m-hostpage .hp-body { padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); }
+.m-hostpage .hp-head { flex-wrap: wrap; }
+.m-hostpage .hp-actions { justify-content: flex-start; width: 100%; }
+.m-hostpage .hp-crumb button { max-width: 160px; }
+.m-hostpage .hp-back { width: 32px; height: 32px; }
 html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .m-divider-toggle { position: absolute; left: 0; top: 50%; z-index: 5; display: flex; align-items: center; justify-content: center; width: 22px; height: 64px; margin-top: -32px; border: 1px solid var(--border-strong); border-left: 0; border-radius: 0 10px 10px 0; background: var(--panel); color: var(--text-2); box-shadow: var(--shadow); opacity: .85; }
 .m-divider-toggle:active { background: var(--panel-2); }

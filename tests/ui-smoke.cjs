@@ -143,7 +143,7 @@ const healthFixture = () => {
           svc('dashboard', '3DDashboard', 'ok', '2 servers up', [ep('https://dash-prod.example.com/3ddashboard/test-alive')], [node('01', '10.9.0.41'), node('02', '10.9.0.42')]),
           svc('space', '3DSpace', 'warn', '1 of 2 servers down, still served', [ep('https://space-prod.example.com/3dspace/servlet/fcs/ping', 'ok', 22)], [node('01', '10.9.0.11'), node('02', '10.9.0.12', 'crit')]),
           svc('fcs', 'File Collaboration Server', 'ok', '2 servers up', [ep('https://fcs-prod.example.com/fcs/servlet/fcs/ping')], [node('01', '10.9.0.51'), node('02', '10.9.0.52')])],
-        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11'), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51', { sharedStores: [{ mount: '/filestore', pct: 86.3, level: 'crit' }] })],
+        [host('3DPassport', '01', '10.9.0.31', { level: 'crit', reporting: false, cpu: null, mem: null, disk: null, problems: ['Not reporting'] }), host('3DPassport', '02', '10.9.0.32', { level: 'off', state: 'stopped', reporting: false }), host('3DSpace', '01', '10.9.0.11', { instanceKey: running.key }), host('3DSpace', '02', '10.9.0.12', { level: 'warn', mem: 83, problems: ['Memory at 83%'] }), host('File Collaboration Server', '01', '10.9.0.51', { sharedStores: [{ mount: '/filestore', pct: 86.3, level: 'crit' }] })],
         { alerts: [{ name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: 'pass-prod.example.com', since: now - 600000, level: 'crit', muted: false }, { name: 'PlatformServiceDown', severity: 'critical', summary: 'HTTP status 0', target: '3DPassport 02', since: now - 7200000, level: 'off', muted: true }] }),
       env('qa', 'QA', 'ok', 'All systems operational', [],
         [svc('passport', '3DPassport', 'ok', 'Up · 1 stopped', [ep('https://pass-qa.example.com/3dpassport/healthcheck')], [node('01', '10.8.0.31'), node('02', '10.8.0.32', 'crit', true)])],
@@ -1726,12 +1726,25 @@ app.whenReady().then(async () => {
     await pshot('phone-health-hive.png')
     await tapHex('10.9.0.31')
     await puntil(`!!document.querySelector('.hl-srv.lit[data-ip="10.9.0.31"]')`)
+    // A machine's name opens its page (CPU, memory, disks, processes) on the phone's stage; Back returns to Health.
+    await pjs(`document.querySelector('.hl-srv[data-ip="10.9.0.11"] .hl-srv-link').click()`)
+    await puntil(`!!document.querySelector('.m-hostpage .host-page') && document.querySelectorAll('.m-hostpage .hp-tile').length === 6 && getComputedStyle(document.querySelector('.m-side')).display === 'none'`)
+    assert.match(await pjs(`document.querySelector('.m-hostpage .hp-crumbs').textContent`), /Health · Production/)
+    assert.equal(await noSideScroll(), true, 'the machine page fits the phone width')
+    await pshot('phone-host-page.png')
+    await pjs(`document.querySelector('.m-hostpage .hp-back').click()`)
+    await puntil(`!document.querySelector('.m-hostpage') && !!document.querySelector('.hl-hero')`)
     await pjs(`document.querySelector('.hl').scrollTop = 0`)
     phone.setContentSize(1194, 834)
     await puntil(`innerWidth === 1194 && document.querySelector('.m-app').classList.contains('wide')`)
     await new Promise((r) => setTimeout(r, 300))
     assert.equal(await pjs(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling inside health on a tablet')
     await pshot('ipad-health.png')
+    await pjs(`document.querySelector('.hl-srv[data-ip="10.9.0.11"] .hl-srv-link').click()`)
+    await puntil(`!!document.querySelector('.m-hostpage .host-page') && document.querySelectorAll('.m-hostpage .hp-chart').length === 4`)
+    await pshot('ipad-host-page.png')
+    await pjs(`document.querySelector('.m-hostpage .hp-back').click()`)
+    await puntil(`!document.querySelector('.m-hostpage') && !!document.querySelector('.hl-hero')`)
     phone.destroy()
 
     // The browser: start page, tabs, command bar, an AWS account space signing in to its console, spaces, persistence.
