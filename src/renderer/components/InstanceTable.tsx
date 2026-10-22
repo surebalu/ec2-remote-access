@@ -237,8 +237,8 @@ export default function InstanceTable(): ReactElement {
                         <Icon.broadcast /> Run command
                       </button>
                     )}
-                    <span className="muted text-[10.5px]" title="Hosts with a connection route right now (SSM or a reachable address)">
-                      {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} reachable
+                    <span className="muted text-[10.5px]" title="Hosts with an SSM or direct route; connectivity has not been tested">
+                      {g.rows.filter((r) => routeOf(r, s.settings).route !== 'unreachable' && routeOf(r, s.settings).route !== 'not-running').length} with a route
                     </span>
                   </div>
                 </td>

@@ -5,6 +5,7 @@ const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const assert = require('node:assert/strict')
+const workspacePreview = process.argv.includes('--workspace-preview')
 const output = mkdtempSync(join(tmpdir(), 'ec2ra-ui-'))
 app.setPath('userData', output)
 app.setPath('sessionData', output)
@@ -33,6 +34,8 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+let failWorkspaceHealth = false
+let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
 let emptyScenario = false
 // Notes vault for the Notes tab.
@@ -364,7 +367,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'finder:search': return Object.entries(finderFs).filter(([d]) => d.startsWith(args[1])).flatMap(([, l]) => l).filter((e) => e.name.toLowerCase().includes(args[0].toLowerCase())).map((e) => ({ ...e, lastUsed: e.mtime }))
     case 'local:reveal': return
     case 'app:pointer': return { x: 640, y: 420 }
-    case 'health:snapshot': return process.env.HEALTH_SNAPSHOT_JSON ? JSON.parse(readFileSync(process.env.HEALTH_SNAPSHOT_JSON, 'utf8')) : healthFixture()
+    case 'health:snapshot':
+      if (failWorkspaceHealth) throw new Error('Fixture health is unavailable')
+      if (workspaceHealthAge) return { ...healthFixture(), at: Date.now() - workspaceHealthAge }
+      return process.env.HEALTH_SNAPSHOT_JSON ? JSON.parse(readFileSync(process.env.HEALTH_SNAPSHOT_JSON, 'utf8')) : healthFixture()
     case 'health:memory': {
       if (process.env.HEALTH_MEM_JSON) return JSON.parse(readFileSync(process.env.HEALTH_MEM_JSON, 'utf8'))[`${args[0]}|${args[1]}`]
       const env = healthFixture().envs.find((e) => e.id === args[0])
@@ -509,7 +515,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
 })
 
 app.whenReady().then(async () => {
-  app.dock?.hide()
+  if (!workspacePreview) app.dock?.hide()
   // Nothing from a test run may reach the desktop: no notifications from the hidden windows.
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission !== 'notifications')
   session.defaultSession.setPermissionRequestHandler((_wc, permission, done) => done(permission !== 'notifications'))
@@ -533,8 +539,116 @@ app.whenReady().then(async () => {
     await win.loadFile(resolve('out/renderer/index.html'))
     await until(`document.querySelectorAll('[data-host-key]').length === 3`)
     await screenshot('hosts-dark.png')
+    // This uses only the fixture IPC above. No production main, real credentials, shell or file writes are loaded.
+    if (workspacePreview) {
+      settings = { ...settings,
+        workspaces: [{ id: 'preview-workspace', name: 'Production support', tabs: [{ kind: 'ssh', instanceKey: running.key }], savedAt: now }],
+        hostViews: [{ id: 'preview-view', name: 'Production Linux', filters: { search: '', profileFilter: 'production', favoritesOnly: false, osFilter: 'linux', stateFilter: 'running', reachFilter: 'all' } }],
+        portForwards: [{ id: 'preview-forward', name: 'Application logs', instanceKey: running.key, remotePort: 8080 }],
+        quicklinks: [{ id: 'preview-link', name: 'Issue tracker', keyword: 'issue', url: 'https://example.com/issues/{query}', space: 'external' }]
+      }
+      await win.loadFile(resolve('out/renderer/index.html'))
+      await until(`document.querySelector('.ws-account')?.textContent === '2 accounts verified'`)
+      await js(`(() => {
+        document.querySelector('.brand-name').textContent = 'Workspace Preview';
+        const badge = document.createElement('div'); badge.textContent = 'DEMO · Synthetic data · Connections simulated';
+        badge.style.cssText = 'position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:50;padding:5px 12px;background:#322c16;color:#ffe29a;border:1px solid #665429;border-radius:6px;font:11px system-ui;pointer-events:none';
+        document.body.append(badge)
+      })()`)
+      win.setTitle('Workspace Preview — Synthetic data')
+      win.on('closed', () => app.exit(0))
+      win.show()
+      console.log(`Isolated workspace preview. Temporary data: ${output}`)
+      return
+    }
     // Save a filtered view, switch away, and restore it after a reload through the command palette.
     const setInput = (selector, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    // Workspace modules: keyboard access, actionable failures, saved work, freshness and constrained layouts.
+    const workspaceTab = (name) => js(`document.getElementById('workspace-tab-' + ${JSON.stringify(name)}).click()`)
+    assert.equal(calls.filter((c) => c.channel === 'health:snapshot').length, 0, 'overview does not start platform polling')
+    assert.equal(await js(`document.querySelector('.ws-account').textContent`), '2 accounts verified')
+    assert.equal(await js(`document.querySelectorAll('.app-rail .rail-group').length`), 4)
+    assert.ok(await js(`(() => {
+      const rail = document.querySelector('.app-rail');
+      const extra = [...rail.querySelectorAll('.rail-item:not(:has(.rail-key)):not([aria-label="Theme"])')].map((b) => b.appendChild(Object.assign(document.createElement('kbd'), { className: 'rail-key' })));
+      extra.forEach((k) => k.dataset.keys = '⌃⌥⇧⌘K');
+      const fits = rail.scrollHeight <= rail.clientHeight; extra.forEach((k) => k.remove()); return fits
+    })()`), 'grouped navigation fits with all shortcuts')
+    assert.equal(await js(`document.querySelector('.ws-attention').textContent.includes('1 inventory scan needs a retry')`), true)
+    await js(`document.getElementById('workspace-tab-overview').focus()`)
+    await key('ArrowRight')
+    await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
+    assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 8)
+    await screenshot('workspace-tools.png')
+    await workspaceTab('saved-work')
+    await until(`!!document.querySelector('[aria-label="Search saved work"]')`)
+    assert.equal(await js(`document.querySelector('.ws-saved-top button').disabled`), true, 'no remote sessions to save')
+    const workspaceSettings = structuredClone(settings)
+    settings = { ...settings,
+      workspaces: [{ id: 'ws-test', name: 'Production support', tabs: [{ kind: 'ssh', instanceKey: running.key }], savedAt: now }, { id: 'missing', name: 'Missing host', tabs: [{ kind: 'ssh', instanceKey: 'gone/host' }], savedAt: now }],
+      portForwards: [{ id: 'pf-test', name: 'Application logs', instanceKey: running.key, remotePort: 8080 }],
+      quicklinks: [{ id: 'ql-test', name: 'Issue tracker', keyword: 'issue', url: 'https://example.com/issues/{query}', space: 'external' }]
+    }
+    await win.loadFile(resolve('out/renderer/index.html'))
+    await until(`document.querySelector('.ws-account')?.textContent === '2 accounts verified'`)
+    await workspaceTab('saved-work')
+    await until(`document.querySelectorAll('.ws-saved-item').length === 4`)
+    assert.equal(await js(`[...document.querySelectorAll('.ws-saved-item')].find((x) => x.textContent.includes('Missing host')).disabled`), true)
+    await screenshot('workspace-saved-work.png')
+    await setInput('[aria-label="Search saved work"]', 'not-found')
+    await until(`!!document.querySelector('.ws-no-results')`)
+    await setInput('[aria-label="Search saved work"]', 'issue')
+    await until(`document.querySelectorAll('.ws-saved-item').length === 1`)
+    await js(`document.querySelector('.ws-saved-item').click()`)
+    await until(`!!document.querySelector('#workspace-link-query')`)
+    await setInput('#workspace-link-query', 'PLM 42/7')
+    await js(`document.querySelector('.ws-link-query').requestSubmit()`)
+    await until(`!document.querySelector('.ws-link-query')`)
+    assert.equal(calls.filter((c) => c.channel === 'shell:open').at(-1).args[0], 'https://example.com/issues/PLM%2042%2F7')
+    await setInput('[aria-label="Search saved work"]', 'Application logs')
+    await js(`document.querySelector('.ws-saved-item').click()`)
+    await until(`!!document.querySelector('[role="dialog"]')`)
+    assert.equal(await js(`document.querySelector('[role="dialog"]').textContent.includes('Port forward: Application logs')`), true)
+    await key('Escape')
+    await workspaceTab('platform')
+    await until(`document.querySelectorAll('.ws-environment').length === 3`)
+    await screenshot('workspace-platform.png')
+    failWorkspaceHealth = true
+    await click('Refresh health')
+    await until(`document.querySelector('.ws-stale')?.textContent.includes('Refresh failed')`)
+    assert.equal(await js(`document.querySelectorAll('.ws-environment.lvl-unknown').length`), 3, 'retained health is marked stale after failure')
+    await screenshot('workspace-health-stale.png')
+    failWorkspaceHealth = false
+    workspaceHealthAge = 240_000
+    await click('Refresh health')
+    await until(`document.querySelector('.ws-stale')?.textContent.includes('more than 3 minutes')`)
+    workspaceHealthAge = 0
+    await click('Refresh health')
+    await until(`!document.querySelector('.ws-stale') && !!document.querySelector('.ws-environment.lvl-ok')`)
+    await workspaceTab('overview')
+    await screenshot('workspace-overview-dark.png')
+    await js(`document.documentElement.dataset.theme = 'light'`)
+    await screenshot('workspace-overview-light.png')
+    await js(`document.documentElement.dataset.theme = 'dark'`)
+    win.setSize(1000, 700)
+    await screenshot('workspace-small.png')
+    assert.equal(await js(`document.querySelector('.workspace-deck').scrollWidth <= document.querySelector('.workspace-deck').clientWidth + 1`), true, 'workspace fits a small window')
+    assert.ok(await js(`(() => { const r = document.querySelector('.host-table').getBoundingClientRect(); return Math.min(innerHeight - 30, r.bottom) - Math.max(0, r.top) })()`) > 80, 'inventory retains visible space in the viewport')
+    await js(`document.querySelector('[aria-label="Fold the home panel"]').click()`)
+    await win.loadFile(resolve('out/renderer/index.html'))
+    await until(`!!document.querySelector('.workspace-deck.folded')`)
+    await js(`document.querySelector('[aria-label="Show the home panel"]').click()`)
+    win.setSize(1400, 900)
+    settings = workspaceSettings
+    await win.loadFile(resolve('out/renderer/index.html'))
+    await until(`document.querySelectorAll('[data-host-key]').length === 3`)
+    if (process.argv.includes('--workspace-only')) {
+      assert.deepEqual(errors, [])
+      console.log(`Workspace UI checks passed. Screenshots: ${output}`)
+      app.exit(0)
+      return
+    }
     assert.equal(await js(`!!document.querySelector('.quick-host-card[aria-label="Connect SSH: web-prod-01"]')`), true, 'favorites are available before there are recents')
     await setInput('[aria-label="Search hosts"]', 'web-prod')
     await until(`document.querySelectorAll('[data-host-key]').length === 2`)
