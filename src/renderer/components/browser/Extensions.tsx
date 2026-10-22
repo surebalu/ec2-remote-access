@@ -149,22 +149,38 @@ function ExtensionPage({ partition, url, wide, onWidth, onClosed }: { partition:
   const box = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: wide ? 520 : 340, h: wide ? 460 : 280 })
   useEffect(() => {
-    const el = document.createElement('webview') as HTMLElement & { executeJavaScript: (code: string) => Promise<unknown> }
+    const el = document.createElement('webview') as HTMLElement & { getWebContentsId: () => number }
     el.setAttribute('partition', partition)
     el.setAttribute('src', url)
+    // Its window.open (1Password's "Add an account") reaches main, which opens it as a tab in this space.
+    el.setAttribute('allowpopups', '')
     el.className = 'ext-view'
-    // A popup sizes itself to its content, as Chrome's do (within Chrome's own 800 × 600).
-    const fit = (): void => {
-      void el.executeJavaScript('[document.documentElement.scrollWidth, document.documentElement.scrollHeight]').then((v) => {
-        const [w, h] = v as [number, number]
-        if (!wide && w && h) setSize({ w: Math.max(240, Math.min(420, w)), h: Math.max(120, Math.min(560, h)) })
-      }, () => undefined)
+    // A popup takes the size its page asks for, as Chrome's do (within Chrome's 800 × 600 and this window): main
+    // reports the page's preferred size, which a page measured once at load (1Password draws its 600 × 450 later) is not.
+    let id = 0
+    const sizes = new Map<number, { width: number; height: number }>()
+    const fit = (d: { width: number; height: number } | undefined): void => {
+      if (wide || !d?.width || !d.height) return
+      setSize({ w: Math.max(120, Math.min(800, d.width, window.innerWidth - 48)), h: Math.max(60, Math.min(600, d.height, window.innerHeight - 140)) })
     }
-    el.addEventListener('dom-ready', () => { fit(); setTimeout(fit, 400) })
+    // Its id is known once it is attached; getWebContentsId can still throw in 'did-attach', so a report for a page
+    // not known yet asks again.
+    const learn = (): void => {
+      if (id) return
+      try { id = el.getWebContentsId() } catch { return }
+      fit(sizes.get(id))
+    }
+    const off = window.api.on('web:preferredSize', (d) => {
+      sizes.set(d.webContentsId, d)
+      learn()
+      if (d.webContentsId === id) fit(d)
+    })
+    el.addEventListener('did-attach', learn)
+    el.addEventListener('dom-ready', learn)
     // window.close() in the page: Chrome closes a popup that does it (1Password's, once it is unlocked and used).
     el.addEventListener('close', () => closed.current())
     box.current?.appendChild(el)
-    return () => { el.remove() }
+    return () => { off(); el.remove() }
   }, [partition, url, wide])
   // The popover takes the page's width (the margins included).
   useEffect(() => onWidth(size.w + 12), [size.w]) // eslint-disable-line react-hooks/exhaustive-deps

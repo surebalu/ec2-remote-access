@@ -304,6 +304,8 @@ export interface IpcEvents {
    * (pages swallow keys before the app sees them). `key` is lower-cased; `code` names the physical key.
    */
   'web:shortcut': { webContentsId: number; key: string; code: string; meta: boolean; ctrl: boolean; shift: boolean; alt: boolean }
+  /** The size an extension's page (a popup in the Extensions panel) asks for, as it changes. */
+  'web:preferredSize': { webContentsId: number; width: number; height: number }
   /** The mouse went down inside a page (the app's document never sees those clicks). */
   'web:pointer': { webContentsId: number }
   /**

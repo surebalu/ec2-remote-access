@@ -2106,6 +2106,12 @@ app.whenReady().then(async () => {
     // An extension asking for its popup (action.openPopup: 1Password's Unlock in a page) gets the panel open on it.
     bwin.webContents.send('ext:openPopup', { partition: 'persist:web-general', id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', url: 'chrome-extension://eimadpbcbfnmbkopoojfekhnkhdbieeh/popup.html' })
     await buntil(`document.querySelector('.ext .ext-head')?.textContent.includes('Dark Reader') && document.querySelector('.ext .ext-view')?.getAttribute('src') === 'chrome-extension://eimadpbcbfnmbkopoojfekhnkhdbieeh/popup.html'`, 'the popup it asked for')
+    assert.equal(await bjs(`document.querySelector('.ext .ext-view').hasAttribute('allowpopups')`), true, 'its links reach main')
+    // The panel takes the size the page asks for (1Password's popup is 600 × 450), so it needs no scroll bars.
+    await buntil(`(() => { try { return document.querySelector('.ext .ext-view').getWebContentsId() > 0 } catch { return false } })()`, 'popup page attached')
+    const popupWc = await bjs(`document.querySelector('.ext .ext-view').getWebContentsId()`)
+    bwin.webContents.send('web:preferredSize', { webContentsId: popupWc, width: 600, height: 450 })
+    await buntil(`document.querySelector('.ext-view-box').style.width === '600px' && document.querySelector('.ext-view-box').style.height === '450px'`, 'sized to its page')
     await bjs(`document.querySelector('.ext .ext-head [aria-label="Back to extensions"]').click()`)
     await buntil(`document.querySelectorAll('.ext-row').length === 1`, 'extensions list again')
     await bjs(`document.querySelector('.ext-row input[type="checkbox"]').click()`)
