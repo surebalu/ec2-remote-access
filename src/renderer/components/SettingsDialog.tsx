@@ -11,13 +11,14 @@ import type { AccentColor } from '@shared/types'
 import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
 import { isDarkMode } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
+import QuicklinkSettings from './QuicklinkSettings'
 import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
 import { DEFAULT_UI_FONT, UI_FONTS } from '../uiFont'
 import { ZOOM_SECTIONS } from '../sectionZoom'
 import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
-type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'keyboard' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
+type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'keyboard' | 'launcher' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
 
 const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: 'general', label: 'General', blurb: 'Appearance, how hosts are found and how connections are routed.', icon: Icon.settings },
@@ -26,6 +27,7 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
   { id: 'terminal', label: 'Terminal', blurb: 'How SSH tabs look, what runs when they connect, and recordings.', icon: Icon.terminal },
   { id: 'notes', label: 'Notes', blurb: 'Where your Markdown notes live.', icon: Icon.note },
   { id: 'keyboard', label: 'Keyboard', blurb: 'Your own shortcut for each section down the left edge, Claude and ChatGPT included.', icon: Icon.keyboard },
+  { id: 'launcher', label: 'Launcher', blurb: 'Quicklinks: a word you type in the launcher to open a page. The launcher’s own key is under Keyboard.', icon: Icon.launcher },
   { id: 'voice', label: 'Voice', blurb: 'Talk instead of typing, wherever you type in the app.', icon: Icon.mic },
   { id: 'services', label: 'Services', blurb: 'The 3DEXPERIENCE services, and the systemd units service control starts, stops and restarts.', icon: Icon.layers },
   { id: 'phone', label: 'Phone & iPad', blurb: 'Use this Mac’s sessions from your iPhone or iPad.', icon: Icon.phone },
@@ -389,7 +391,8 @@ export default function SettingsDialog(): ReactElement | null {
   const save = async (): Promise<void> => {
     // Snippets, port-forward presets and workspaces are edited in their own dialogs while this one is open;
     // writing the draft's copy back would undo those edits.
-    const { snippets: _sn, portForwards: _pf, workspaces: _ws, finderExtra: _fe, finderHidden: _fh, ...rest } = draft
+    // Quicklinks (the launcher adds them too) and the 1Password panel's switch are saved where they are changed.
+    const { snippets: _sn, portForwards: _pf, workspaces: _ws, finderExtra: _fe, finderHidden: _fh, quicklinks: _ql, onePasswordStayApproved: _op, ...rest } = draft
     await s.saveSettings(rest)
     await s.refreshProfiles()
     close()
@@ -739,7 +742,7 @@ export default function SettingsDialog(): ReactElement | null {
       </Group>
     </>
   )
-  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, keyboard, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
+  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, keyboard, launcher: <QuicklinkSettings />, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
 
   return (
     <Modal title="Settings" onClose={close} width="max-w-[880px]" bare>

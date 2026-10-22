@@ -831,6 +831,8 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .op-row.on { background: var(--accent-soft); }
 .op-title { display: block; overflow: hidden; color: var(--text); font-size: 12.5px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .op-sub { display: block; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.op-foot { display: flex; align-items: center; gap: 7px; margin: 6px 8px 0; padding: 7px 4px 1px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 11px; cursor: pointer; }
+.op-foot input { accent-color: var(--accent); }
 .dl { padding: 2px 0 0; }
 .dl-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px 6px; }
 .dl-clear { padding: 2px 8px; border-radius: 6px; background: var(--panel-2); color: var(--text-2); font-size: 11px; font-weight: 600; }
@@ -1828,6 +1830,16 @@ html.launcher-page, html.launcher-page body { background: transparent; }
 .launcher-actions-title { padding: 3px 7px 5px; overflow: hidden; color: var(--muted); font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .launcher-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 28px; padding: 0 7px; border-radius: 6px; font-size: 12px; cursor: default; }
 .launcher-action .kbd { font-size: 9.5px; line-height: 14px; }
+.launcher-form { position: absolute; inset: 45px 0 0; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 16px 22px; overflow-y: auto; background: var(--panel); }
+.launcher-form-title { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; font-size: 13px; font-weight: 700; }
+.launcher-form-title svg { width: 15px; height: 15px; color: var(--accent); }
+.launcher-form-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 4px 12px; }
+.launcher-form-row > span { color: var(--text-2); font-size: 12px; text-align: right; }
+.launcher-form-row .input { height: 30px; font-size: 12.5px; }
+.launcher-form-row small { grid-column: 2; font-size: 10.5px; }
+.launcher-form-error { margin-left: 102px; color: var(--err); font-size: 11.5px; }
+.launcher-form-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 8px; }
+.launcher-form-buttons .kbd { margin-left: 4px; font-size: 9.5px; }
 .launcher-action.on { background: var(--accent-soft-2); }
 
 /* ---------- Health (components/health): the 3DEXPERIENCE platform at a glance ---------- */
@@ -2730,3 +2742,11 @@ button.hp-th:hover, .hp-th.on { color: var(--text); }
 .dbl-wsql { color: var(--muted); font-size: 10.5px; }
 .dbl-hist { margin-top: 10px; }
 .dbl-hist .svc-row { grid-template-columns: auto minmax(160px, 1fr) minmax(0, 1.6fr) auto; }
+
+/* Settings → Launcher: quicklinks (components/QuicklinkSettings.tsx). */
+.ql-row { display: flex; align-items: center; gap: 12px; }
+.ql-key { flex-shrink: 0; width: 72px; }
+.ql-grid { display: grid; grid-template-columns: 1fr 160px; gap: 8px 12px; width: 100%; }
+.ql-grid label { display: flex; flex-direction: column; gap: 4px; color: var(--text-2); font-size: 11.5px; }
+.ql-grid label.wide { grid-column: 1 / -1; }
+.ql-grid .input { height: 30px; font-size: 12.5px; }

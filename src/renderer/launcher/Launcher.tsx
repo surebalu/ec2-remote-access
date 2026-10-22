@@ -8,6 +8,7 @@ import { comboOf, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type R
 import { manualToInstance } from '@shared/manual'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome, ec2InstanceUrl, hostOf, normalizeInput, spaceIdForProfile } from '@shared/browser'
+import { DEFAULT_SPACE, EXTERNAL, checkQuicklink, cleanQuicklink, quicklinkFor, quicklinkUrl, takesQuery, type Quicklink } from '@shared/quicklinks'
 import { applyAppearance } from '../store'
 import { applyUiFont } from '../uiFont'
 import { Icon } from '../components/icons'
@@ -37,6 +38,7 @@ type Detail =
   | { kind: 'note'; path: string; text: string }
   | { kind: 'web'; url: string; space: string; favicon?: string }
   | { kind: 'calc'; value: number; expr: string; unit?: string }
+  | { kind: 'quicklink'; link: Quicklink; url: string }
 
 interface Row {
   id: string
@@ -70,6 +72,7 @@ interface Data {
 }
 
 const EMPTY: Data = { apps: [], usage: {}, settings: null, hosts: [], profiles: [], browser: null, home: '' }
+const NO_LINKS: Quicklink[] = []
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
   hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
@@ -155,6 +158,9 @@ export default function Launcher(): ReactElement {
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchSeq = useRef(0)
+  /** The Create/Edit Quicklink form, over the list; `id` is '' for a new one. */
+  const [form, setForm] = useState<Quicklink | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
 
   const load = async (): Promise<void> => {
     const soft = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback)
@@ -186,6 +192,7 @@ export default function Launcher(): ReactElement {
       setFiles([])
       setNotes([])
       setPreviews({})
+      setForm(null)
       setTimeout(() => input.current?.focus(), 0)
       void load()
     })
@@ -277,6 +284,34 @@ export default function Launcher(): ReactElement {
     ]
   })
 
+  const links = settings?.quicklinks ?? NO_LINKS
+  const editLink = (l: Quicklink | null): void => { setFormError(null); setForm(l ?? { id: '', name: '', keyword: '', url: '', space: DEFAULT_SPACE }) }
+  /** Writes the list (main merges it into the settings); the main window reads it again where it shows quicklinks. */
+  const saveLinks = async (next: Quicklink[]): Promise<void> => {
+    const saved = await window.api.invoke('settings:set', { quicklinks: next })
+    setData((d) => ({ ...d, settings: saved }))
+  }
+  const quicklinkRow = (l: Quicklink, rest = ''): Row => {
+    const id = `quicklink:${l.id}`
+    const url = quicklinkUrl(l, rest)
+    const external_ = l.space === EXTERNAL
+    const where = external_ ? 'Your Browser' : spaceName(l.space)
+    return {
+      id, title: rest ? `${l.name}: ${rest}` : l.name, subtitle: `Quicklink · ${takesQuery(l) && !rest ? `type “${l.keyword} …”` : hostOf(url)}`,
+      keywords: `${l.keyword} quicklink ${l.url}`, icon: <Favicon url={url} size={18} />, accessory: l.keyword ? <kbd className="kbd">{l.keyword}</kbd> : undefined,
+      detail: { kind: 'quicklink', link: l, url },
+      actions: [
+        { title: `Open in ${where}`, key: 'enter', run: external_ ? () => { used(id); external(url)() } : inApp(id, { kind: 'browse', url, space: l.space }) },
+        external_
+          ? { title: 'Open in the Browser Tab', key: 'cmd+enter', run: inApp(id, { kind: 'browse', url, space: DEFAULT_SPACE }) }
+          : { title: 'Open in Your Browser', key: 'cmd+enter', run: external(url) },
+        { title: 'Copy Link', key: 'shift+cmd+c', run: copy(url) },
+        { title: 'Edit Quicklink…', key: 'cmd+e', run: () => editLink(l) },
+        { title: 'Delete Quicklink', run: () => { void saveLinks(links.filter((x) => x.id !== l.id)) } }
+      ]
+    }
+  }
+
   const keys = sectionKeys(settings?.shortcuts)
   const appRows: Row[] = useMemo(() => [
     ...RAIL_SECTIONS.map((sec): Row => {
@@ -290,6 +325,7 @@ export default function Launcher(): ReactElement {
     }),
     { id: 'cmd:today', title: 'Today’s Note', subtitle: 'Notes', keywords: 'daily journal obsidian', icon: <Icon.note />, actions: [{ title: 'Open Today’s Note', key: 'enter', run: inApp('cmd:today', { kind: 'today' }) }] },
     { id: 'cmd:scan', title: 'Rescan AWS Accounts', subtitle: 'Hosts', keywords: 'refresh inventory reload', icon: <Icon.refresh />, actions: [{ title: 'Rescan', key: 'enter', run: inApp('cmd:scan', { kind: 'scan' }) }] },
+    { id: 'cmd:quicklink', title: 'Create Quicklink…', subtitle: 'A word that opens a page, such as “aws” for the AWS sign-in', keywords: 'quicklink bookmark link shortcut alias keyword url', icon: <Icon.plus />, actions: [{ title: 'Create Quicklink', key: 'enter', run: () => editLink(null) }] },
     ...(settings?.workspaces ?? []).map((w): Row => ({
       id: `workspace:${w.id}`, title: `Workspace: ${w.name}`, subtitle: `${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`, keywords: 'workspace session layout tabs', icon: <Icon.grid />,
       actions: [{ title: 'Open the Workspace', key: 'enter', run: inApp(`workspace:${w.id}`, { kind: 'workspace', id: w.id }) }]
@@ -381,11 +417,15 @@ export default function Launcher(): ReactElement {
       const favorites = (settings?.favorites ?? []).map((k) => byId.get(`host:${k}`)).filter((r): r is Row => !!r && !recent.includes(r)).slice(0, 5)
       return [
         { title: 'Recent', rows: recent },
+        { title: 'Quicklinks', rows: links.filter((l) => !recent.some((r) => r.id === `quicklink:${l.id}`)).slice(0, 6).map((l) => quicklinkRow(l)) },
         { title: 'Favorite Hosts', rows: favorites },
         { title: 'EC2 Remote Access', rows: appRows.slice(0, RAIL_SECTIONS.length + 2) }
       ].filter((g) => g.rows.length)
     }
     const out: Group[] = []
+    // A quicklink's keyword comes first, so "aws" ↩ opens it.
+    const keyword = quicklinkFor(query, links)
+    if (keyword) out.push({ title: 'Quicklink', rows: [quicklinkRow(keyword.link, keyword.rest)] })
     if (calc !== null) {
       out.push({ title: 'Calculator', rows: [{
         id: 'calc', title: formatNumber(calc), subtitle: query, icon: <span className="launcher-calc">=</span>, detail: { kind: 'calc', value: calc, expr: query },
@@ -416,6 +456,8 @@ export default function Launcher(): ReactElement {
     for (const h of notes) if (!byNote.has(h.path) || h.line === 0) byNote.set(h.path, h)
     const noteRows = [...byNote.values()].slice(0, 5).map((h) => noteRow(h.path, h.line === 0 ? '' : h.text.trim()))
     middle.push({ title: 'Notes', rows: noteRows, best: noteRows.length ? Math.max(30, matchScore(query, noteRows[0].title)) : 0 })
+    const ql = rankRows(links.filter((l) => l.id !== keyword?.link.id).map((l) => quicklinkRow(l)), query, data.usage, now)
+    middle.push({ title: 'Quicklinks', rows: ql.rows.slice(0, 4), best: ql.best })
     const web = rankRows(webRows, query, data.usage, now)
     middle.push({ title: 'Browser', rows: web.rows.slice(0, 5), best: web.best })
     const inside = rankRows(appRows, query, data.usage, now)
@@ -430,7 +472,10 @@ export default function Launcher(): ReactElement {
     const url = normalizeInput(query)
     const search: Row[] = []
     if (!url.startsWith('https://www.google.com/search')) {
-      search.push({ id: 'web:open', title: `Open ${url}`, icon: <Icon.globe />, actions: [{ title: 'Open in Your Browser', key: 'enter', run: external(url) }, { title: 'Open in the Browser Tab', key: 'cmd+enter', run: inApp('web:open', { kind: 'browse', url }) }] })
+      search.push({ id: 'web:open', title: `Open ${url}`, icon: <Icon.globe />, actions: [
+        { title: 'Open in Your Browser', key: 'enter', run: external(url) }, { title: 'Open in the Browser Tab', key: 'cmd+enter', run: inApp('web:open', { kind: 'browse', url }) },
+        { title: 'Create Quicklink…', key: 'cmd+e', run: () => { setFormError(null); setForm({ id: '', name: hostOf(url), keyword: '', url, space: DEFAULT_SPACE }) } }
+      ] })
     }
     const google = `https://www.google.com/search?q=${encodeURIComponent(query)}`
     search.push(
@@ -440,7 +485,7 @@ export default function Launcher(): ReactElement {
     )
     out.push({ title: 'Search', rows: search })
     return out
-  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows, links]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => groups.flatMap((g) => g.rows), [groups])
   const current = rows[Math.min(sel, rows.length - 1)]
@@ -576,6 +621,22 @@ export default function Launcher(): ReactElement {
             <button type="button" className="launcher-hint" onMouseDown={(e) => e.preventDefault()} onClick={() => setPanel(panel === null ? 0 : null)}>Actions <kbd className="kbd">⌘K</kbd></button>
           )}
         </div>
+        {form && (
+          <QuicklinkForm form={form} error={formError} spaces={data.browser?.spaces.map((x) => ({ id: x.id, name: x.name })) ?? [{ id: DEFAULT_SPACE, name: 'Browser' }]}
+            onChange={(f) => { setForm(f); setFormError(null) }}
+            onCancel={() => { setForm(null); setTimeout(() => input.current?.focus(), 0) }}
+            onSave={() => {
+              const link = cleanQuicklink(form)
+              const others = links.filter((l) => l.id !== form.id)
+              const why = checkQuicklink(link, others)
+              if (why) { setFormError(why); return }
+              void saveLinks(form.id ? links.map((l) => (l.id === form.id ? link : l)) : [...links, link]).then(() => {
+                setForm(null)
+                setQ(link.keyword || link.name)
+                setTimeout(() => input.current?.focus(), 0)
+              }, (e: Error) => setFormError(e.message))
+            }} />
+        )}
         {panel !== null && current && (
           <div className="launcher-actions" role="menu" aria-label="Actions">
             <div className="launcher-actions-title">{current.title}</div>
@@ -668,6 +729,20 @@ function DetailPane({ row, preview, icon, home, accountLabel, spaceName }: {
       </>
     )
   }
+  if (d?.kind === 'quicklink') {
+    return (
+      <>
+        <div className="launcher-thumb host"><Favicon url={d.url} size={40} /></div>
+        <div className="launcher-detail-title">{d.link.name}</div>
+        {facts([
+          ['Keyword', d.link.keyword ? <kbd className="kbd">{d.link.keyword}</kbd> : 'none (found by name)'],
+          ['Opens in', d.link.space === EXTERNAL ? 'Your browser' : spaceName(d.link.space)],
+          ['Address', <span className="launcher-url">{d.link.url}</span>]
+        ])}
+        {takesQuery(d.link) && <p className="launcher-snippet">Type “{d.link.keyword || d.link.name} something” to put the words where the address says {'{query}'}.</p>}
+      </>
+    )
+  }
   if (d?.kind === 'calc') {
     return (
       <div className="launcher-calc-big">
@@ -683,5 +758,47 @@ function DetailPane({ row, preview, icon, home, accountLabel, spaceName }: {
       {row.subtitle && <p className="launcher-snippet">{row.subtitle}</p>}
       {row.actions[0] && <p className="launcher-snippet">↩ {row.actions[0].title}</p>}
     </>
+  )
+}
+
+/** Create or edit a quicklink, over the launcher's list: ↩ saves, Esc goes back. */
+function QuicklinkForm({ form, error, spaces, onChange, onCancel, onSave }: {
+  form: Quicklink
+  error: string | null
+  spaces: { id: string; name: string }[]
+  onChange: (f: Quicklink) => void
+  onCancel: () => void
+  onSave: () => void
+}): ReactElement {
+  const keys = (e: ReactKeyboardEvent): void => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel() }
+    if (e.key === 'Enter') { e.preventDefault(); onSave() }
+  }
+  const field = (k: 'name' | 'keyword' | 'url', label: string, placeholder: string, hint?: string, autoFocus = false): ReactElement => (
+    <label className="launcher-form-row">
+      <span>{label}</span>
+      <input className="input" value={form[k]} placeholder={placeholder} autoFocus={autoFocus} spellCheck={false} onChange={(e) => onChange({ ...form, [k]: e.target.value })} onKeyDown={keys} />
+      {hint && <small className="muted">{hint}</small>}
+    </label>
+  )
+  return (
+    <div className="launcher-form" role="dialog" aria-label={form.id ? 'Edit Quicklink' : 'Create Quicklink'}>
+      <div className="launcher-form-title"><Icon.globe /> {form.id ? 'Edit Quicklink' : 'Create Quicklink'}</div>
+      {field('name', 'Name', 'AWS sign-in', undefined, !form.url)}
+      {field('keyword', 'Keyword', 'aws', 'Type this word in the launcher and press ↩ to open it.', !!form.url)}
+      {field('url', 'Address', 'https://mainspring.awsapps.com/start', 'Put {query} where words typed after the keyword should go.')}
+      <label className="launcher-form-row">
+        <span>Open in</span>
+        <select className="input" value={form.space} onChange={(e) => onChange({ ...form, space: e.target.value })} onKeyDown={keys}>
+          {spaces.map((sp) => <option key={sp.id} value={sp.id}>The app’s Browser: {sp.name}</option>)}
+          <option value={EXTERNAL}>Your Mac’s default browser</option>
+        </select>
+      </label>
+      {error && <div className="launcher-form-error">{error}</div>}
+      <div className="launcher-form-buttons">
+        <button type="button" className="btn btn-sm" onClick={onCancel}>Cancel <kbd className="kbd">esc</kbd></button>
+        <button type="button" className="btn btn-sm btn-primary" onClick={onSave}>Save <kbd className="kbd">↩</kbd></button>
+      </div>
+    </div>
   )
 }
