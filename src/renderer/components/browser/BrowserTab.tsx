@@ -791,6 +791,11 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
       activate(request.tab)
       return
     }
+    if (request.partition) {
+      const sp = spacesRef.current.find((x) => partitionFor(x.id) === request.partition)
+      if (sp && request.url) openInNewTab(sp.id, request.url, { background: request.background })
+      return
+    }
     let spaceId = request.profile ? spaceIdForProfile(request.profile) : request.space && spacesRef.current.some((x) => x.id === request.space) ? request.space : st.activeSpace
     if (!spacesRef.current.some((x) => x.id === spaceId)) {
       if (request.profile) toast('info', `${request.profile} has no AWS space (only SSO accounts sign in to the console); opened in ${spaces[0].name}.`)
@@ -1408,6 +1413,8 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
       {menu?.kind === 'extensions' && (
         <Popover anchor={menu.anchor} width={extWidth ?? 360} onClose={() => { setMenu(null); setExtWidth(null) }}>
           <Extensions partition={partitionFor(space.id)} pageUrl={current?.url ?? ''} onWidth={setExtWidth}
+            tabId={current ? safely(() => views.current.get(current.id)?.getWebContentsId() ?? null, null) : null}
+            onClose={() => { setMenu(null); setExtWidth(null) }}
             onBrowseStore={() => { setMenu(null); go('https://chromewebstore.google.com/category/extensions', true) }} />
         </Popover>
       )}

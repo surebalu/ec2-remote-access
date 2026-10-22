@@ -15,7 +15,8 @@ export default defineConfig({
   },
   preload: {
     resolve: { alias: { '@shared': resolve('src/shared') } },
-    build: { rollupOptions: { external, output: { format: 'cjs' } } }
+    // extensionWorker: the Browser extensions' service-worker preload (main/extensions.ts).
+    build: { rollupOptions: { input: { index: resolve('src/preload/index.ts'), extensionWorker: resolve('src/preload/extensionWorker.ts') }, external, output: { format: 'cjs' } } }
   },
   renderer: {
     plugins: [react(), tailwindcss()],

@@ -86,6 +86,7 @@ export interface ExtensionsHost {
   addFolder(): Promise<ExtensionInfo | null>
   setEnabled(id: string, on: boolean): Promise<ExtensionInfo[]>
   remove(id: string): ExtensionInfo[]
+  action(id: string, partition: string, tabId: number | null): Promise<string | null>
 }
 
 /** What the launcher needs from the Mac app. */

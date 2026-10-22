@@ -179,6 +179,11 @@ export interface IpcApi {
   'ext:addFolder': () => Promise<ExtensionInfo | null>
   'ext:setEnabled': (id: string, on: boolean) => Promise<ExtensionInfo[]>
   'ext:remove': (id: string) => Promise<ExtensionInfo[]>
+  /**
+   * Its toolbar button, pressed in the space with that partition (on the page `tabId`, a webContents id): the popup
+   * page to show, or null when it took the click itself (no popup set; it may open a tab, `ext:openTab`).
+   */
+  'ext:action': (id: string, partition: string, tabId: number | null) => Promise<string | null>
   /** The system Share menu for a page; false when the host has none (gateway). */
   'browser:share': (url: string) => Promise<boolean>
   /** The terminals beside the Browser in a split, offered by its page menu as "Paste into …" (empty when none). */
@@ -290,6 +295,8 @@ export interface IpcEvents {
   'phone:changed': PhoneAccessStatus
   /** A page asked for a new window (target=_blank, window.open) or "Open link in new tab": open it as a tab. */
   'web:window': { webContentsId: number; url: string; background: boolean }
+  /** An extension asked for a page (tabs.create, a link in its popup): open it as a tab in the space it runs in. */
+  'ext:openTab': { partition: string; url: string; background: boolean }
   /**
    * A browser shortcut, or one of the rail sections' own (Settings → Keyboard), pressed while a page had the keyboard
    * (pages swallow keys before the app sees them). `key` is lower-cased; `code` names the physical key.

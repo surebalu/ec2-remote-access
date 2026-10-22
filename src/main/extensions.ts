@@ -2,20 +2,23 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { app, session, type Session } from 'electron'
-import { crxZipOffset, iconPathOf, isExtensionPage, localized, missingFeatures, optionsOf, popupOf, siteAccess, storeIdOf, type ExtensionInfo } from '@shared/extensions'
-import { partitionFor } from '@shared/browser'
+import { app, session, type ServiceWorkerMain, type Session } from 'electron'
+import { crxZipOffset, hasWorker, iconPathOf, isExtensionPage, localized, missingFeatures, optionsOf, popupOf, siteAccess, storeIdOf, type ExtensionInfo } from '@shared/extensions'
+import { isWebUrl, partitionFor } from '@shared/browser'
 import { host } from './host'
 import { loadBrowserState } from './browser'
 import { log } from './log'
+import { mainWindow } from './windows'
 
 /**
  * Browser extensions (Electron-only; Host.extensions): Chrome extensions installed from the Chrome Web Store (the
  * signed package Chrome itself downloads, unpacked into <userData>/extensions/<id>) or loaded from a folder, and loaded
  * with Electron's own `session.extensions` into every Browser space and the Claude/ChatGPT tabs: each is its own
  * session, so an extension keeps its settings per space. A session is caught as it is created ('session-created'),
- * and the known ones are created at start, so the first page a space shows already has its extensions. See
- * src/shared/extensions.ts for what Electron does and does not give them.
+ * and the known ones are created at start, so the first page a space shows already has its extensions. Each session
+ * also gets the service-worker preload (src/preload/extensionWorker.ts) that fills in the Chrome APIs Electron lacks,
+ * without which an extension like 1Password dies at start-up. See src/shared/extensions.ts for what Electron does and
+ * does not give them.
  */
 
 interface Saved { id: string; source: 'store' | 'folder'; path: string; enabled: boolean; installedAt: number }
@@ -36,14 +39,22 @@ function writeSaved(list: Saved[]): void {
   renameSync(tmp, listFile())
 }
 
-/** A Browser space's or a chat tab's session (persist:web-*), by where it keeps its data. */
-const isWebSession = (ses: Session): boolean => /[/\\]Partitions[/\\]web-[^/\\]+$/.test(ses.storagePath ?? '')
+/** A Browser space's or a chat tab's partition (persist:web-*), by where its session keeps its data; null for others. */
+function partitionOf(ses: Session): string | null {
+  const m = /[/\\]Partitions[/\\](web-[^/\\]+)$/.exec(ses.storagePath ?? '')
+  return m ? `persist:${m[1]}` : null
+}
 
 /** Call before any Browser session exists (index.ts, ahead of restoring sign-ins). */
 export function initExtensions(): void {
   app.on('session-created', (ses) => {
-    if (!isWebSession(ses)) return
+    if (!partitionOf(ses)) return
     webSessions.add(ses)
+    // Before any extension loads: the preload must be there when its worker starts.
+    ses.registerPreloadScript({ type: 'service-worker', id: 'ec2ra-extension-worker', filePath: join(__dirname, '../preload/extensionWorker.cjs') })
+    ses.serviceWorkers.on('running-status-changed', ({ versionId, runningStatus }) => {
+      if (runningStatus === 'starting' || runningStatus === 'running') listen(ses, versionId)
+    })
     void loadAll(ses)
   })
   if (!readSaved().some((s) => s.enabled)) return
@@ -99,7 +110,7 @@ function infoOf(s: Saved): ExtensionInfo | null {
     }
     return {
       id: s.id, runtimeId: runtimeIds.get(s.id) ?? null, name: localized(String(m.name ?? s.id), msg), version: String(m.version ?? ''),
-      description: localized(String(m.description ?? ''), msg), icon, popup: popupOf(m), options: optionsOf(m), enabled: s.enabled, source: s.source, path: s.path,
+      description: localized(String(m.description ?? ''), msg), icon, popup: popupOf(m), options: optionsOf(m), worker: hasWorker(m), enabled: s.enabled, source: s.source, path: s.path,
       manifestVersion: Number(m.manifest_version ?? 2), access: siteAccess(m), missing: missingFeatures(m), installedAt: s.installedAt
     }
   } catch (e) {
@@ -190,6 +201,71 @@ export function removeExtension(id: string): ExtensionInfo[] {
   if (s.source === 'store' && s.path.startsWith(root())) rmSync(s.path, { recursive: true, force: true })
   log('extensions', 'removed', { id })
   return listExtensions()
+}
+
+/** Toolbar clicks waiting for the extension's worker to say what it did with them. */
+const clicks = new Map<number, (popup: string | null) => void>()
+let clickSeq = 0
+const listening = new WeakSet<ServiceWorkerMain>()
+
+/** Takes requests from an extension's worker (the preload's side of it), once per worker. */
+function listen(ses: Session, versionId: number): ServiceWorkerMain | undefined {
+  const w = ses.serviceWorkers.getWorkerFromVersionID(versionId)
+  if (!w || listening.has(w) || !w.scope.startsWith('chrome-extension://')) return w
+  listening.add(w)
+  w.ipc.on('ext-worker:open', (_e, url: unknown, active: unknown) => openFromExtension(ses, w.scope, String(url), active !== false))
+  w.ipc.on('ext-worker:clicked', (_e, n: unknown, popup: unknown) => {
+    const done = clicks.get(Number(n))
+    clicks.delete(Number(n))
+    done?.(typeof popup === 'string' ? popup : null)
+  })
+  return w
+}
+
+/**
+ * Opens a page an extension asked for (tabs.create or windows.create in its worker, a link or window.open in one of
+ * its pages) as a Browser tab in the space it runs in: its sign-in and settings pages need that space's session.
+ * Only web pages and the extension's own pages, and only for an enabled extension.
+ */
+export function openFromExtension(ses: Session, extensionUrl: string, url: string, active: boolean): void {
+  const rid = /^chrome-extension:\/\/([a-p]{32})\//.exec(extensionUrl)?.[1]
+  const partition = partitionOf(ses)
+  if (!rid || !partition || !isAllowedExtensionPage(`chrome-extension://${rid}/`)) return
+  if (!isWebUrl(url) && !isExtensionPage(url, [rid])) {
+    log('extensions', 'refused to open', { extension: rid, url: url.slice(0, 120) })
+    return
+  }
+  // The Mac's own window only: phones have no Browser.
+  mainWindow()?.webContents.send('ext:openTab', { partition, url, background: !active })
+}
+
+/**
+ * The extension's toolbar button, pressed in a space (on the page `tabId`, a webContents id): the popup page to show,
+ * or null when it has no popup set and was handed the click instead (action.onClicked). 1Password clears its popup
+ * until an account is signed in and opens its sign-in page on the click.
+ */
+export async function clickExtension(id: string, partition: string, tabId: number | null): Promise<string | null> {
+  const s = readSaved().find((x) => x.id === id && x.enabled)
+  const rid = runtimeIds.get(id)
+  if (!s || !rid || !partition.startsWith('persist:web-')) throw new Error('That extension is not loaded. Turn it on, then try again.')
+  const m = manifestOf(s.path)
+  const page = popupOf(m)
+  const declared = page ? `chrome-extension://${rid}/${page.replace(/^\//, '')}` : null
+  if (!hasWorker(m)) return declared
+  const ses = session.fromPartition(partition)
+  let w: ServiceWorkerMain | undefined
+  try { w = listen(ses, (await ses.serviceWorkers.startWorkerForScope(`chrome-extension://${rid}/`)).versionId) } catch { return declared }
+  if (!w) return declared
+  const n = ++clickSeq
+  const popup = await new Promise<string | null>((resolve) => {
+    clicks.set(n, resolve)
+    setTimeout(() => { if (clicks.delete(n)) resolve(null) }, 3000)
+    w.send('ext-worker:click', n, tabId)
+  })
+  log('extensions', 'click', { id, answer: popup === null ? 'none' : popup ? 'popup' : 'taken' })
+  // No answer (the worker failed to start, or runs without the preload): show the popup its manifest names.
+  if (popup === null) return declared
+  return popup === '' ? null : isExtensionPage(popup, [rid]) ? popup : declared
 }
 
 /** A popup or options page of an enabled extension, which a Browser webview may show (main/webviews.ts). */
