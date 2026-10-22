@@ -3,6 +3,7 @@
  * gateway. Modules under src/main call `host()` instead of importing 'electron', so the same SSH/SFTP/RDP/AWS
  * code runs inside the desktop app and inside `src/gateway` (a Node server reached from a phone's browser).
  */
+import type { ExtensionInfo } from '@shared/extensions'
 import type { AppCommand, Theme, VoiceEvent, VoicePermission } from '@shared/types'
 
 export interface OpenDialogOptions {
@@ -74,6 +75,17 @@ export interface Host {
   voice: VoiceHost | null
   /** The launcher's window and its key in every app (main/launcherWindow.ts); null without a desktop (gateway). */
   launcher: LauncherHost | null
+  /** Chrome extensions in the Browser (main/extensions.ts); null where there is no Browser (gateway). */
+  extensions: ExtensionsHost | null
+}
+
+/** What the Browser's extensions need from the Mac app. */
+export interface ExtensionsHost {
+  list(): ExtensionInfo[]
+  installFromStore(input: string): Promise<ExtensionInfo>
+  addFolder(): Promise<ExtensionInfo | null>
+  setEnabled(id: string, on: boolean): Promise<ExtensionInfo[]>
+  remove(id: string): ExtensionInfo[]
 }
 
 /** What the launcher needs from the Mac app. */

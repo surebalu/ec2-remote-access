@@ -17,6 +17,7 @@ import Webview, { type WebviewEl, type WebviewEvents } from './Webview'
 import CommandBar, { type Suggestion } from './CommandBar'
 import StartPage from './StartPage'
 import Downloads from './Downloads'
+import Extensions from './Extensions'
 import OnePassword from './OnePassword'
 import { ACCENT_HEX, Favicon, ServiceBadge, SPACE_EMOJI, SPACE_GRADIENTS, SPACE_SERVICES, SpaceAvatar, spaceVars, type Space } from './parts'
 
@@ -94,6 +95,7 @@ type MenuState =
   | { kind: 'newSpace'; anchor: HTMLElement; edit?: string }
   | { kind: 'editTab'; id: string; anchor: HTMLElement }
   | { kind: 'downloads'; anchor: HTMLElement }
+  | { kind: 'extensions'; anchor: HTMLElement }
   | { kind: 'fill'; anchor: HTMLElement; tabId: string }
   | { kind: 'hosts'; anchor: HTMLElement }
 
@@ -155,6 +157,8 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const emojiInput = useRef<HTMLInputElement>(null)
   /** A download finished since the Downloads popover was last opened (a dot on its button). */
   const [unseenDownloads, setUnseenDownloads] = useState(false)
+  /** The Extensions popover's width while it shows an extension's popup or options page (null: the list's). */
+  const [extWidth, setExtWidth] = useState<number | null>(null)
   const [tabDraft, setTabDraft] = useState<{ name: string; url: string; error?: string }>({ name: '', url: '' })
   /** Dragging the sidebar's edge: where the drag started. */
   const [resizing, setResizing] = useState<{ x: number; width: number } | null>(null)
@@ -1040,6 +1044,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
         >
           <Icon.download />
         </button>
+        <button type="button" className="web-ico" title="Extensions" aria-label="Extensions" onClick={(e) => setMenu({ kind: 'extensions', anchor: e.currentTarget })}><Icon.puzzle /></button>
         <span className="flex-1" />
         <button type="button" className="web-ico" title="Back (⌘[)" aria-label="Back" disabled={!cur.back} onClick={() => act((v) => v.goBack())}><Icon.back /></button>
         <button type="button" className="web-ico" title="Forward (⌘])" aria-label="Forward" disabled={!cur.fwd} onClick={() => act((v) => v.goForward())}><Icon.forward /></button>
@@ -1397,6 +1402,13 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
             webContentsId={safely(() => views.current.get(menu.tabId)?.getWebContentsId() ?? 0, 0)}
             onDone={() => { setMenu(null); act((v) => v.focus(), menu.tabId) }}
           />
+        </Popover>
+      )}
+
+      {menu?.kind === 'extensions' && (
+        <Popover anchor={menu.anchor} width={extWidth ?? 360} onClose={() => { setMenu(null); setExtWidth(null) }}>
+          <Extensions partition={partitionFor(space.id)} pageUrl={current?.url ?? ''} onWidth={setExtWidth}
+            onBrowseStore={() => { setMenu(null); go('https://chromewebstore.google.com/category/extensions', true) }} />
         </Popover>
       )}
 

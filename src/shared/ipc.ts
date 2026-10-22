@@ -1,3 +1,4 @@
+import type { ExtensionInfo } from './extensions'
 import type { DbAudit, DbKillRequest, DbTarget, LockReport } from './dbLocks'
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
@@ -170,6 +171,14 @@ export interface IpcApi {
    * 'code'). Refuses a page on another site than the login's unless `anySite` (the user confirmed).
    */
   'browser:fill': (webContentsId: number, account: string, itemId: string, anySite?: boolean) => Promise<string[]>
+  /** Chrome extensions in the Browser (Mac app only). */
+  'ext:list': () => Promise<ExtensionInfo[]>
+  /** Installs or updates one from a Chrome Web Store link or id. */
+  'ext:install': (input: string) => Promise<ExtensionInfo>
+  /** Loads an unpacked extension from a folder the user picks; null when cancelled. */
+  'ext:addFolder': () => Promise<ExtensionInfo | null>
+  'ext:setEnabled': (id: string, on: boolean) => Promise<ExtensionInfo[]>
+  'ext:remove': (id: string) => Promise<ExtensionInfo[]>
   /** The system Share menu for a page; false when the host has none (gateway). */
   'browser:share': (url: string) => Promise<boolean>
   /** The terminals beside the Browser in a split, offered by its page menu as "Paste into …" (empty when none). */

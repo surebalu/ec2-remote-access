@@ -156,6 +156,8 @@ const healthFixture = () => {
 }
 // Service control jobs the fixture "runs": running, then active, then the health check, then done.
 const serviceJobs = []
+// Browser extensions: one installed; what the panel asked main to do.
+let extList = [{ id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', runtimeId: null, name: 'Dark Reader', version: '4.9.133', description: 'Dark mode for every website', icon: '', popup: null, options: null, enabled: true, source: 'store', path: '/fixture/extensions/dark', manifestVersion: 3, access: { all: true, hosts: [] }, missing: ['right-click menu items'], installedAt: 0 }]
 // Sessions ended in the Database locks dialog.
 const dbKilled = []
 const jobNow = (j) => {
@@ -247,6 +249,14 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
     ]
     case 'browser:fill': return ['username', 'password']
+    case 'ext:list': return extList
+    case 'ext:install': {
+      const x = { ...extList[0], id: 'bcjindcccaagfpapjjmafapmmgkkhgoa', name: 'JSON Formatter', version: '0.7.1', access: { all: false, hosts: ['*'] }, missing: [] }
+      extList = [...extList, x]
+      return x
+    }
+    case 'ext:setEnabled': extList = extList.map((x) => (x.id === args[0] ? { ...x, enabled: args[1] } : x)); return extList
+    case 'ext:remove': extList = extList.filter((x) => x.id !== args[0]); return extList
     // Service control: a running 3DSpace unit and a failed TIF unit; a job steps through its phases over a few seconds.
     case 'services:status': return args[0].map((key) => {
       const i = [running, stopped, stale].find((x) => x.key === key)
@@ -1944,6 +1954,20 @@ app.whenReady().then(async () => {
     const fillCall = calls.filter((c) => c.channel === 'browser:fill').at(-1).args
     assert.deepEqual(fillCall.slice(1), ['u1', 'i1', false])
     assert.equal(fillCall[0], guestAt('/one').id, 'fills the page on screen')
+    // Extensions (the puzzle button): what is installed and what it can reach, turning one off, adding by link.
+    await bjs(`document.querySelector('.web-side-top [aria-label="Extensions"]').click()`)
+    await buntil(`document.querySelectorAll('.ext-row').length === 1 && document.querySelector('.ext-row').textContent.includes('Dark Reader') && document.querySelector('.ext-row').textContent.includes('Reads and changes every site')`, 'extensions list')
+    await bjs(`document.querySelector('.ext-row input[type="checkbox"]').click()`)
+    await buntil(`document.querySelector('.ext-row').classList.contains('off')`, 'turned off')
+    assert.ok(calls.some((c) => c.channel === 'ext:setEnabled' && c.args[0] === 'eimadpbcbfnmbkopoojfekhnkhdbieeh' && c.args[1] === false))
+    await bjs(`(() => { const i = document.querySelector('.ext-add input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'https://chromewebstore.google.com/detail/json-formatter/bcjindcccaagfpapjjmafapmmgkkhgoa'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await bjs(`document.querySelector('.ext-add button[type="submit"]').click()`)
+    await buntil(`document.querySelectorAll('.ext-row').length === 2`, 'added by link')
+    assert.equal(calls.filter((c) => c.channel === 'ext:install').at(-1).args[0], 'https://chromewebstore.google.com/detail/json-formatter/bcjindcccaagfpapjjmafapmmgkkhgoa')
+    await bshot('browser-extensions.png')
+    await bkey('Escape')
+    await bjs(`document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+    await buntil(`!document.querySelector('.ext')`, 'the panel closes')
     // A click inside the page (which this document never sees) closes an open menu.
     await bjs(`document.querySelector('.web-url-more[aria-label="Page actions"]').click()`)
     await buntil(`!!document.querySelector('.popover')`, 'page menu open')

@@ -150,6 +150,11 @@ export const Icon = {
       <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14" />
     </svg>
   ),
+  puzzle: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <path d="M10 4.5a2 2 0 1 1 4 0V6h3.5a.5.5 0 0 1 .5.5V10h-1.5a2 2 0 1 0 0 4H18v3.5a.5.5 0 0 1-.5.5H14v-1.5a2 2 0 1 0-4 0V18H6.5a.5.5 0 0 1-.5-.5V14h1.5a2 2 0 1 0 0-4H6V6.5a.5.5 0 0 1 .5-.5H10z" />
+    </svg>
+  ),
   download: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />

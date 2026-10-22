@@ -1,3 +1,4 @@
+import { addExtensionFolder, installFromStore, listExtensions, removeExtension, setExtensionEnabled } from './extensions'
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, screen, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -120,5 +121,6 @@ export const electronHost: Host = {
   encrypt: (plain) => (safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(plain) : null),
   decrypt: (cipher) => safeStorage.decryptString(cipher),
   voice: electronVoice,
-  launcher: electronLauncher
+  launcher: electronLauncher,
+  extensions: { list: listExtensions, installFromStore, addFolder: addExtensionFolder, setEnabled: setExtensionEnabled, remove: removeExtension }
 }
