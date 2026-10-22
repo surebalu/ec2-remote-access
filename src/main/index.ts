@@ -19,6 +19,7 @@ import { setupAutoUpdate } from './updater'
 import { startPhoneAccess, stopPhoneAccess } from './phoneAccess'
 import { initLog } from './log'
 import { initWebviews } from './webviews'
+import { initExtensions } from './extensions'
 import { restoreSessionCookies, saveSessionCookies } from './sessionCookies'
 import { mainWindow, setMainWindow } from './windows'
 import { closeLauncher, updateLauncherKey } from './launcherWindow'
@@ -91,6 +92,8 @@ app.whenReady().then(async () => {
   initLog(electronHost.logsDir())
   console.log(`[app] EC2 Remote Access ${app.getVersion()} starting (packaged=${app.isPackaged})`)
   nativeTheme.themeSource = getSettings().theme
+  // Before any Browser session exists (restoring sign-ins creates them): each loads its extensions as it is created.
+  initExtensions()
   // The browser's sign-ins from the last run, before any page can load (bounded, so a stuck store never delays the window).
   await Promise.race([restoreSessionCookies().catch(() => undefined), new Promise((r) => setTimeout(r, 3000))])
   registerIpc(() => {

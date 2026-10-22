@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { basename, resolve, sep } from 'node:path'
 import { startDeviceFlow, waitForDeviceFlow, saveSsoProfiles, cancelDeviceFlow, addStaticProfile, removeProfile, renameProfile, ssoSessionsInConfig, sessionTokenInfo, loginExistingSession } from './aws/sso'
 import type { IpcApi } from '@shared/ipc'
-import { host } from './host'
+import { host, type ExtensionsHost } from './host'
 import { listProfiles } from './aws/profiles'
 import { checkAllProfiles, checkProfile, ssoLogin } from './aws/credentials'
 import { enabledRegions, scanAll, setInstanceState, findInstance } from './aws/inventory'
@@ -51,6 +51,12 @@ export function send<T>(channel: string, payload: T): void {
  * The complete request/response surface of the connection engine, keyed by IpcApi channel. Electron registers each
  * entry with ipcMain (ipc.ts); the gateway dispatches WebSocket RPC calls to the same object.
  */
+function extensionsHost(): ExtensionsHost {
+  const e = host().extensions
+  if (!e) throw new Error('Browser extensions are in the Mac app only.')
+  return e
+}
+
 export const handlers: Handlers = {
   'profiles:list': () => listProfiles(true),
   'profiles:check': async (profile) => (profile ? [await checkProfile(profile)] : checkAllProfiles()),
@@ -237,6 +243,11 @@ export const handlers: Handlers = {
     if (!login) throw new Error('That 1Password item is no longer there.')
     return host().fillWebPage(webContentsId, await opSecrets(account, itemId), anySite ? null : login.urls)
   },
+  'ext:list': async () => extensionsHost().list(),
+  'ext:install': (input) => extensionsHost().installFromStore(input),
+  'ext:addFolder': () => extensionsHost().addFolder(),
+  'ext:setEnabled': (id, on) => extensionsHost().setEnabled(id, on),
+  'ext:remove': async (id) => extensionsHost().remove(id),
   'clipboard:write': async (text) => {
     if (!host().clipboardWrite(text)) throw new Error('No clipboard on this host')
   },

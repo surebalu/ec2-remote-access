@@ -833,6 +833,25 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .op-sub { display: block; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .op-foot { display: flex; align-items: center; gap: 7px; margin: 6px 8px 0; padding: 7px 4px 1px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 11px; cursor: pointer; }
 .op-foot input { accent-color: var(--accent); }
+.ext { padding: 2px 0 6px; }
+.ext-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; font-size: 12.5px; }
+.ext-logo { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
+.ext-logo svg { width: 13px; height: 13px; }
+.ext-store { display: flex; align-items: center; gap: 8px; margin: 0 8px 6px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 9px; background: var(--accent-soft); font-size: 11.5px; }
+.ext-list { max-height: 300px; overflow-y: auto; padding: 0 6px; }
+.ext-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px; }
+.ext-row:hover { background: var(--panel-2); }
+.ext-row.off .ext-icon, .ext-row.off .op-title { opacity: .5; }
+.ext-icon { width: 20px; height: 20px; flex-shrink: 0; border-radius: 4px; object-fit: contain; }
+.ext-icon.blank { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.ext-main { flex: 1; min-width: 0; text-align: left; }
+.ext-main:disabled { cursor: default; }
+.ext-switch input { accent-color: var(--accent); }
+.ext-add { display: flex; gap: 6px; margin: 8px 8px 0; }
+.ext-add .input { flex: 1; min-width: 0; height: 28px; font-size: 12px; }
+.ext-foot { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px 0; }
+.ext-view-box { position: relative; max-width: 100%; margin: 0 6px; overflow: hidden; border-radius: 8px; background: #fff; }
+.ext-view { position: absolute; inset: 0; width: 100%; height: 100%; }
 .dl { padding: 2px 0 0; }
 .dl-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px 6px; }
 .dl-clear { padding: 2px 8px; border-radius: 6px; background: var(--panel-2); color: var(--text-2); font-size: 11px; font-weight: 600; }

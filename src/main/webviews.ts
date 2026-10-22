@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, Menu, shell, webContents, type DownloadItem, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron'
 import { isWebUrl, loginMatches } from '@shared/browser'
+import { isAllowedExtensionPage } from './extensions'
 import { isDictationKey } from '@shared/dictation'
 import { comboOf, sectionFor } from '@shared/keyCombos'
 import type { WebDownload } from '@shared/types'
@@ -37,7 +38,8 @@ export function initWebviews(win: BrowserWindow): void {
     prefs.contextIsolation = true
     prefs.sandbox = true
     prefs.webSecurity = true
-    if (!params.partition?.startsWith('persist:web-') || !isWebUrl(params.src)) event.preventDefault()
+    // An extension's popup or options page is shown in a webview of the space it runs in.
+    if (!params.partition?.startsWith('persist:web-') || !(isWebUrl(params.src) || isAllowedExtensionPage(params.src))) event.preventDefault()
     // Its session cookies (sign-ins) are kept across restarts from here on.
     else track(params.partition)
   })

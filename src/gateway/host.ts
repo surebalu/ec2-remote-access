@@ -44,6 +44,7 @@ export function createGatewayHost(dataDir: string, broadcast: (channel: string, 
     // No microphone or speech recognizer here; a phone or tablet has its keyboard's own dictation key.
     voice: null,
     launcher: null,
+    extensions: null,
     encrypt(plain) {
       const iv = randomBytes(12)
       const cipher = createCipheriv('aes-256-gcm', key(), iv)
