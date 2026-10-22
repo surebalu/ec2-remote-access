@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fillExtensionApis } from '../src/shared/extensionApis.ts'
+import { fillExtensionApis, type ExtensionFrame } from '../src/shared/extensionApis.ts'
 
 const ID = 'aeblfdkhhhdcdjpifhhbdiojplfjncoa'
 type Api = Record<string, any>
@@ -22,7 +22,13 @@ function worker(opts: { url?: string; popup?: string; manifest?: object } = {}):
   return { chrome, browser, opened, tabsGet }
 }
 
-const fill = (opened: [string, boolean][]): ReturnType<typeof fillExtensionApis> => fillExtensionApis((url, active) => { opened.push([url, active]) })
+/** Tab 7: a login page with 1Password's fill menu in an iframe of its own (what main answers for it). */
+const PAGE: ExtensionFrame[] = [
+  { frameId: 0, parentFrameId: -1, url: 'https://login.example/', processId: 9, errorOccurred: false, documentLifecycle: 'active', frameType: 'outermost_frame' },
+  { frameId: 41, parentFrameId: 0, url: `chrome-extension://${ID}/inline/menu/menu.html`, processId: 3, errorOccurred: false, documentLifecycle: 'active', frameType: 'sub_frame' }
+]
+const fill = (opened: [string, boolean][]): ReturnType<typeof fillExtensionApis> =>
+  fillExtensionApis((url, active) => { opened.push([url, active]) }, async (tabId) => (tabId === 7 ? PAGE : null))
 
 test('does nothing in a website\'s service worker', () => {
   const w = worker({ url: 'https://example.com/sw.js' })
@@ -54,6 +60,18 @@ test('answers through a callback or a promise, as Chrome does', async () => {
   assert.equal(w.chrome.contextMenus.create({ id: 'fill', title: 'Fill' }), 'fill', 'the id comes back at once')
   assert.equal((await w.chrome.windows.getCurrent()).id, 1)
   assert.deepEqual(await w.chrome.commands.getAll(), [{ name: '_execute_action', description: 'Open', shortcut: '' }])
+})
+
+test('a page\'s frames come from main', async () => {
+  const w = worker()
+  fill(w.opened)
+  // 1Password passes a login picked in its menu to the menu's parent frame.
+  assert.equal((await w.browser.webNavigation.getFrame({ tabId: 7, frameId: 41 })).parentFrameId, 0)
+  assert.deepEqual(await w.chrome.webNavigation.getAllFrames({ tabId: 7 }), PAGE)
+  assert.equal(await w.chrome.webNavigation.getFrame({ tabId: 7, frameId: 5 }), null)
+  assert.equal(await w.chrome.webNavigation.getAllFrames({ tabId: 8 }), null, 'a page not in this space')
+  const top = await new Promise((resolve) => w.chrome.webNavigation.getFrame({ tabId: 7, frameId: 0 }, resolve))
+  assert.equal((top as ExtensionFrame).url, 'https://login.example/')
 })
 
 test('permissions are what the manifest gave', async () => {
