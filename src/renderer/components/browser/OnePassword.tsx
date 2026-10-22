@@ -14,6 +14,7 @@ const FILLED: Record<string, string> = { username: 'username', password: 'passwo
  */
 export default function OnePassword({ pageUrl, webContentsId, onDone }: { pageUrl: string; webContentsId: number; onDone: () => void }): ReactElement {
   const toast = useStore((s) => s.toast)
+  const stayApproved = useStore((s) => s.settings?.onePasswordStayApproved ?? true)
   const [logins, setLogins] = useState<WebLogin[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -75,7 +76,7 @@ export default function OnePassword({ pageUrl, webContentsId, onDone }: { pageUr
         />
       </div>
       {error && <div className="op-msg error">{error}</div>}
-      {!logins && !error && <div className="op-msg"><span className="web-spinner" /> Asking 1Password… approve in the 1Password window if it asks.</div>}
+      {!logins && !error && <div className="op-msg"><span className="web-spinner" /> Asking 1Password for your logins… approve once for each 1Password account if it asks.</div>}
       {logins && !list.length && !error && (
         <div className="op-msg muted">{query.trim() ? 'No login matches.' : `No login saved for ${hostOf(pageUrl)}. Search to pick another one.`}</div>
       )}
@@ -98,6 +99,11 @@ export default function OnePassword({ pageUrl, webContentsId, onDone }: { pageUr
           </button>
         ))}
       </div>
+      {/* 1Password lets an approval lapse after ten idle minutes; this keeps the ones given in this run (main/onepassword.ts). */}
+      <label className="op-foot" title="1Password's CLI forgets an approval after ten minutes without use. With this on, the app keeps the approvals you give while it is open, so you are asked once per 1Password account each time the app starts (up to 12 hours).">
+        <input type="checkbox" checked={stayApproved} onChange={(e) => void useStore.getState().saveSettings({ onePasswordStayApproved: e.target.checked })} />
+        <span>Stay approved while the app is open <span className="muted">· ask once per account</span></span>
+      </label>
     </div>
   )
 }

@@ -72,7 +72,9 @@ export const defaultSettings: Settings = {
   dictationKey: 'AltRight',
   dictationLocale: '',
   shortcuts: {},
-  launcherKey: ''
+  launcherKey: '',
+  onePasswordStayApproved: true,
+  quicklinks: []
 }
 
 interface Schema {

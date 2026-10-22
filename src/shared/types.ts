@@ -1,5 +1,6 @@
 import type { ServiceDef } from './services'
 import type { RailSection } from './keyCombos'
+import type { Quicklink } from './quicklinks'
 
 export type Platform = 'linux' | 'windows' | 'unknown'
 export type InstanceState = 'pending' | 'running' | 'stopping' | 'stopped' | 'shutting-down' | 'terminated'
@@ -223,6 +224,13 @@ export interface Settings {
   shortcuts?: Record<string, string>
   /** Opens the launcher from any app (Settings → Keyboard), a combination like 'alt+space'; '' for none, the default. */
   launcherKey?: string
+  /**
+   * Keep the 1Password CLI approvals given in this run from lapsing after ten idle minutes (main/onepassword.ts), so
+   * filling asks once per account per app start, for up to twelve hours.
+   */
+  onePasswordStayApproved?: boolean
+  /** Launcher quicklinks: a keyword that opens a page (src/shared/quicklinks.ts). */
+  quicklinks?: Quicklink[]
   /**
    * Where the Health tab reads the 3DEXPERIENCE platform's metrics: a Prometheus server reached over SSM through
    * `instanceKey` (default: a running host with "monitor" or "prometheus" in its name), at `host` (default: that
