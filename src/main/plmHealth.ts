@@ -15,7 +15,7 @@ import { CloudWatchClient, GetMetricDataCommand, ListMetricsCommand, type Metric
 import { DescribeDBInstancesCommand, RDSClient } from '@aws-sdk/client-rds'
 import type { Instance } from '@shared/types'
 import {
-  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, fullestDisk, gcTrend, ipOf, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
+  ENV_NAMES, ENV_ORDER, GC_RANGES, LIMITS, ROLES, SERVICE_ORDER, checkNote, envOf, fullestDisk, gcTrend, ipOf, isExporterCheck, isFrontProbe, isFullGc, levelBelow, levelOf, nodeLabel, probeOk, roleOf,
   serviceLevel, urlHost, verdict, worst, formatBytes, formatPct, formatMs, gcPolicy, isServiceAccount, parseLicense, SYSTEM_USERS, type GcCollector, type JvmGcDetail, type MachineMemory, type MemoryHistory,
   type AlbHealth, type AlertItem, type ApacheHealth, type CertHealth, type DbHealth, type DiskUse, type Endpoint, type HostHealth, type Issue, type JvmHealth,
   type HealthCheck, type KernelHealth, type KernelMemoryHistory, type KernelMemorySeries, type KernelServer, type Level, type PlmEnvHealth, type PlmEnvId, type PlmHealthSnapshot, type ServiceHealth, type ServiceNode, type Spark, type StorageHealth
@@ -1124,4 +1124,25 @@ async function build(): Promise<PlmHealthSnapshot> {
   }
   cached = { at: now, snap }
   return snap
+}
+
+// ---------- for service control (main/services.ts) ----------
+
+/** A server's own health checks for a service (the probes Grafana runs), from the last snapshot. */
+export async function checksFor(serviceId: string, ip: string | null): Promise<string[]> {
+  if (!ip) return []
+  const snap = await plmHealth()
+  return [...new Set(snap.envs.flatMap((e) => e.checks ?? []).filter((c) => c.via === 'server' && c.serviceId === serviceId && ipOf(c.url) === ip && !isExporterCheck(c.url)).map((c) => c.url))]
+}
+
+/**
+ * The check's latest result if Prometheus has probed it since `since` (ms), else null: after a restart, a pass from
+ * before it proves nothing.
+ */
+export async function probeSince(url: string, since: number): Promise<{ ok: boolean; status: number | null } | null> {
+  const port = await prometheusPort(source())
+  const sel = `{instance="${url.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"}`
+  const [ok, at, code] = await Promise.all([instant(port, `probe_success${sel}`), instant(port, `timestamp(probe_success${sel})`), instant(port, `probe_http_status_code${sel}`)])
+  if (!ok.length || !at.length || at[0].value * 1000 < since) return null
+  return { ok: ok[0].value === 1, status: code.length ? code[0].value : null }
 }

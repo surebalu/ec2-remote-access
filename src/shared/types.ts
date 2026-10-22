@@ -1,3 +1,4 @@
+import type { ServiceDef } from './services'
 import type { RailSection } from './keyCombos'
 
 export type Platform = 'linux' | 'windows' | 'unknown'
@@ -203,6 +204,8 @@ export interface Settings {
   snippets: Snippet[]
   /** Saved port forwards, one click to reopen from the tunnel bar or the quick switcher. */
   portForwards: PortForwardPreset[]
+  /** Settings → Services: the services and their systemd units that service control offers ([] = the defaults). */
+  serviceCatalog: ServiceDef[]
   /** Named sets of session tabs that reopen together. */
   workspaces: Workspace[]
   /** Write every SSH session's output (ANSI codes stripped) to a log file in sessionLogDir. */

@@ -63,6 +63,7 @@ function commands(): Command[] {
     { id: 'chatgpt', title: 'Open ChatGPT', keywords: 'ai assistant chat openai gpt llm ask', hint: keyOf('chatgpt'), icon: Icon.chatgpt, run: () => s.openTool('chatgpt') },
     { id: 'terminal', title: 'New terminal tab', keywords: 'local shell zsh warp console', icon: Icon.console, run: () => s.openTerminal({ newTab: true }), when: hasBrowser() },
     { id: 'notes-host', title: 'Open the note for this host', keywords: 'notes obsidian', icon: Icon.note, run: () => openHostNote(active!.instanceKey, active!.id), when: !!active?.instanceKey },
+    { id: 'services', title: 'Control services…', keywords: 'systemctl restart start stop service 3dspace tomee systemd', icon: Icon.layers, run: () => s.set({ servicesFor: { targets: filteredInstances(s).filter((i) => !i.manual && i.platform !== 'windows' && i.state === 'running' && i.ssmOnline).map((i) => ({ key: i.key })), title: 'Hosts shown' } }) },
     { id: 'forward', title: 'Forward a port…', keywords: 'tunnel port forward database', icon: Icon.plug, run: () => s.set({ portForwardFor: {} }) },
     { id: 'snippets', title: 'Edit snippets…', keywords: 'commands saved', icon: Icon.snippet, run: () => s.set({ snippetsOpen: {} }) },
     { id: 'ws-save', title: 'Save open tabs as a workspace…', keywords: 'workspace session layout', icon: Icon.grid, run: () => s.set({ workspaceSaveOpen: true }), when: s.tabs.length > 0 },

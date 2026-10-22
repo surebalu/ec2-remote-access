@@ -154,6 +154,13 @@ const healthFixture = () => {
     ]
   }
 }
+// Service control jobs the fixture "runs": running, then active, then the health check, then done.
+const serviceJobs = []
+const jobNow = (j) => {
+  const t = Date.now() - j.startedAt
+  const phase = t < 900 ? 'running' : t < 1800 ? 'verifying' : t < 2700 ? 'checking' : 'done'
+  return { ...j, finishedAt: phase === 'done' ? j.startedAt + 2700 : undefined, steps: j.steps.map((s) => ({ ...s, phase, message: phase === 'done' ? 'Restarted; active and its health check passes.' : undefined, endedAt: phase === 'done' ? j.startedAt + 2700 : undefined })) }
+}
 // Run Command: runs the fixture "sent", and how they come back (the production host succeeds, the others fail).
 const runsSent = []
 const runState = (r) => {
@@ -238,6 +245,25 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { id: 'i2', account: 'u1', accountName: 'my.1password.com', title: 'Other site', username: 'other', vault: 'Work', urls: ['https://other.example'], matches: false }
     ]
     case 'browser:fill': return ['username', 'password']
+    // Service control: a running 3DSpace unit and a failed TIF unit; a job steps through its phases over a few seconds.
+    case 'services:status': return args[0].map((key) => {
+      const i = [running, stopped, stale].find((x) => x.key === key)
+      return { key, name: i?.name ?? key, ip: '10.0.1.15', units: [
+        { unit: '3dspace.service', description: '3DSpace TomEE', load: 'loaded', active: 'active', sub: 'running', enabled: 'enabled', pid: 4242, memBytes: 6.1 * 1024 ** 3, since: Date.now() - 2 * 86400000 },
+        { unit: 'tif.service', description: 'TIF', load: 'loaded', active: 'failed', sub: 'failed', enabled: 'enabled', pid: null, memBytes: null, since: Date.now() - 3600000 }
+      ] }
+    })
+    case 'services:run': {
+      const j = { id: `svc-${serviceJobs.length + 1}`, action: args[0].action, rolling: args[0].rolling, verify: args[0].verify, startedAt: Date.now(),
+        steps: args[0].targets.map((t) => ({ key: t.key, name: 'web-prod-01', label: t.label ?? t.key, serviceId: t.serviceId, unit: t.unit, phase: 'running', startedAt: Date.now() })) }
+      serviceJobs.push(j)
+      return j
+    }
+    case 'services:jobs': return serviceJobs.map(jobNow).reverse()
+    case 'services:job': return serviceJobs.map(jobNow).find((j) => j.id === args[0]) ?? null
+    case 'services:cancel': return undefined
+    case 'services:logs': return `2026-10-21T20:01:02+0000 ip-10-0-1-15 systemd[1]: Started ${args[1]}.\n2026-10-21T20:01:05+0000 ip-10-0-1-15 java[4242]: Server startup in 61234 ms`
+    case 'services:history': return serviceJobs.filter((j) => jobNow(j).finishedAt).map((j) => ({ at: Date.now(), by: 'fixture.user', action: j.action, key: j.steps[0].key, name: 'web-prod-01', unit: j.steps[0].unit, result: 'done', message: 'Restarted; active and its health check passes.', seconds: 3 }))
     case 'run:start': {
       const r = { id: `run-${runsSent.length + 1}`, command: args[0].command, timeoutSec: args[0].timeoutSec ?? 600, startedAt: Date.now(), targets: args[0].keys.map((k) => { const i = [running, stopped, stale].find((x) => x.key === k); return { key: k, name: i.name, profile: i.profile, region: i.region, instanceId: i.instanceId, platform: 'linux', status: 'pending' } }) }
       runsSent.push(r)
@@ -710,6 +736,46 @@ app.whenReady().then(async () => {
     await keyUp()
     await radialKey({ metaKey: true, shiftKey: true })
     await until(`!document.querySelector('.radial')`)
+
+    // Service control from a host's menu: the units the server has, production asks for PROD, a restart is verified.
+    await js(`(() => { const row = document.querySelector('[data-host-key="${running.key}"]'); row.scrollIntoView({ block: 'center' }); const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 10 })) })()`)
+    await until(`!!document.querySelector('body > .panel.modal.fixed')`)
+    await js(`[...document.querySelectorAll('body > .panel.modal.fixed button')].find((b) => b.textContent === 'Services…').click()`)
+    await until(`!!document.querySelector('.svc-row[data-unit="3dspace.service"]') && !!document.querySelector('.svc-row[data-unit="tif.service"]')`)
+    assert.ok(calls.some((c) => c.channel === 'services:status' && c.args[0].includes(running.key)), 'the server is asked for its units')
+    assert.equal(await js(`!!document.querySelector('.svc-prod')`), true, 'a production account is marked')
+    assert.match(await js(`document.querySelector('.svc-row[data-unit="tif.service"]').textContent`), /Failed.*Start/)
+    assert.match(await js(`document.querySelector('.svc-row[data-unit="3dspace.service"]').textContent`), /Running.*up 2d 0h.*6\.1 GB.*Restart/)
+    await js(`[...document.querySelector('.svc-row[data-unit="3dspace.service"]').querySelectorAll('button')].find((b) => b.textContent.includes('Restart')).click()`)
+    await until(`!!document.querySelector('.svc-confirm')`)
+    const goBtn = `[...document.querySelectorAll('.svc-confirm button')].find((b) => b.textContent.startsWith('Restart'))`
+    assert.equal(await js(`${goBtn}.disabled`), true, 'production waits for PROD to be typed')
+    await js(`(() => { const i = document.querySelector('.svc-type'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'PROD'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until(`${goBtn}.disabled === false`)
+    await js(`${goBtn}.click()`)
+    await until(`!!document.querySelector('.svc-job') && document.querySelector('.svc-step')?.classList.contains('done')`)
+    const runCall = calls.find((c) => c.channel === 'services:run')
+    assert.deepEqual([runCall.args[0].action, runCall.args[0].verify, runCall.args[0].targets[0].unit, runCall.args[0].targets[0].serviceId], ['restart', true, '3dspace.service', 'space'])
+    assert.match(await js(`document.querySelector('.svc-step').textContent`), /health check passes/)
+    await screenshot('services.png')
+    // The log, and who did what.
+    await js(`document.querySelector('.svc-row[data-unit="3dspace.service"] [aria-label^="More for"]').click()`)
+    await until(`!!document.querySelector('.popover')`)
+    await js(`[...document.querySelectorAll('.popover button')].find((b) => b.textContent === 'Show the log').click()`)
+    await until(`document.querySelector('.svc-log')?.textContent.includes('Server startup in')`)
+    await js(`[...document.querySelectorAll('.svc-head button')].find((b) => b.textContent.includes('Services')).click()`)
+    await js(`[...document.querySelectorAll('.svc-head button')].find((b) => b.textContent.includes('History')).click()`)
+    await until(`document.querySelectorAll('.svc-hist').length >= 1 && document.querySelector('.svc-hist').textContent.includes('3dspace.service')`)
+    await js(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
+    await until(`!document.querySelector('.svc')`)
+    // Settings → Services lists the install sheet's services and their units.
+    await key(',', { metaKey: true })
+    await until(`!!document.querySelector('.settings-nav-item[data-section="services"]')`)
+    await js(`document.querySelector('.settings-nav-item[data-section="services"]').click()`)
+    await until(`document.querySelectorAll('.svc-def').length === 10`)
+    assert.ok(await js(`[...document.querySelectorAll('.svc-def input')].some((i) => i.value === 'thbtasklist.service 3dspaceDerivedconverter.service')`), 'a service with two units')
+    await js(`document.querySelector('.settings [aria-label="Close dialog"]').click()`)
+    await until(`!document.querySelector('.settings')`)
 
     // Text size per section: the sidebar matches the table's 12px; pointing at it and pressing ⌘− shrinks only it,
     // keeping its width on screen; the footer's Aa sizes either section; menus still open at the pointer when zoomed.

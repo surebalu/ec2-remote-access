@@ -1,5 +1,6 @@
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
+import type { HostServices, ServiceAudit, ServiceJob, ServiceJobRequest } from './services'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -211,6 +212,19 @@ export interface IpcApi {
   'run:cancel': (id: string) => Promise<void>
   /** Recent runs, newest first. */
   'run:list': () => Promise<RunState[]>
+  /** Service control (main/services.ts): which of Settings → Services' units each server has, and their state. */
+  'services:status': (keys: string[]) => Promise<HostServices[]>
+  /** Starts, stops or restarts units; a job to poll with services:job (one server at a time when rolling). */
+  'services:run': (req: ServiceJobRequest) => Promise<ServiceJob>
+  'services:job': (id: string) => Promise<ServiceJob | null>
+  /** Jobs this run of the app has started, newest first. */
+  'services:jobs': () => Promise<ServiceJob[]>
+  /** Stops a job before its next server (an action already sent runs to its end). */
+  'services:cancel': (id: string) => Promise<void>
+  /** A unit's recent log (journalctl). */
+  'services:logs': (key: string, unit: string, lines?: number) => Promise<string>
+  /** Finished actions, newest first (who, what, where, how it went). */
+  'services:history': () => Promise<ServiceAudit[]>
   'app:about': () => Promise<AppAbout>
   /** Shows the app's data or log folder in Finder. */
   'app:reveal': (which: 'data' | 'logs') => Promise<void>

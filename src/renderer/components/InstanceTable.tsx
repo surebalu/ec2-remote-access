@@ -479,6 +479,7 @@ function ContextMenu({
       {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), i.state !== 'running')}
       {!i.manual && item('Forward a port…', () => s.set({ portForwardFor: { key: i.key } }), !i.ssmOnline || i.state !== 'running')}
       {!i.manual && item('Run a command…', () => s.set({ runCommandFor: { keys: [i.key] } }), !i.ssmOnline || i.state !== 'running')}
+      {!i.manual && i.platform !== 'windows' && item('Services…', () => s.set({ servicesFor: { targets: [{ key: i.key }], title: i.name } }), !i.ssmOnline || i.state !== 'running')}
       {i.platform === 'windows' && !i.manual && item('Get Windows password', () => s.set({ passwordFor: i.key }))}
       {!i.manual && item('Open in AWS console', () => openInConsole(i))}
       {i.manual && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}
