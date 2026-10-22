@@ -123,6 +123,8 @@ export default function ServicesDialog(): ReactElement | null {
     void window.api.invoke('services:history').then((items) => setView((v) => (v.kind === 'history' ? { kind: 'history', items } : v)), () => setView({ kind: 'history', items: [] }))
   }
   const close = (): void => set({ servicesFor: null })
+  // The host page keeps this dialog on its trail, so Back returns here with the same servers.
+  const toHost = (key: string, pid?: number): void => { setMenu(null); useStore.getState().openHostPage(key, { pid, from: `Services · ${req.title}` }) }
   const now = Date.now()
 
   return (
@@ -193,7 +195,7 @@ export default function ServicesDialog(): ReactElement | null {
                       <div key={`${r.host.key}|${r.unit.unit}`} className={`svc-row lvl-${w.level}`} data-unit={r.unit.unit} data-host={r.host.key}>
                         <i className="svc-dot" />
                         <div className="svc-who min-w-0">
-                          <strong className="truncate">{r.label}</strong>
+                          <button type="button" className="svc-host-link truncate" title={`Open ${r.host.name}'s host page`} onClick={() => toHost(r.host.key)}>{r.label}</button>
                           <span className="muted truncate">{r.host.name}{r.host.ip ? ` · ${r.host.ip}` : ''}</span>
                         </div>
                         <code className="svc-unit truncate" title={r.unit.description || r.unit.unit}>{r.unit.unit}</code>
@@ -267,6 +269,8 @@ export default function ServicesDialog(): ReactElement | null {
           {menu.row.unit.active === 'active' && <MenuItem danger onClick={() => ask('stop', [menu.row])}>Stop…</MenuItem>}
           <MenuSep />
           <MenuItem onClick={() => openLogs(menu.row)}>Show the log</MenuItem>
+          <MenuItem onClick={() => toHost(menu.row.host.key)}>Host page</MenuItem>
+          {menu.row.unit.pid ? <MenuItem onClick={() => toHost(menu.row.host.key, menu.row.unit.pid!)}>Its process ({menu.row.unit.pid})</MenuItem> : null}
         </Popover>
       )}
     </Modal>

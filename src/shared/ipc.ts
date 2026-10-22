@@ -1,6 +1,7 @@
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
 import type { HostServices, ServiceAudit, ServiceJob, ServiceJobRequest } from './services'
+import type { HostHistory, HostSnapshot, ProcessDetail } from './hostInsight'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
@@ -225,6 +226,12 @@ export interface IpcApi {
   'services:logs': (key: string, unit: string, lines?: number) => Promise<string>
   /** Finished actions, newest first (who, what, where, how it went). */
   'services:history': () => Promise<ServiceAudit[]>
+  /** The host page (main/hostInsight.ts): a live snapshot of a Linux server through SSM (processes, disks, network). */
+  'host:snapshot': (key: string) => Promise<HostSnapshot>
+  /** One process on it, sampled over a second. */
+  'host:process': (key: string, pid: number) => Promise<ProcessDetail>
+  /** Its CPU, memory, network and disk over `hours` (Prometheus when an exporter watches it, else CloudWatch). */
+  'host:history': (key: string, hours: number) => Promise<HostHistory>
   'app:about': () => Promise<AppAbout>
   /** Shows the app's data or log folder in Finder. */
   'app:reveal': (which: 'data' | 'logs') => Promise<void>

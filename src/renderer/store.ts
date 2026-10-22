@@ -80,6 +80,10 @@ export interface Toast {
 export type OsFilter = 'all' | 'linux' | 'windows'
 export type StateFilter = 'running' | 'all'
 export type ReachFilter = 'all' | 'reachable' | 'unreachable'
+export type HostPageTab = 'overview' | 'processes' | 'disks' | 'network' | 'connections' | 'properties'
+export interface HostPageView { key: string; tab: HostPageTab; pid?: number }
+/** A place the host page can lead back to: the tab in front, the grid, an open Services dialog, an earlier host page. */
+export interface NavStop { label: string; activeTab: string; gridView: boolean; hostPage: HostPageView | null; servicesFor: State['servicesFor'] }
 
 interface State {
   profiles: AwsProfile[]
@@ -181,6 +185,19 @@ interface State {
   runCommandFor: { keys: string[]; runId?: string } | null
   /** The Services dialog (service control) for these servers; `label` names a server ("3DSpace 01"), `env` its environment. */
   servicesFor: { targets: { key: string; label?: string }[]; title: string; env?: string } | null
+  /** The host page (in place of the hosts list): one server in depth, `pid` one of its processes. */
+  hostPage: HostPageView | null
+  /**
+   * Opens a server's host page. `from` names the place being left ("Services · Production"); it goes on the trail so
+   * the page can lead back there (the dialog reopened, the tab shown) instead of stranding the user in the hosts list.
+   */
+  openHostPage: (key: string, opts?: { tab?: HostPageTab; pid?: number; from?: string }) => void
+  /** One step back from the host page: a process to its host, then along the trail, then to the hosts list. */
+  hostBack: () => void
+  /** Back to the trail's stop `index` (the breadcrumb), dropping the stops after it. */
+  hostBackTo: (index: number) => void
+  /** Where the host page was reached from, oldest first. */
+  trail: NavStop[]
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
   workspaceSaveOpen: boolean
@@ -436,6 +453,35 @@ export const useStore = create<State>((set, get) => ({
   portForwardFor: null,
   runCommandFor: null,
   servicesFor: null,
+  hostPage: null,
+  trail: [],
+  openHostPage: (key, opts = {}) => {
+    const s = get()
+    const here: NavStop | null = opts.from ? { label: opts.from, activeTab: s.activeTab, gridView: s.gridView, hostPage: s.activeTab === 'hosts' ? s.hostPage : null, servicesFor: s.servicesFor } : null
+    s.setActive('hosts')
+    set((x) => ({
+      hostPage: { key, tab: opts.tab ?? (opts.pid ? 'processes' : 'overview'), pid: opts.pid },
+      // Opened from the list itself, a new walk starts.
+      trail: here ? [...x.trail, here].slice(-8) : x.hostPage ? x.trail : [],
+      servicesFor: null, selectedKey: key
+    }))
+  },
+  hostBack: () => {
+    const s = get()
+    if (s.hostPage?.pid) return set({ hostPage: { ...s.hostPage, pid: undefined, tab: 'processes' } })
+    if (s.trail.length) return s.hostBackTo(s.trail.length - 1)
+    set({ hostPage: null })
+  },
+  hostBackTo: (index) => {
+    const s = get()
+    const stop = s.trail[index]
+    if (!stop) return
+    // The tab may have been closed since; the hosts list stands in for it.
+    const tab = stop.activeTab === 'hosts' || s.tabs.some((t) => t.id === stop.activeTab) ? stop.activeTab : 'hosts'
+    s.setActive(tab)
+    set({ trail: s.trail.slice(0, index), hostPage: stop.hostPage, servicesFor: stop.servicesFor })
+    if (stop.gridView && tab !== 'hosts') get().showGrid(true)
+  },
   openPortForward: async (req) => {
     try {
       const t = await window.api.invoke('tunnels:open', req)
@@ -471,7 +517,7 @@ export const useStore = create<State>((set, get) => ({
   clearFilters: () => set({ ...clearHostFilters }),
   applyHostView: (filters) => {
     get().setActive('hosts')
-    set({ ...captureHostFilters(filters), selectedKey: null, detailsFor: null })
+    set({ ...captureHostFilters(filters), selectedKey: null, detailsFor: null, hostPage: null, trail: [] })
   },
   saveHostView: async (name, id, filters) => {
     // Paired browsers on plain HTTP do not expose randomUUID; this identifier is only a settings key.
@@ -487,7 +533,7 @@ export const useStore = create<State>((set, get) => ({
     if (!inst) return
     const group = inst.manual ? `group:${inst.region}` : inst.profile
     const collapsedGroups = st.settings?.collapsedGroups.filter((g) => !['fav', group, `os:${inst.platform}`].includes(g)) ?? []
-    set({ ...clearHostFilters, activeTab: 'hosts', selectedKey: key, detailsFor: key,
+    set({ ...clearHostFilters, activeTab: 'hosts', selectedKey: key, detailsFor: key, hostPage: null, trail: [],
       settings: st.settings ? { ...st.settings, collapsedGroups } : undefined })
     if (collapsedGroups.length !== st.settings?.collapsedGroups.length) {
       void get().saveSettings({ collapsedGroups }).catch((e: Error) => get().toast('error', e.message))

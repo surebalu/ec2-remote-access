@@ -1146,3 +1146,13 @@ export async function probeSince(url: string, since: number): Promise<{ ok: bool
   if (!ok.length || !at.length || at[0].value * 1000 < since) return null
   return { ok: ok[0].value === 1, status: code.length ? code[0].value : null }
 }
+
+/** Range queries for the host page (main/hostInsight.ts), over one of GC_RANGES; null when Prometheus cannot be reached. */
+export async function promHistory(queries: Record<string, string>, hours: number): Promise<{ start: number; step: number; hours: number; series: Record<string, Spark | null> } | null> {
+  const r = GC_RANGES.find((x) => x.hours === hours) ?? GC_RANGES[2]
+  let port: number
+  try { port = await prometheusPort(source()) } catch { return null }
+  const end = Math.floor(Date.now() / 1000)
+  const pairs = await Promise.all(Object.entries(queries).map(async ([k, q]) => [k, (await range(port, q, end, r.hours * 60, r.step).catch(() => [] as Series[]))[0]?.values ?? null] as const))
+  return { start: (end - r.hours * 3600) * 1000, step: r.step, hours: r.hours, series: Object.fromEntries(pairs) }
+}

@@ -109,6 +109,7 @@ export default function HostDetails(): ReactElement | null {
   return <aside className="host-details panel flex min-h-0 flex-col border-l" aria-label={`Details for ${i.name}`} data-accent={meta.color}>
     <div className="flex items-start gap-2 border-b p-4 border-default">
       <div className="min-w-0 flex-1"><span className="env-chip mb-2">{meta.label}</span><h2 className="break-words text-base font-semibold">{i.name}</h2><p className="muted mt-1 text-xs">{i.state} · {i.osHint}</p></div>
+      <button className="btn btn-ghost btn-icon" title="Open the host page: processes, disks, connections, charts" aria-label="Open host page" onClick={() => s.openHostPage(i.key)}><Icon.maximize /></button>
       <button className="btn btn-ghost btn-icon" aria-label="Close host details" onClick={() => s.set({ detailsFor: null })}><Icon.x /></button>
     </div>
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
