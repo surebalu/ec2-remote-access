@@ -1269,8 +1269,8 @@ html[data-fold='vertical'] .m-app.wide.list-hidden .m-stage { margin-left: 0; }
 .app-rail { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: var(--rail-w); padding: 8px 0; overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg-elev); scrollbar-width: none; }
 .app-rail::-webkit-scrollbar { display: none; }
 .app-rail { overflow: hidden; }
-.rail-sections { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 4px; width: 100%; min-height: 0; padding-top: 6px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
-.rail-utilities { display: flex; flex: none; flex-direction: column; align-items: center; gap: 2px; width: 100%; padding-top: 6px; margin-top: 4px; border-top: 1px solid var(--border); }
+.rail-sections { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 10px; width: 100%; min-height: 0; padding-top: 8px; padding-bottom: 8px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+.rail-utilities { display: flex; flex: none; flex-direction: column; align-items: center; gap: 6px; width: 100%; padding-top: 8px; margin-top: 4px; border-top: 1px solid var(--border); }
 .rail-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; width: 60px; padding: 4px 0 5px; border-radius: 10px; color: var(--text-2); transition: color .15s var(--ease); }
 .rail-item .rail-icon { position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 26px; border-radius: 9px; transition: background .15s var(--ease), color .15s var(--ease), transform .15s var(--ease); }
 .rail-item .rail-icon svg { width: 18px; height: 18px; }
