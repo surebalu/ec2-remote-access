@@ -689,8 +689,8 @@ function ServerRow({ h, env, lit }: { h: HostHealth; env: PlmEnvHealth; lit: boo
         </>
       )}
       <div className="hl-srv-actions">
-        {h.instanceKey && h.os === 'linux' && !off && <button type="button" className="hl-btn sm" title={`Start, stop or restart the services on ${h.name}`} onClick={() => st().set({ servicesFor: { targets: [{ key: h.instanceKey!, label: `${h.role}${h.label ? ` ${h.label}` : ''}` }], title: `${h.role}${h.label ? ` ${h.label}` : ''}`, env: env.id } })}><Icon.layers />Services</button>}
-        {h.instanceKey && h.os === 'linux' && !off && <button type="button" className="hl-btn sm" title={`Open a shell on ${h.name}`} onClick={() => openSshFor(h.instanceKey!)}><Icon.terminal />SSH</button>}
+        {h.instanceKey && h.os === 'linux' && !off && <button type="button" className="hl-btn sm" title={`Start, stop or restart the services on ${h.name}`} onClick={() => st().set({ servicesFor: { targets: [{ key: h.instanceKey!, label: `${h.role}${h.label ? ` ${h.label}` : ''}` }], title: `${h.role}${h.label ? ` ${h.label}` : ''}`, env: env.id } })} aria-label={`Services on ${h.name}`}><Icon.layers /><span className="hl-btn-label">Services</span></button>}
+        {h.instanceKey && h.os === 'linux' && !off && <button type="button" className="hl-btn sm" title={`Open a shell on ${h.name}`} onClick={() => openSshFor(h.instanceKey!)} aria-label={`SSH to ${h.name}`}><Icon.terminal /><span className="hl-btn-label">SSH</span></button>}
         {h.instanceKey && <button type="button" className="hl-icon-btn sm" title="Show in the host list" aria-label="Show in the host list" onClick={() => st().revealHost(h.instanceKey!)}><Icon.info /></button>}
       </div>
     </div>
