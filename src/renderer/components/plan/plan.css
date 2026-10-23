@@ -276,3 +276,9 @@
 img.link-icon { width: 24px; height: 24px; }
 .link-detail-head .link-icon { margin-right: 8px; }
 .link-detail-path { overflow-wrap: anywhere; color: var(--text-2); font: 11px/1.5 var(--mono-font); }
+/* Tree rows (Links' folders and nested tags): a chevron that opens or folds, Expand all / Collapse all in the heading. */
+.plan-chev { display: grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; margin-right: -4px; border-radius: 4px; color: var(--muted); }
+.plan-chev:not(.leaf):hover { background: var(--panel); color: var(--text); }
+.plan-chev svg { width: 11px; height: 11px; transition: transform .15s var(--ease); }
+.plan-chev.open svg { transform: rotate(90deg); }
+.plan-side h4 .plan-head-actions { display: flex; align-items: center; gap: 2px; }

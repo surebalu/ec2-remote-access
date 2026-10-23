@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { ymd } from '@shared/naturalDate'
 import { newRecordId } from '@shared/records'
+import { Icon } from '../icons'
 
 /** Pieces the Tasks, Calendar and Links tabs share (plan.css): sidebar items, today's date, an undo bar. */
 
@@ -30,7 +31,19 @@ export function useLocal<T extends string>(key: string, initial: T): [T, (v: T) 
   return [v, set]
 }
 
-export function NavItem({ icon, label, count, alert, on, onClick, onContextMenu, color, depth = 0, title }: {
+/** A set of ids remembered in this browser (the folders left open), with a toggle. */
+export function useLocalSet(key: string): [Set<string>, (id: string) => void, (ids: string[]) => void] {
+  const [set, setSet] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(key) ?? '[]') as string[]) } catch { return new Set() }
+  })
+  const save = (next: Set<string>): void => {
+    setSet(next)
+    try { localStorage.setItem(key, JSON.stringify([...next])) } catch { /* private window */ }
+  }
+  return [set, (id) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); save(n) }, (ids) => save(new Set(ids))]
+}
+
+export function NavItem({ icon, label, count, alert, on, onClick, onContextMenu, color, depth = 0, title, tree }: {
   icon?: ReactNode
   label: string
   count?: number
@@ -41,9 +54,22 @@ export function NavItem({ icon, label, count, alert, on, onClick, onContextMenu,
   color?: string
   depth?: number
   title?: string
+  /** A row of a tree: a chevron that opens or folds it (→ and ← do too), or a spacer for a row with nothing below. */
+  tree?: { open: boolean; hasChildren: boolean; onToggle: () => void }
 }): ReactElement {
   return (
-    <button type="button" className="plan-nav" aria-current={on ? 'page' : undefined} onClick={onClick} onContextMenu={onContextMenu} title={title ?? label} style={depth ? { paddingLeft: 9 + depth * 14 } : undefined}>
+    <button type="button" className="plan-nav" aria-current={on ? 'page' : undefined} onClick={onClick} onContextMenu={onContextMenu} title={title ?? label}
+      aria-expanded={tree?.hasChildren ? tree.open : undefined} style={depth || tree ? { paddingLeft: (tree ? 2 : 9) + depth * 14 } : undefined}
+      onKeyDown={(e) => {
+        if (!tree?.hasChildren) return
+        if ((e.key === 'ArrowRight' && !tree.open) || (e.key === 'ArrowLeft' && tree.open)) { e.preventDefault(); e.stopPropagation(); tree.onToggle() }
+      }}>
+      {tree && (
+        <span className={`plan-chev ${tree.hasChildren ? '' : 'leaf'} ${tree.open ? 'open' : ''}`} aria-hidden="true"
+          onClick={(e) => { if (!tree.hasChildren) return; e.stopPropagation(); tree.onToggle() }}>
+          {tree.hasChildren && <Icon.forward />}
+        </span>
+      )}
       {color ? <span className="plan-dot" style={{ background: color }} /> : icon}
       <span className="plan-nav-label">{label}</span>
       {!!count && <span className={`plan-count ${alert ? 'alert' : ''}`}>{count}</span>}
