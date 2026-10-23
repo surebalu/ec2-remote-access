@@ -25,6 +25,7 @@ import { restoreSessionCookies, saveSessionCookies } from './sessionCookies'
 import { mainWindow, setMainWindow } from './windows'
 import { closeLauncher, updateLauncherKey } from './launcherWindow'
 import { closeLinksPanel, updateLinksPanelKeys } from './linksPanel'
+import { closeToolWindows } from './toolWindows'
 
 setHost(electronHost)
 
@@ -75,7 +76,7 @@ function createWindow(): void {
   })
   setMainWindow(win)
   // The launcher's hidden window would otherwise keep the app running with no window to show.
-  win.on('closed', () => { closeLauncher(); closeLinksPanel() })
+  win.on('closed', () => { closeLauncher(); closeLinksPanel(); closeToolWindows() })
   initWebviews(win)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.webContents.on('console-message', (ev) => {

@@ -45,6 +45,7 @@ export function createGatewayHost(dataDir: string, broadcast: (channel: string, 
     voice: null,
     launcher: null,
     linksPanel: null,
+    toolWindows: null,
     extensions: null,
     encrypt(plain) {
       const iv = randomBytes(12)

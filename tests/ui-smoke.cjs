@@ -191,6 +191,8 @@ const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !r
 const boardsSaved = {}
 // Tasks, Calendar and Links documents (main/records.ts), Anybox's library on "this Mac", a page preview and an iCal link.
 const recordDocs = {}
+// Tools in windows of their own (main/toolWindows.ts): which are out.
+let toolsOut = []
 // Settings → Data: the data folder's state as main/dataFolder.ts reports it.
 let dataState = { dir: '', reachable: false, syncing: false, places: [{ id: 'app', label: 'This Mac’s copy', path: '/fixture/userData' }, { id: 'records', label: 'Tasks, Calendar and Links', path: '/fixture/userData/records' }] }
 // The first Anybox import meets macOS's privacy wall, as on a Mac that has not let this app in.
@@ -367,6 +369,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'rdp:release': return
     case 'records:load': return structuredClone(recordDocs[args[0]] ?? { rev: 0, items: {} })
     case 'data:status': case 'data:sync': return dataState
+    case 'tools:list': return toolsOut
+    case 'tools:detach': toolsOut = [...new Set([...toolsOut, args[0]])]; _e.sender.send('tools:detached', toolsOut); return
+    case 'tools:attach': toolsOut = toolsOut.filter((k) => k !== args[0]); _e.sender.send('tools:detached', toolsOut); _e.sender.send('app:command', { kind: 'section', section: args[0] }); return
+    case 'tools:relay': return toolsOut.includes(args[0])
     case 'data:pickFolder': return '/Volumes/home/EC2 Remote Access'
     case 'data:setFolder': dataState = { ...dataState, dir: args[0], reachable: !!args[0], lastSync: args[0] ? Date.now() : undefined }; return dataState
     case 'data:copyLinkFiles': dataState = { ...dataState, linkFiles: { to: `${dataState.dir}/Links Files`, done: 3, total: 3, finished: true } }; return dataState
@@ -2608,6 +2614,44 @@ app.whenReady().then(async () => {
     await buntil(`document.querySelector('button[aria-label="Links"]').classList.contains('on') && !!document.querySelector('.link-row.selected[data-link="${shownLink.id}"]')`, 'links shows the item')
     bwin.webContents.send('app:command', { kind: 'section', section: 'hosts' })
     await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'back to hosts')
+    // A tool in a window of its own: Open in New Window closes its tab here, its rail button then hands the call to
+    // that window, and Put Back shows it here again.
+    const railMenu = async (label, item) => {
+      await bjs(`document.querySelector('button[aria-label="${label}"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+      await buntil(`[...document.querySelectorAll('.popover .menu-item')].some((b) => b.textContent === ${JSON.stringify(item)})`, `${label}: ${item}`)
+      await bjs(`[...document.querySelectorAll('.popover .menu-item')].find((b) => b.textContent === ${JSON.stringify(item)}).click()`)
+    }
+    await bjs(`document.querySelector('button[aria-label="Links"]').click()`)
+    await buntil(`!!document.querySelector('section.plan.links')`, 'links open before detaching')
+    await railMenu('Links', 'Open in New Window')
+    await buntil(`document.querySelector('button[aria-label="Links"]').classList.contains('rail-out') && !document.querySelector('section.plan.links')`, 'links is out and its tab closed')
+    assert.ok(calls.some((c) => c.channel === 'tools:detach' && c.args[0] === 'links'))
+    const relays = calls.filter((c) => c.channel === 'tools:relay').length
+    await bjs(`document.querySelector('button[aria-label="Links"]').click()`)
+    for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'tools:relay').length === relays; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'tools:relay').at(-1)?.args.slice(0, 2), ['links', 'openTool'], 'the rail button goes to the window')
+    assert.equal(await bjs(`!!document.querySelector('section.plan.links')`), false, 'no second Links here')
+    await railMenu('Links', 'Put Back in This Window')
+    await buntil(`!document.querySelector('button[aria-label="Links"]').classList.contains('rail-out') && !!document.querySelector('section.plan.links')`, 'links back in the main window')
+    // The tool's own window: the tool under a slim bar, carrying out what the main window hands it.
+    const owin = new BrowserWindow({ show: false, width: 1000, height: 700, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    owin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const ojs = (code) => owin.webContents.executeJavaScript(code)
+    const ountil = async (code, what = code) => {
+      for (let n = 0; n < 200; n++) { if (await ojs(code)) return; await new Promise((r) => setTimeout(r, 30)) }
+      throw new Error(`Timed out (tool window): ${what}`)
+    }
+    await owin.loadFile(resolve('out/renderer/index.html'), { query: { tool: 'links' } })
+    await ountil(`document.querySelector('.tool-window-grip')?.textContent === 'Links' && !!document.querySelector('.tool-window-body section.plan.links')`, 'links in its own window')
+    assert.equal(await ojs(`document.title`), 'Links')
+    owin.webContents.send('tools:relay', { method: 'showInLinks', args: [{ id: shownLink.id }] })
+    await ountil(`!!document.querySelector('.link-row.selected[data-link="${shownLink.id}"]')`, 'the hand-off selects the link')
+    writeFileSync(join(output, 'tool-window-links.png'), (await owin.webContents.capturePage()).toPNG())
+    const attaches = calls.filter((c) => c.channel === 'tools:attach').length
+    await ojs(`document.querySelector('.tool-window-attach').click()`)
+    for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'tools:attach').length === attaches; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.deepEqual(calls.filter((c) => c.channel === 'tools:attach').at(-1)?.args, ['links'], 'Put back')
+    owin.destroy()
     // The rail's Launcher button opens it without the keyboard.
     const shows = launcherDone.filter((d) => d[0] === 'launcher:show').length
     await bjs(`document.querySelector('button[aria-label="Launcher"]').click()`)

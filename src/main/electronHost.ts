@@ -2,11 +2,12 @@ import { addExtensionFolder, clickExtension, installFromStore, listExtensions, r
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, screen, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Host, LauncherHost, LinksPanelHost, VoiceHost } from './host'
+import type { Host, LauncherHost, LinksPanelHost, ToolWindowsHost, VoiceHost } from './host'
 import { broadcastToPhones } from './phoneAccess'
 import { cancelDownload, fillPage } from './webviews'
 import { mainWindow } from './windows'
 import { fileIcons, hideLauncher, launcherCommand, launcherConfirm, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
+import { attachTool, detachTool, detachedTools, relayToTool, toolWindowList } from './toolWindows'
 import { hideLinksPanel, linksPanelCommand, linksPanelPage, linksPanelStatus, openAutomationSettings, pauseLinksPanelKeys, resizeLinksPanel, setOwnPage, showLinksPanel } from './linksPanel'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
@@ -43,6 +44,8 @@ const electronLauncher: LauncherHost = {
   confirm: launcherConfirm
 }
 
+const electronToolWindows: ToolWindowsHost = { detach: detachTool, attach: attachTool, list: detachedTools, relay: relayToTool }
+
 const electronLinksPanel: LinksPanelHost = {
   show: showLinksPanel,
   hide: hideLinksPanel,
@@ -56,9 +59,10 @@ const electronLinksPanel: LinksPanelHost = {
 
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */
 export const electronHost: Host = {
-  // The main window only: the launcher's window has no use for sessions' events.
+  // The main window and detached tools' windows: the launcher's and the Links panel's have no use for sessions' events.
   broadcast(channel, payload) {
     mainWindow()?.webContents.send(channel, payload)
+    for (const w of toolWindowList()) w.webContents.send(channel, payload)
     broadcastToPhones(channel, payload)
   },
   userDataDir: () => app.getPath('userData'),
@@ -136,5 +140,6 @@ export const electronHost: Host = {
   voice: electronVoice,
   launcher: electronLauncher,
   linksPanel: electronLinksPanel,
+  toolWindows: electronToolWindows,
   extensions: { list: listExtensions, installFromStore, addFolder: addExtensionFolder, setEnabled: setExtensionEnabled, remove: removeExtension, action: clickExtension }
 }

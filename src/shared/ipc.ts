@@ -156,6 +156,14 @@ export interface IpcApi {
    * The Links panels over any app (Mac app only; main/linksPanel.ts). `page` is what was in front when the save key was
    * pressed (read from the browser, which can take a moment, or for macOS to ask about Automation the first time).
    */
+  /**
+   * Detached tools (Mac app only; main/toolWindows.ts): open a tool in a window of its own near a screen point (or
+   * bring its window forward), put it back in the main window, list those out, and hand a window an opener call.
+   */
+  'tools:detach': (kind: string, at?: { x: number; y: number }) => Promise<void>
+  'tools:attach': (kind: string) => Promise<void>
+  'tools:list': () => Promise<string[]>
+  'tools:relay': (kind: string, method: string, args: unknown[]) => Promise<boolean>
   'linksPanel:page': () => Promise<FrontPage>
   'linksPanel:show': (mode: LinksPanelMode) => Promise<void>
   'linksPanel:hide': () => Promise<void>
@@ -326,6 +334,10 @@ export interface IpcEvents {
   'launcher:shown': { at: number }
   /** Sent to the Links panel's own window each time it appears, with what it is for. */
   'linksPanel:shown': { mode: LinksPanelMode; at: number }
+  /** The tools that have windows of their own now. */
+  'tools:detached': string[]
+  /** To a tool's own window: an opener call the main window handed on ("open this page"). */
+  'tools:relay': { method: string; args: unknown[] }
   'scan:progress': ScanProgress
   'ssh:event': SshEvent
   'sftp:transfer': SftpTransfer
