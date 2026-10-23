@@ -5,7 +5,8 @@ import type { RecordDoc, RecordKind, RecordOp } from './records'
 import type { DbAudit, DbKillRequest, DbTarget, LockReport } from './dbLocks'
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type { DiskInfo, DuplicateGroup, MapNode, MapView, RemovedEntry, ScanRootKind, ScanState, TrashOutcome } from './storage'
-import type { CleanReport, PackageReceipt } from './cleanup'
+import type { CleanItem, CleanReport, PackageReceipt } from './cleanup'
+import type { MacApp, MonitorSample, OpenApp } from './macApps'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
 import type { HostServices, ServiceAudit, ServiceJob, ServiceJobRequest } from './services'
 import type { HostHistory, HostSnapshot, ProcessDetail } from './hostInsight'
@@ -117,6 +118,16 @@ export interface IpcApi {
   'storage:systemData': () => Promise<CleanReport>
   'storage:installers': () => Promise<CleanReport>
   'storage:receipts': () => Promise<PackageReceipt[]>
+  /** The Apps rooms: installed apps (measured with `withSizes`), what one keeps in the Library, leftovers, startup items. */
+  'storage:apps': (withSizes: boolean) => Promise<MacApp[]>
+  'storage:appFiles': (appPath: string) => Promise<CleanItem[]>
+  'storage:leftovers': () => Promise<CleanReport>
+  'storage:startup': () => Promise<CleanReport>
+  /** Asks apps to quit as Command-Q does (anything unsaved asks first); returns how many accepted. */
+  'storage:quitApps': (pids: number[]) => Promise<number>
+  /** Monitor: one reading (rates since the last); Optimize: the open apps and how long each has been away from the front. */
+  'storage:monitor': () => Promise<MonitorSample>
+  'storage:openApps': () => Promise<{ apps: OpenApp[]; watchedFor: number }>
   'sftp:cancel': (transferId: string) => Promise<void>
   'sftp:transfers': (sessionId: string) => Promise<SftpTransfer[]>
   'sftp:clearTransfers': (sessionId: string) => Promise<void>

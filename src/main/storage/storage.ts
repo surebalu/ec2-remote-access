@@ -287,6 +287,9 @@ export async function moveToTrash(items: { path: string; size?: number; dir?: bo
     try { await access(dirname(it.path), constants.W_OK) } catch { out.failed.push({ path: it.path, reason: ADMIN, admin: true }); continue }
     go.push({ path: it.path, size: it.size ?? (st.isDirectory() ? 0 : st.blocks * 512), dir: it.dir ?? st.isDirectory() })
   }
+  // A launch agent of this account is unloaded first, so it stops now rather than running until the next login.
+  const agents = join(home, 'Library/LaunchAgents/')
+  for (const g of go) if (g.path.startsWith(agents) && g.path.endsWith('.plist')) await run('launchctl', ['bootout', `gui/${process.getuid?.() ?? 501}`, g.path], 10_000).catch(() => undefined)
   for (let k = 0; k < go.length; k += 100) {
     const batch = go.slice(k, k + 100)
     let lines: string[] = []

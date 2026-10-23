@@ -16,11 +16,15 @@ import HiddenFiles from './HiddenFiles'
 import RecentlyRemoved from './RecentlyRemoved'
 import Duplicates from './Duplicates'
 import { AiModels, Installers, JunkFiles, SystemData } from './CleanupRooms'
+import { Leftovers, StartupItems, Uninstaller, UnusedApps } from './AppRooms'
+import { Monitor, Optimize } from './MacRooms'
 
 /**
  * Storage: a Mac cleaner in the spirit of Strata, as rooms in a sidebar of its own. The Disk rooms look into a scan
  * of the Mac, the home folder or any folder (main/storage: a separate process walks the disk and keeps the tree); the
- * Clean up rooms measure the places caches, models, backups and installers are kept (main/storage/cleanup.ts).
+ * Clean up rooms measure the places caches, models, backups and installers are kept (main/storage/cleanup.ts); the
+ * Apps rooms read the installed apps, their Library files and startup items (macApps.ts), and This Mac reads the
+ * processor, memory, disk, network and battery and the open apps (monitor.ts).
  * Nothing is ever deleted: what goes, goes to the Trash, and Recently Removed puts it back. Mac app only.
  */
 
@@ -44,6 +48,22 @@ const GROUPS: { label?: string; rooms: Room[] }[] = [
       { id: 'system', label: 'System Data', icon: () => <Icon.disk />, render: () => <SystemData /> },
       { id: 'duplicates', label: 'Duplicates', icon: () => <Icon.copy />, render: () => <Duplicates /> },
       { id: 'installers', label: 'Installers', icon: () => <Icon.archive />, render: () => <Installers /> }
+    ]
+  },
+  {
+    label: 'Apps',
+    rooms: [
+      { id: 'unused', label: 'Unused Apps', icon: () => <Icon.moon />, render: () => <UnusedApps /> },
+      { id: 'uninstaller', label: 'Uninstaller', icon: () => <Icon.trash />, render: () => <Uninstaller /> },
+      { id: 'leftovers', label: 'Leftovers', icon: () => <Icon.box />, render: () => <Leftovers /> },
+      { id: 'startup', label: 'Startup Items', icon: () => <Icon.power />, render: () => <StartupItems /> }
+    ]
+  },
+  {
+    label: 'This Mac',
+    rooms: [
+      { id: 'monitor', label: 'Monitor', icon: () => <Icon.gauge />, render: (a) => <Monitor active={a} /> },
+      { id: 'optimize', label: 'Optimize', icon: () => <Icon.wand />, render: () => <Optimize /> }
     ]
   },
   { rooms: [{ id: 'removed', label: 'Recently Removed', icon: () => <Icon.history />, render: () => <RecentlyRemoved /> }] }

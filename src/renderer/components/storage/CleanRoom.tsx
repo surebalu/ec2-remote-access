@@ -14,7 +14,7 @@ import { setRoom, useStorage, type RoomId } from './state'
 
 const SHOW = 6
 
-export default function CleanRoom({ room, icon, title, sub, intro, measuring, load, after, from }: {
+export default function CleanRoom({ room, icon, title, sub, intro, measuring, load, after, from, noSizes }: {
   room: RoomId
   icon: ReactElement
   title: string
@@ -27,6 +27,8 @@ export default function CleanRoom({ room, icon, title, sub, intro, measuring, lo
   after?: ReactNode
   /** The room's name in Recently Removed. */
   from?: string
+  /** Items whose size says nothing (startup items' plists). */
+  noSizes?: boolean
 }): ReactElement {
   const report = useStorage((s) => s.reports[room])
   const [busy, setBusy] = useState(false)
@@ -61,7 +63,7 @@ export default function CleanRoom({ room, icon, title, sub, intro, measuring, lo
 
   return (
     <div className="st-list-room">
-      <RoomHead icon={icon} title={title} sub={busy ? measuring : report ? (total ? `${bytes(total)} found · ${bytes(safe)} can go without losing anything` : sub) : sub}>
+      <RoomHead icon={icon} title={title} sub={busy ? measuring : report ? (noSizes ? `${plural(items.length, 'item')} · ${plural(items.filter((i) => i.safe && !i.blocked).length, 'item')} safe to remove` : total ? `${bytes(total)} found · ${bytes(safe)} can go without losing anything` : sub) : sub}>
         {report && <span className="muted st-when">Measured {ago(report.at)}</span>}
         <button type="button" className="btn btn-sm" disabled={busy} onClick={measure}><Icon.refresh />{busy ? 'Measuring…' : 'Look again'}</button>
       </RoomHead>
@@ -71,7 +73,7 @@ export default function CleanRoom({ room, icon, title, sub, intro, measuring, lo
         {error && <div className="plan-error"><Icon.alert />{error}</div>}
         {busy && !report && <div className="st-empty"><div className="st-spinner" aria-hidden="true" /><p>{measuring}</p></div>}
         {report && !report.groups.length && <div className="st-empty"><Icon.check className="plan-empty-icon" /><p>Nothing here worth clearing.</p></div>}
-        {report?.groups.map((g) => <Group key={g.id} group={g} ticks={ticks} open={open.has(g.id)} icons={icons}
+        {report?.groups.map((g) => <Group key={g.id} group={g} ticks={ticks} open={open.has(g.id)} icons={icons} noSizes={noSizes}
           onOpen={() => setOpen((o) => { const n = new Set(o); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n })}
           onTick={tick} onAct={act} onMenu={(item, anchor) => setMenu({ item, anchor })} />)}
         {after}
@@ -82,8 +84,9 @@ export default function CleanRoom({ room, icon, title, sub, intro, measuring, lo
   )
 }
 
-function Group({ group, ticks, open, icons, onOpen, onTick, onAct, onMenu }: {
+function Group({ group, ticks, open, icons, noSizes, onOpen, onTick, onAct, onMenu }: {
   group: CleanGroup
+  noSizes?: boolean
   ticks: Set<string>
   open: boolean
   icons: Map<string, string>
@@ -107,13 +110,13 @@ function Group({ group, ticks, open, icons, onOpen, onTick, onAct, onMenu }: {
           <h3>{group.title} <span className="muted">{plural(group.items.length, 'item')}</span></h3>
           {group.text && <p>{group.text}</p>}
         </div>
-        <span className="st-size">{bytes(groupSize(group))}</span>
+        {!noSizes && <span className="st-size">{bytes(groupSize(group))}</span>}
       </header>
       {shown.map((i) => (
         <ItemRow key={i.path} checked={ticks.has(i.path)} onCheck={i.blocked ? undefined : (v) => onTick([i.path], v)} disabled={!!i.blocked}
           icon={i.path.startsWith('/') && !i.path.includes('#') ? <NodeIcon node={i} icons={icons} /> : <span className="st-icon st-icon-glyph"><Icon.layers /></span>}
           title={i.name} sub={i.path.startsWith('/') && !i.path.includes('#') ? <span title={i.path}>{tilde(i.path.replace(/\/[^/]+$/, ''))}</span> : undefined}
-          note={[i.note, i.blocked].filter(Boolean).join(' ')} warn={!i.safe && !i.blocked} size={i.size}
+          note={[i.note, i.blocked].filter(Boolean).join(' ')} warn={!i.safe && !i.blocked} size={noSizes ? undefined : i.size}
           extra={i.action && <button type="button" className="btn btn-sm" onClick={(e) => { e.stopPropagation(); onAct(i.action!) }}>{i.action.copy ? <Icon.copy /> : i.action.url ? <Icon.settings /> : null}{i.action.label}</button>}
           onMenu={i.path.startsWith('/') && !i.path.includes('#') && !i.blocked ? (anchor) => onMenu(i, anchor) : undefined} />
       ))}

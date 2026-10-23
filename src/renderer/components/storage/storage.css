@@ -177,6 +177,39 @@ button.st-legend-item:hover, .st-legend-item.on { background: var(--panel-2); }
 .st-warn-text { color: var(--err); font-weight: 600; }
 .st-tile-size { color: var(--accent); font-weight: 600; }
 
+/* Uninstaller: the apps on the left, what goes with the chosen ones on the right. */
+.st-uninstaller { display: flex; flex: 1; min-height: 0; }
+.st-un-list { display: flex; flex: 0 0 42%; flex-direction: column; min-width: 300px; min-height: 0; border-right: 1px solid var(--border); }
+.st-un-list .st-list { padding-left: 16px; padding-right: 12px; }
+.st-un-detail { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; padding-top: 16px; }
+.st-un-detail .st-list { padding: 0 20px 16px; }
+
+/* Monitor and Optimize. */
+.st-monitor { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; margin: 0 28px 14px; }
+.st-mon-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+.st-mon-card.lvl-warn, .st-mon-card.lvl-crit { border-color: color-mix(in srgb, var(--lvl) 45%, var(--border)); }
+.st-mon-card h3 { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; }
+.st-mon-card h3 svg { width: 15px; height: 15px; color: var(--text-2); }
+.st-mon-top { display: flex; align-items: center; gap: 14px; }
+.st-mon-top .hl-spark { flex: 1; min-width: 0; }
+.st-mon-top .hl-gauge b { font-size: 16px; font-weight: 700; }
+.st-mon-rates { display: flex; flex-direction: column; gap: 4px; min-width: 110px; font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 650; }
+.st-mon-rates span { display: inline-flex; align-items: center; gap: 5px; }
+.st-mon-rates svg { width: 13px; height: 13px; color: var(--muted); }
+.st-mon-card dl { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.st-mon-card dl > div { display: flex; justify-content: space-between; gap: 10px; }
+.st-mon-card dt { color: var(--muted); }
+.st-mon-card dd { min-width: 0; overflow: hidden; color: var(--text); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.st-cores { display: flex; align-items: flex-end; gap: 3px; height: 28px; }
+.st-cores span { position: relative; flex: 1; height: 100%; overflow: hidden; border-radius: 3px; background: var(--panel-2); }
+.st-cores i { position: absolute; inset: auto 0 0 0; background: var(--accent); transition: height .4s var(--ease); }
+.st-mon-app { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 6px; border-radius: 8px; font-size: 12.5px; }
+.st-mon-app:hover { background: var(--panel-2); }
+.st-mon-name { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-mon-note { flex: 0 1 280px; min-width: 0; overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.st-mon-num { flex-shrink: 0; width: 76px; font-variant-numeric: tabular-nums; text-align: right; }
+.st-mon-quit { width: 52px; }
+
 /* The administrator list. */
 .st-admin { display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; line-height: 1.5; }
 .st-admin ul { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
@@ -185,6 +218,10 @@ button.st-legend-item:hover, .st-legend-item.on { background: var(--panel-2); }
 
 @container (max-width: 640px) {
   .st-disk { display: none; }
+  .st-uninstaller { flex-direction: column; }
+  .st-un-list { flex-basis: 45%; border-right: 0; border-bottom: 1px solid var(--border); }
+  .st-monitor { margin-left: 12px; margin-right: 12px; }
+  .st-mon-note { display: none; }
   .st-side-group { display: contents; }
   .st-side h4 { display: none; }
   .st-head-icon { display: none; }

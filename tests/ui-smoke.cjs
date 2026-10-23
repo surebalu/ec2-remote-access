@@ -125,6 +125,12 @@ const stView = (path) => {
   const children = (stKids[path] ?? []).slice().sort((a, b) => b.size - a.size)
   return { node, chain, children, small: { bytes: Math.max(0, node.size - children.reduce((t, c) => t + c.size, 0)), files: 3000 }, inner: Object.fromEntries(children.filter((c) => stKids[c.path]).map((c) => [c.id, stKids[c.path].map((g) => ({ size: g.size, dir: g.dir, kind: g.kind }))])) }
 }
+const stApps = [
+  { path: '/Applications/Old Editor.app', name: 'Old Editor', id: 'com.old.editor', version: '2.1', size: 1.4e9, lastUsed: now - 200 * 86400000, intelOnly: true, running: false, systemExtension: false, admin: false, apple: false },
+  { path: '/Applications/Daily.app', name: 'Daily', id: 'com.daily.app', version: '5.0', size: 3e8, lastUsed: now - 86400000, intelOnly: false, running: true, systemExtension: false, admin: false, apple: false },
+  { path: '/Applications/Guard VPN.app', name: 'Guard VPN', id: 'com.guard.vpn', version: '1.0', size: 2e8, lastUsed: now - 400 * 86400000, intelOnly: false, running: false, systemExtension: true, admin: false, apple: false }
+]
+const stQuits = []
 let stState = { status: 'idle' }
 let stRemoved = []
 const stPutBacks = []
@@ -462,6 +468,21 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       { path: '/Users/fixture/.ollama/models/manifests/registry.ollama.ai/library/llama3.2/latest', name: 'llama3.2:latest', size: 2e9, dir: false, safe: false, blocked: 'Removed with ollama rm in Terminal: only Ollama removes its models safely.', action: { label: 'Copy the command', copy: 'ollama rm llama3.2:latest' } }] }] }
     case 'storage:systemData': case 'storage:installers': return { at: Date.now(), notes: [], groups: [] }
     case 'storage:receipts': return []
+    case 'storage:apps': return stApps
+    case 'storage:appFiles': { const a = stApps.find((x) => x.path === args[0]); return [
+      { path: `/Users/fixture/Library/Caches/${a.id}`, name: a.id, size: 5e7, dir: true, safe: true, note: 'Named for the app\'s bundle identifier. Caches are rebuilt whenever an app needs them.' },
+      { path: `/Users/fixture/Library/Application Support/${a.name}`, name: a.name, size: 2e8, dir: true, safe: false, note: 'Named like the app. Application Support can hold documents, so it is never ticked for you.' }] }
+    case 'storage:leftovers': return { at: Date.now(), notes: [], groups: [{ id: 'com.gone.app', title: 'gone', text: 'com.gone.app: no app with this identifier is installed.', items: [{ path: '/Users/fixture/Library/Caches/com.gone.app', name: 'com.gone.app', size: 3e7, dir: true, safe: true, note: 'Caches are rebuilt whenever an app needs them.' }] }] }
+    case 'storage:startup': return { at: Date.now(), notes: ['Apps that open at login are in System Settings.'], groups: [{ id: 'user-agent', title: 'Launch agents, your account', text: 'Started when you log in.', items: [
+      { path: '/Users/fixture/Library/LaunchAgents/com.gone.agent.plist', name: 'com.gone.agent', size: 0, dir: false, safe: true, note: 'No installed app matches its name. Its program, /Applications/Gone.app/Contents/MacOS/agent, is no longer there.' },
+      { path: '/Users/fixture/Library/LaunchAgents/com.daily.helper.plist', name: 'com.daily.helper', size: 0, dir: false, safe: false, note: 'From Daily. Running now.' }] }] }
+    case 'storage:quitApps': stQuits.push(...args[0]); return args[0].length
+    case 'storage:monitor': return { at: Date.now(), cpu: 23.5, cores: [10, 40, 20, 30, 5, 60, 15, 8], load: [2.1, 1.8, 1.5], memory: { total: 32e9, used: 21e9, app: 14e9, wired: 4e9, compressed: 3e9, cached: 6e9, free: 11e9, swap: 0, pressure: 'normal' },
+      net: { rx: 120000 + Math.random() * 1e5, tx: 40000 }, disk: { read: 3e6 * Math.random(), write: 1e6 }, battery: { percent: 77, charging: false, plugged: true, minutes: null, cycles: 116, health: 83, temperature: 30 }, uptime: 360000,
+      apps: [{ name: 'Daily', path: '/Applications/Daily.app', cpu: 12.5, memory: 1.2e9, pids: [501, 502], system: false }, { name: 'WindowServer', path: '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer', cpu: 8, memory: 3e8, pids: [300], system: true }], address: '192.168.0.20', thermal: 'normal' }
+    case 'storage:openApps': return { watchedFor: 3600000, apps: [
+      { name: 'Daily', id: 'com.daily.app', path: '/Applications/Daily.app', pid: 501, memory: 1.2e9, cpu: 0.1, lastFront: now - 2 * 3600000, front: false, busy: false, keep: false, idle: true },
+      { name: 'Mail', id: 'com.apple.mail', path: '/System/Applications/Mail.app', pid: 601, memory: 4e8, cpu: 0.2, lastFront: now - 5 * 3600000, front: false, busy: false, keep: true, idle: false }] }
     case 'storage:trashSize': return 0.8e9
     case 'storage:trash': {
       const moved = args[0].map((it, i) => ({ id: `st-${Date.now()}-${i}`, path: it.path, trashPath: `/Users/fixture/.Trash/${it.path.split('/').pop()}`, size: it.size ?? 0 }))
@@ -3391,6 +3412,30 @@ app.whenReady().then(async () => {
     await tuntil(`document.querySelectorAll('.st-group .st-row').length === 2`, 'duplicates found')
     assert.equal(await tjs(`[...document.querySelectorAll('.st-group .st-row')].map((r) => r.querySelector('.st-check').checked).join()`), 'false,true', 'the oldest copy stays')
     await tshot('storage-duplicates.png')
+    await stNav('Unused Apps')
+    await tuntil(`[...document.querySelectorAll('.st-list .st-row')].some((r) => r.textContent.includes('Old Editor'))`, 'unused apps listed')
+    assert.ok(await tjs(`[...document.querySelectorAll('.st-list .st-row')].find((r) => r.textContent.includes('Old Editor')).textContent.includes('Intel')`), 'Intel-only apps are marked')
+    assert.ok(await tjs(`[...document.querySelectorAll('.st-list .st-row')].find((r) => r.textContent.includes('Guard VPN'))?.querySelector('.st-check') === null`), 'an app with a system extension goes through Finder')
+    await tjs(`[...document.querySelectorAll('.st-list .st-row')].find((r) => r.textContent.includes('Old Editor')).querySelector('button.btn-ghost').click()`)
+    await tuntil(`document.querySelector('.st-uninstaller') && [...document.querySelectorAll('.st-un-detail .st-row')].some((r) => r.textContent.includes('com.old.editor'))`, 'Uninstall… opens the app in the Uninstaller with its files')
+    assert.equal(await tjs(`document.querySelectorAll('.st-un-detail .st-check:checked').length`), 2, 'the app and what is sure start ticked')
+    await tshot('storage-uninstaller.png')
+    await stNav('Startup Items')
+    await tuntil(`document.querySelectorAll('.st-list .st-row').length === 2`, 'startup items listed')
+    assert.equal(await tjs(`document.querySelectorAll('.st-list .st-row .st-check:checked').length`), 1, 'only the agent whose program is gone starts ticked')
+    await stNav('Monitor')
+    await tuntil(`document.querySelectorAll('.st-mon-card').length === 5 && document.querySelectorAll('.st-cores span').length === 8`, 'monitor cards')
+    await new Promise((r) => setTimeout(r, 4500))
+    await tshot('storage-monitor.png')
+    await stNav('Optimize')
+    await tuntil(`document.querySelectorAll('.st-card .st-mon-app').length >= 3 && !!document.querySelector('.st-banner.warn')`, 'optimize shows apps and junk')
+    assert.equal(await tjs(`[...document.querySelectorAll('.st-card .st-mon-app')].filter((r) => r.querySelector('.st-check')?.checked).map((r) => r.querySelector('.st-mon-name').firstChild.textContent).join()`), 'Daily', 'only the idle app is ticked; Mail keeps you notified')
+    await tshot('storage-optimize.png')
+    await tjs(`[...document.querySelectorAll('.st-banner button')].find((b) => b.textContent.includes('Optimize')).click()`)
+    for (let n = 0; n < 60 && !stQuits.includes(501); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(stQuits.includes(501), 'Optimize asks the idle app to quit')
+    for (let n = 0; n < 60 && calls.filter((c) => c.channel === 'storage:trash').at(-1)?.args[1] !== 'Optimize'; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'storage:trash').at(-1).args[1], 'Optimize', 'and moves the safe junk')
     await stNav('Recently Removed')
     await tuntil(`document.querySelector('.st-intro')?.textContent.includes('800 MB')`, 'recently removed shows the Trash')
     await tshot('storage-removed.png')

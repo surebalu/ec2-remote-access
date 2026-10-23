@@ -13,6 +13,7 @@ import { closeOnePassword } from './onepassword'
 import { closePlmHealth } from './plmHealth'
 import { closeDbLocks } from './dbLocks'
 import { closeStorage, noteDiskUse } from './storage/storage'
+import { closeMonitor } from './storage/monitor'
 import { flushDataFolder, updateDataFolder } from './dataFolder'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
@@ -136,6 +137,7 @@ app.on('before-quit', (e) => {
   closeAllVoice()
   closeOnePassword()
   closeStorage()
+  closeMonitor()
   Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder()])
     .then(() => stopProxy())
     .catch(() => undefined)

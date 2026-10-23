@@ -28,10 +28,12 @@ interface StorageState {
   adminItems: { path: string; reason: string }[] | null
   /** The Cleanup rooms' last reports, kept while the page lives so coming back does not measure again. */
   reports: Partial<Record<RoomId, CleanReport>>
+  /** Apps to open the Uninstaller on ("Open in the Uninstaller"). */
+  uninstall: { paths: string[]; nonce: number } | null
 }
 
 export const useStorage = create<StorageState>(() => ({
-  scan: { status: 'idle' }, disk: null, fda: null, room: savedRoom(), trashed: 0, mapRequest: null, undo: null, adminItems: null, reports: {}
+  scan: { status: 'idle' }, disk: null, fda: null, room: savedRoom(), trashed: 0, mapRequest: null, undo: null, adminItems: null, reports: {}, uninstall: null
 }))
 
 /** Takes what went to the Trash out of every kept report, so the rooms match the disk without measuring again. */
@@ -85,6 +87,20 @@ export async function startScan(kind: ScanRootKind, path?: string): Promise<void
 }
 
 export const cancelScan = (): Promise<void> => window.api.invoke('storage:cancel').catch(() => undefined)
+
+export function openInUninstaller(paths: string[]): void {
+  useStorage.setState({ uninstall: { paths, nonce: Date.now() } })
+  setRoom('uninstaller')
+}
+
+/** Asks apps to quit (as Command-Q does) and says how many did. */
+export async function quitApps(pids: number[], names: string[]): Promise<number> {
+  try {
+    const n = await window.api.invoke('storage:quitApps', pids)
+    toast(n ? 'success' : 'info', n ? `Asked ${names.length === 1 ? names[0] : plural(n, 'app')} to quit. Anything unsaved asks first.` : 'Nothing was asked to quit.')
+    return n
+  } catch (e) { toast('error', (e as Error).message); return 0 }
+}
 
 export function openInMap(path: string): void {
   useStorage.setState({ mapRequest: { path, nonce: Date.now() } })

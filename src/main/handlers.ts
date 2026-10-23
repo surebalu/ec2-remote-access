@@ -41,6 +41,8 @@ import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finde
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
 import { aiReport, installersReport, junkReport, packageReceipts, systemReport } from './storage/cleanup'
+import { appFiles, forgetApps, installedApps, leftoversReport, quitApps, startupReport } from './storage/macApps'
+import { monitorSample, openApps } from './storage/monitor'
 import { cancelDuplicates, cancelScan, diskInfo, findDuplicates, forgetRemoved, fullDiskAccess, hiddenItems, largeFiles, moveToTrash, openTrash, pickScanFolder, putBack, removedItems, searchScan, startScan, storageState, storageView, trashSize } from './storage/storage'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
@@ -163,7 +165,7 @@ export const handlers: Handlers = {
   'storage:hidden': () => hiddenItems(),
   'storage:duplicates': () => findDuplicates(),
   'storage:cancelDuplicates': () => cancelDuplicates(),
-  'storage:trash': (items, from) => moveToTrash(items, from),
+  'storage:trash': async (items, from) => { const r = await moveToTrash(items, from); forgetApps(); return r },
   'storage:removed': () => removedItems(),
   'storage:putBack': (ids) => putBack(ids),
   'storage:forget': (ids) => forgetRemoved(ids),
@@ -174,6 +176,13 @@ export const handlers: Handlers = {
   'storage:systemData': () => systemReport(),
   'storage:installers': () => installersReport(),
   'storage:receipts': () => packageReceipts(),
+  'storage:apps': (withSizes) => installedApps(withSizes),
+  'storage:appFiles': (path) => appFiles(path),
+  'storage:leftovers': () => leftoversReport(),
+  'storage:startup': () => startupReport(),
+  'storage:quitApps': (pids) => quitApps(pids),
+  'storage:monitor': () => monitorSample(),
+  'storage:openApps': () => openApps(),
   'sftp:cancel': async (tid) => cancelTransfer(tid),
   'sftp:transfers': async (id) => listTransfers(id),
   'sftp:clearTransfers': async (id) => clearTransfers(id),
