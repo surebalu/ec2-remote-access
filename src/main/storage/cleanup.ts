@@ -4,11 +4,14 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { BIG_FILE, compareVersions, extOf, type MapNode } from '@shared/storage'
 import {
-  AI_CACHE_DIRS, AI_PLACES, APPLE_ASSETS, appleAssetGroup, blobDigest, cacheOwner, DOWNLOAD_CACHES, hfRepo, INSTALLER_EXTS, KEEP_CACHES, MODEL_EXTS,
+  AI_CACHE_DIRS, AI_PLACES, SUPPORT_CACHES, supportCacheLabel, APPLE_ASSETS, appleAssetGroup, blobDigest, cacheOwner, DOWNLOAD_CACHES, hfRepo, INSTALLER_EXTS, KEEP_CACHES, MODEL_EXTS,
   parseOllamaManifest, parsePackageInfo, VERDICT_NOTE, zipAppPlist,
-  type CleanGroup, type CleanItem, type CleanReport, type InstallerVerdict, type PackageReceipt
+  type CleanGroup, type CleanItem, type CleanReport, type InstallerVerdict, type PackageReceipt, type SystemCard
 } from '@shared/cleanup'
 import { fullDiskAccess, scanQuery } from './storage'
+import { runningApps } from './running'
+import { installedApps } from './macApps'
+export { runningApps }
 
 /**
  * The Cleanup rooms' measuring (Junk Files, AI Models, System Data, Installers), Mac app only. Each room's report is
@@ -52,24 +55,6 @@ async function list(dir: string): Promise<{ name: string; path: string; dir: boo
 const exists = async (p: string): Promise<boolean> => { try { await lstat(p); return true } catch { return false } }
 const mtimeOf = async (p: string): Promise<number> => { try { return (await lstat(p)).mtimeMs } catch { return 0 } }
 
-/** The apps running now, with their bundle ids (lsappinfo needs no permission). */
-export async function runningApps(): Promise<{ id: string; name: string; pid: number; type: string; path: string }[]> {
-  const text = await out('lsappinfo', ['list'], 10_000)
-  const apps: { id: string; name: string; pid: number; type: string; path: string }[] = []
-  for (const block of text.split(/\n(?=\s*\d+\) ")/)) {
-    const name = /^\s*\d+\) "([^"]*)"/.exec(block)?.[1]
-    if (!name) continue
-    apps.push({
-      name,
-      id: /bundleID="([^"]*)"/.exec(block)?.[1] ?? '',
-      pid: Number(/pid = (\d+)/.exec(block)?.[1] ?? 0),
-      type: /type="([^"]*)"/.exec(block)?.[1] ?? '',
-      path: /bundle path="([^"]*)"/.exec(block)?.[1] ?? ''
-    })
-  }
-  return apps
-}
-
 /** Whether a command-line process of this name is running (Ollama's server has no app bundle). */
 const processRunning = async (name: string): Promise<boolean> => (await out('pgrep', ['-x', name], 5000)).trim().length > 0
 
@@ -87,6 +72,30 @@ async function lastUsed(paths: string[]): Promise<Map<string, number>> {
 
 const item = (path: string, size: number, dir: boolean, safe: boolean, note?: string, extra: Partial<CleanItem> = {}): CleanItem => ({ path, name: basename(path), size, dir, safe, ...(note ? { note } : {}), ...extra })
 
+/** Folders in Application Support never looked into for caches: big, private, or another room's. */
+const SUPPORT_SKIP = new Set(['MobileSync', 'Steam', 'AddressBook', 'CallHistoryDB', 'Knowledge', 'CrashReporter', 'nomic.ai', 'Jan', 'LM Studio', 'node_modules', '.git', 'Caches'])
+
+/** The cache folders Chromium and Electron apps keep in Application Support (Cache, Code Cache, CacheStorage…). */
+async function supportCaches(): Promise<{ path: string; rel: string }[]> {
+  const root = join(home, 'Library/Application Support')
+  const found: { path: string; rel: string }[] = []
+  let visited = 0
+  const walk = async (dir: string, rel: string, depth: number): Promise<void> => {
+    if (depth > 5 || visited > 6000) return
+    visited++
+    const entries = await list(dir)
+    if (entries.length > 400) return
+    for (const e of entries) {
+      if (!e.dir || SUPPORT_SKIP.has(e.name) || e.name.startsWith('com.apple.')) continue
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (SUPPORT_CACHES[e.name] && (e.name !== 'CacheStorage' || rel.endsWith('Service Worker')) && depth > 0) found.push({ path: e.path, rel: r })
+      else await walk(e.path, r, depth + 1)
+    }
+  }
+  await walk(root, '', 0)
+  return found
+}
+
 // ----- Junk Files -----
 
 export async function junkReport(): Promise<CleanReport> {
@@ -95,7 +104,13 @@ export async function junkReport(): Promise<CleanReport> {
   const notes: string[] = []
   const L = (p: string): string => join(home, 'Library', p)
 
+  const apps = await installedApps(false).catch(() => [])
+  const appFor = (folder: string): { name: string; path: string } | undefined => {
+    const f = folder.toLowerCase()
+    return apps.find((a) => a.id && (f === a.id.toLowerCase() || f.startsWith(`${a.id.toLowerCase()}.`))) ?? apps.find((a) => a.name.toLowerCase() === f)
+  }
   const caches = (await list(L('Caches'))).filter((e) => !e.name.startsWith('.') && !KEEP_CACHES.has(e.name))
+  const fromSupport = await supportCaches()
   const downloadCaches = caches.filter((e) => DOWNLOAD_CACHES[e.name])
   const appCaches = caches.filter((e) => !DOWNLOAD_CACHES[e.name])
   const dotCache = (await list(join(home, '.cache'))).filter((e) => !AI_CACHE_DIRS.has(e.name) && !e.name.startsWith('.'))
@@ -135,16 +150,23 @@ export async function junkReport(): Promise<CleanReport> {
   // node_modules of projects left alone for months, from the last scan when there is one.
   const modules = (await scanQuery<MapNode[]>('named', { names: ['node_modules'], min: 50 * BIG_FILE }).catch(() => null)) ?? []
 
-  const all = [...appCaches, ...downloadCaches, ...dotCache, ...logs, ...derived, ...deviceSupport, ...inst, ...macInstallers, ...iosUpdates, ...downloads, ...containerCaches].map((e) => e.path)
+  const all = [...fromSupport.map((s) => ({ path: s.path })), ...appCaches, ...downloadCaches, ...dotCache, ...logs, ...derived, ...deviceSupport, ...inst, ...macInstallers, ...iosUpdates, ...downloads, ...containerCaches].map((e) => e.path)
   const sz = await sizes([...all, ...presentTools, ...presentDev, ...vms.map((v) => v.path)])
   const size = (p: string): number => sz.get(p) ?? 0
   const MB = BIG_FILE
 
-  const ownerNote = (name: string): { safe: boolean; note: string } => {
+  const RUNNING = { text: 'Running', tone: 'warn' as const }
+  const ownerNote = (name: string): { safe: boolean; note: string; badges?: CleanItem['badges'] } => {
     const owner = cacheOwner(name, running)
-    if (owner) return { safe: false, note: `${owner.name || owner.id} is open, and may be writing into it: quit it first.` }
-    if (name.startsWith('com.apple.')) return { safe: false, note: 'Kept by a part of macOS, which rebuilds it. Not ticked for you.' }
+    if (owner) return { safe: false, note: `${owner.name || owner.id} is open, and may be writing into it: quit it first.`, badges: [RUNNING] }
+    if (name.startsWith('com.apple.')) return { safe: false, note: 'Kept by a part of macOS, which rebuilds it. Not ticked for you.', badges: [{ text: 'macOS', tone: 'muted' }] }
     return { safe: true, note: 'The app rebuilds its cache when it next needs it.' }
+  }
+  /** A ~/Library/Caches folder titled with its app's name, the folder's own beneath. */
+  const cacheItem = (e: { name: string; path: string; dir: boolean }, id = e.name): CleanItem => {
+    const o = ownerNote(id)
+    const app = appFor(id)
+    return item(e.path, size(e.path), e.dir, o.safe, o.note, { ...(app ? { label: app.name, app: app.path } : {}), ...(o.badges ? { badges: o.badges } : {}), ...(e.name !== id ? { name: id } : {}) })
   }
   const xcodeOpen = running.some((r) => r.id === 'com.apple.dt.Xcode')
 
@@ -152,8 +174,16 @@ export async function junkReport(): Promise<CleanReport> {
     {
       id: 'caches', title: 'App caches', text: 'Copies apps and browsers keep to open faster. Each rebuilds its own when it next needs it.',
       items: [
-        ...appCaches.map((e) => { const o = ownerNote(e.name); return item(e.path, size(e.path), e.dir, o.safe, o.note) }),
-        ...containerCaches.map((c) => { const o = ownerNote(c.id); return item(c.path, size(c.path), true, o.safe, o.note, { name: c.id }) })
+        ...appCaches.map((e) => cacheItem(e)),
+        ...fromSupport.map((s) => {
+          const { app, label } = supportCacheLabel(s.rel)
+          const owner = cacheOwner(app, running) ?? cacheOwner(s.rel.split('/')[0], running)
+          const inst = apps.find((a) => a.name.toLowerCase() === app.toLowerCase() || a.name.toLowerCase() === s.rel.split('/')[0].toLowerCase())
+          return item(s.path, size(s.path), true, !owner, owner ? `${owner.name} is open, and may be writing into it: quit it first.` : 'The app rebuilds it when it next needs it.', {
+            label, name: s.rel.split('/').slice(-1)[0], ...(inst ? { app: inst.path } : {}), ...(owner ? { badges: [RUNNING] } : {})
+          })
+        }),
+        ...containerCaches.map((c) => cacheItem({ name: 'Caches', path: c.path, dir: true }, c.id))
       ]
     },
     {
@@ -190,7 +220,13 @@ export async function junkReport(): Promise<CleanReport> {
     { id: 'old', title: 'Downloads not opened for three months', text: 'Files in Downloads nobody has opened lately. Yours, so never ticked for you.', items: await oldDownloads(downloads.map((d) => ({ ...d, size: size(d.path) }))) },
     { id: 'vms', title: 'Virtual machines and games', text: 'Whole computers kept as files, and installed games. Never ticked for you.', items: vms.map((v) => item(v.path, size(v.path), !v.path.endsWith('.raw'), false, v.note)) }
   ]
-  for (const g of groups) g.items = g.items.filter((i) => i.size >= MB).sort((a, b) => b.size - a.size)
+  const LOOKS: Record<string, string> = { caches: 'caches', logs: 'logs', downloads: 'downloads', developer: 'developer', modules: 'developer', installers: 'installers', old: 'downloads-old', vms: 'vms' }
+  for (const g of groups) {
+    g.items = g.items.filter((i) => i.size >= MB).sort((a, b) => b.size - a.size)
+    g.look = LOOKS[g.id]
+    // When each last changed, for the line under its name.
+    await Promise.all(g.items.map(async (i) => { if (!i.mtime) i.mtime = await mtimeOf(i.path) }))
+  }
   return { groups: groups.filter((g) => g.items.length), at: Date.now(), notes }
 }
 
@@ -254,7 +290,7 @@ export async function aiReport(): Promise<CleanReport> {
             if (!m) continue
             for (const b of m.blobs) used.add(b.digest)
             models.push(item(e.path, m.size, false, false, place.back, {
-              name: m.name,
+              name: m.name, category: 'model',
               blocked: `Removed with ollama rm in Terminal: only Ollama removes its models safely.${ollamaOn ? '' : ' It works when Ollama is running.'}`,
               action: { label: 'Copy the command', copy: `ollama rm ${m.name}` }
             }))
@@ -267,7 +303,7 @@ export async function aiReport(): Promise<CleanReport> {
       const sz = await sizes(orphans.map((o) => o.path))
       add('Ollama', 'Ollama keeps models as shared layers; only Ollama removes a model safely. Downloads that stopped part way, or that no model uses, can go.', [
         ...models.sort((a, b) => b.size - a.size),
-        ...orphans.map((o) => item(o.path, sz.get(o.path) ?? 0, false, !ollamaOn, ollamaOn ? 'Ollama is running: quit it, or stop its server, first.' : o.name.includes('-partial') ? 'A download that stopped part way.' : 'A download no model uses.', { name: o.name.includes('-partial') ? 'Unfinished download' : 'Layer no model uses' }))
+        ...orphans.map((o) => item(o.path, sz.get(o.path) ?? 0, false, !ollamaOn, ollamaOn ? 'Ollama is running: quit it, or stop its server, first.' : o.name.includes('-partial') ? 'A download that stopped part way.' : 'A download no model uses.', { name: o.name.includes('-partial') ? 'Unfinished download' : 'Layer no model uses', category: 'cache' }))
       ])
       continue
     }
@@ -278,22 +314,22 @@ export async function aiReport(): Promise<CleanReport> {
       const sz = await sizes(repos.map((r) => r.path))
       add('Hugging Face', 'What Python libraries downloaded from Hugging Face. Each comes back the next time code asks for it, though big ones take a while.', repos.map((r) => {
         const repo = hfRepo(r.name)!
-        return item(r.path, sz.get(r.path) ?? 0, true, false, `${repo.kind === 'model' ? 'A model' : repo.kind === 'dataset' ? 'A dataset' : 'A space'}. ${place.back}`, { name: repo.name })
+        return item(r.path, sz.get(r.path) ?? 0, true, false, `${repo.kind === 'model' ? 'A model' : repo.kind === 'dataset' ? 'A dataset' : 'A space'}. ${place.back}`, { name: repo.name, category: repo.kind === 'model' ? 'model' : 'other' })
       }))
       const xet = join(home, '.cache/huggingface/xet')
-      if (await exists(xet)) add('Hugging Face', '', [item(xet, (await sizes([xet])).get(xet) ?? 0, true, true, 'A cache of the pieces downloads are made of. Fetched again as needed.', { name: 'Download cache (xet)' })])
+      if (await exists(xet)) add('Hugging Face', '', [item(xet, (await sizes([xet])).get(xet) ?? 0, true, true, 'A cache of the pieces downloads are made of. Fetched again as needed.', { name: 'Download cache (xet)', category: 'cache' })])
       continue
     }
     const open = place.tool === 'LM Studio' ? appOpen('LM Studio') : place.tool === 'GPT4All' ? appOpen('GPT4All') : place.tool === 'Jan' ? appOpen('Jan') : false
     const shown = place.layout === 'files' ? entries : entries.filter((e) => e.dir)
     const sz = await sizes(shown.map((e) => e.path))
-    add(place.tool, place.back, shown.map((e) => item(e.path, sz.get(e.path) ?? 0, e.dir, false, open ? `${place.tool} is open: quit it before moving its models. ${place.back}` : place.back, place.tool === 'LM Studio' ? { name: e.path.split('/').slice(-2).join('/') } : {})))
+    add(place.tool, place.back, shown.map((e) => item(e.path, sz.get(e.path) ?? 0, e.dir, false, open ? `${place.tool} is open: quit it before moving its models. ${place.back}` : place.back, { category: place.path.includes('cache') && place.tool !== 'LM Studio' ? 'cache' : 'model', ...(place.tool === 'LM Studio' ? { name: e.path.split('/').slice(-2).join('/') } : {}) })))
   }
 
   // Model files elsewhere, from the last scan.
   const found = (await scanQuery<MapNode[]>('search', { query: MODEL_EXTS.join(' '), min: 100 * BIG_FILE, limit: 300 }).catch(() => null)) ?? []
   const other = found.filter((f) => !known.some((k) => f.path.startsWith(`${k}/`)) && !f.path.startsWith('/System/'))
-  if (other.length) add('Other model files', 'Model files from tools the app does not know by name. A model added by hand has to be downloaded again from where it came from.', other.map((f) => item(f.path, f.size, f.dir, false, 'Model files from a tool the app does not know by name.')))
+  if (other.length) add('Other model files', 'Model files from tools the app does not know by name. A model added by hand has to be downloaded again from where it came from.', other.map((f) => item(f.path, f.size, f.dir, false, 'Model files from a tool the app does not know by name.', { category: 'other' })))
 
   // Apple's own, which only macOS removes.
   const assets = await list('/System/Library/AssetsV2')
@@ -301,63 +337,74 @@ export async function aiReport(): Promise<CleanReport> {
   for (const a of assets) { const g = appleAssetGroup(a.name); if (g) byGroup.set(g, [...(byGroup.get(g) ?? []), a.path]) }
   const appleSizes = await sizes([...byGroup.values()].flat())
   const apple: CleanItem[] = APPLE_ASSETS.filter((a) => byGroup.has(a.id)).map((a) => item(`/System/Library/AssetsV2#${a.id}`, (byGroup.get(a.id) ?? []).reduce((s, p) => s + (appleSizes.get(p) ?? 0), 0), true, false, `${a.text} ${a.how}`, {
-    name: a.title, blocked: 'macOS downloads these by itself and protects them: only macOS removes them.', action: { label: 'Open the setting', url: a.url }
+    name: a.title, label: a.title, category: 'model', blocked: 'macOS downloads these by itself and protects them: only macOS removes them.', action: { label: 'Open the setting', url: a.url }, sub: a.id
   }))
   if (apple.length) add('Apple', 'On-device models for Apple Intelligence, Siri, dictation, voices and translation. macOS protects them, and only macOS can remove them.', apple)
 
-  const out = [...groups.values()].map((g) => ({ ...g, items: g.items.filter((i) => i.size >= BIG_FILE).sort((a, b) => b.size - a.size) })).filter((g) => g.items.length)
+  const out = [...groups.values()].map((g) => ({ ...g, look: g.id === 'apple' ? 'apple' : 'ai', items: g.items.filter((i) => i.size >= BIG_FILE).sort((a, b) => b.size - a.size) })).filter((g) => g.items.length)
   const notes = (await fullDiskAccess()) ? [] : ['Without Full Disk Access, models kept inside apps\' containers (Draw Things, for one) are not measured.']
   return { groups: out, at: Date.now(), notes }
 }
 
 // ----- System Data -----
 
-export async function systemReport(): Promise<CleanReport> {
+/** What System Data holds and what Storage settings counts beside it, as cards: each says where it is managed. */
+export async function systemCards(): Promise<{ cards: SystemCard[]; notes: string[] }> {
   const fda = await fullDiskAccess()
   const L = (p: string): string => join(home, 'Library', p)
   const notes: string[] = fda ? [] : ['macOS hides device backups, attachments and the Trash from apps without Full Disk Access, so some of these could not be measured.']
   const backups = await list(L('Application Support/MobileSync/Backup'))
   const music = ['/Library/Application Support/GarageBand', '/Library/Application Support/Logic', '/Library/Audio/Apple Loops']
-  const sims = ['/Library/Developer/CoreSimulator/Volumes', '/Library/Developer/CoreSimulator/Images', L('Developer/CoreSimulator/Devices')]
   const mail = L('Containers/com.apple.mail/Data/Library/Mail Downloads')
   const messages = L('Messages/Attachments')
   const trash = join(home, '.Trash')
-  const sz = await sizes([...backups.map((b) => b.path), ...music, ...sims, mail, messages, trash, L('Caches'), L('Logs')])
+  const devices = L('Developer/CoreSimulator/Devices')
+  const junkPlaces = [L('Caches'), L('Logs'), L('Developer/Xcode/DerivedData')]
+  const aiPlaces = AI_PLACES.map((p) => join(home, p.path))
+  const sz = await sizes([...backups.map((b) => b.path), ...music, mail, messages, trash, devices, ...junkPlaces, ...aiPlaces])
   const size = (p: string): number => sz.get(p) ?? 0
+  const storage = 'x-apple.systempreferences:com.apple.settings.Storage'
 
   const backupItems: CleanItem[] = []
   for (const b of backups) {
     const info = join(b.path, 'Info.plist')
     const name = (await out('plutil', ['-extract', 'Device Name', 'raw', '-o', '-', info], 5000)).trim()
     const when = (await out('plutil', ['-extract', 'Last Backup Date', 'raw', '-o', '-', info], 5000)).trim()
-    backupItems.push(item(b.path, size(b.path), true, false, `Copies Finder made when ${name || 'a device'} was backed up to this Mac${when ? `, last on ${when.slice(0, 10)}` : ''}. A device that backs up to iCloud does not need them.`, { name: name ? `${name} backup` : 'Device backup' }))
+    backupItems.push(item(b.path, size(b.path), true, false, 'A device that backs up to iCloud does not need this.', { label: name ? `${name}` : 'Device backup', sub: when ? `backed up ${when.slice(0, 10)}` : undefined }))
   }
+  // Simulator runtimes, with their size and when each was last used (xcrun is there only with Xcode).
+  const runtimes: { label: string; sub?: string; size?: number }[] = []
+  try {
+    const j = JSON.parse(await out('xcrun', ['simctl', 'runtime', 'list', '-j'], 15_000) || '{}') as Record<string, { version?: string; sizeBytes?: number; lastUsedAt?: string; platformIdentifier?: string }>
+    for (const r of Object.values(j)) {
+      const plat = /iphone/i.test(r.platformIdentifier ?? '') ? 'iOS' : /watch/i.test(r.platformIdentifier ?? '') ? 'watchOS' : /tv/i.test(r.platformIdentifier ?? '') ? 'tvOS' : /xr|vision/i.test(r.platformIdentifier ?? '') ? 'visionOS' : ''
+      runtimes.push({ label: `${plat} ${r.version ?? ''}`.trim(), sub: r.lastUsedAt ? `used ${r.lastUsedAt.slice(0, 10)}` : undefined, size: r.sizeBytes })
+    }
+  } catch { /* no Xcode */ }
+  runtimes.sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
   const swap = /used = ([\d.]+)M/.exec(await out('sysctl', ['-n', 'vm.swapusage'], 5000))
   const snapshots = (await out('tmutil', ['listlocalsnapshots', '/'], 10_000)).split('\n').filter((l) => l.includes('com.apple.TimeMachine')).length
-  const storageSettings = 'x-apple.systempreferences:com.apple.settings.Storage'
+  const trashCount = (await list(trash)).length
 
-  const groups: CleanGroup[] = [
-    {
-      id: 'can-go', title: 'What can go', text: 'Moved to the Trash, and can be put back.',
-      items: [
-        ...(size(mail) ? [item(mail, size(mail), true, true, 'Mail saves a copy of an attachment when you open it. The original stays in the message, and Mail saves it again if you open it again.', { name: 'Mail\'s copies of attachments' })] : []),
-        ...backupItems
-      ]
-    },
-    {
-      id: 'counted', title: 'Counted beside System Data', text: 'What Storage settings counts beside System Data, each with where it is managed.',
-      items: [
-        ...(size(messages) ? [item(messages, size(messages), true, false, 'Photos, videos and files from your conversations.', { name: 'Messages attachments', blocked: 'Remove them in Messages, or in Storage settings, so the conversations keep track of what went.', action: { label: 'Storage settings', url: storageSettings } })] : []),
-        ...music.filter((m) => size(m)).map((m) => item(m, size(m), true, false, 'Instruments, loops and samples GarageBand and Logic Pro downloaded.', { name: basename(m) === 'Apple Loops' ? 'Apple Loops' : `${basename(m)} sounds`, blocked: 'Remove those you do not use in Storage settings, under Music Creation, or the app asks to download them again.', action: { label: 'Storage settings', url: storageSettings } })),
-        ...sims.filter((s) => size(s)).map((s) => item(s, size(s), true, false, s.includes('Devices') ? 'Your simulators and everything installed in them.' : 'The iOS and other system versions Xcode\'s simulators run.', { name: s.includes('Devices') ? 'Simulator devices' : 'Simulator runtimes', blocked: s.includes('Devices') ? 'Delete simulators you no longer use in Xcode, Window, Devices and Simulators.' : 'Remove the versions you no longer test on in Xcode, Settings, Components.' })),
-        ...(swap ? [item('swap', parseFloat(swap[1]) * 1_048_576, false, false, 'Memory macOS set aside on the disk to make room. It shrinks by itself as memory frees up.', { name: 'Swap', blocked: 'macOS manages it.' })] : []),
-        ...(snapshots ? [item('snapshots', 0, false, false, `${snapshots} local snapshot${snapshots === 1 ? '' : 's'} Time Machine keeps between backups. macOS deletes them by itself when the space is needed, and already counts it as available.`, { name: 'Time Machine snapshots', blocked: 'Counted as available.' })] : []),
-        ...(size(trash) ? [item(trash, size(trash), true, false, 'Already removed, still taking space until it is emptied in Finder.', { name: 'The Trash', blocked: 'Empty it in Finder.', action: { label: 'Open the Trash', room: 'trash' } })] : []),
-        item(L('Caches'), size(L('Caches')), true, false, 'Caches, logs and app support files: Storage settings counts them as System Data. What of them can go is in Junk Files.', { name: 'Caches', blocked: 'See Junk Files.', action: { label: 'Junk Files', room: 'junk' } })
-      ]
-    }
+  const cards: SystemCard[] = [
+    { id: 'system', title: 'In System Data', tag: 'System Data', look: 'system', text: 'Storage settings counts caches, logs, app support files and the like as System Data, and macOS looks after most of it. What of it can go has a room of its own.',
+      rows: [{ label: 'Caches, logs and build data', size: junkPlaces.reduce((t, p) => t + size(p), 0), room: 'junk' }, { label: 'Leftovers of removed apps', room: 'leftovers' }] },
+    { id: 'ai', title: 'AI Models', tag: 'System Data or Documents', look: 'ai', text: 'What AI apps downloaded. Storage settings counts models an app keeps in your Library as System Data; those in a folder of their own, such as Ollama\'s, may count as Documents.',
+      rows: [{ label: 'Models and caches from AI apps', size: aiPlaces.reduce((t, p) => t + size(p), 0), room: 'ai' }] },
+    { id: 'backups', title: 'iPhone and iPad Backups', tag: 'iOS Files', look: 'backups', text: backupItems.length ? 'Copies Finder made when a device was backed up to this Mac, often of a phone long since replaced.' : 'None on this Mac. Finder makes one when a device is backed up to this Mac rather than to iCloud.',
+      ...(backupItems.length ? { size: backupItems.reduce((t, i) => t + i.size, 0), items: backupItems } : {}) },
+    { id: 'mail', title: 'Mail\'s Copies of Attachments', tag: 'Mail', look: 'mail', text: 'Mail saves a copy of an attachment when you open it. The original stays in the message, and Mail saves it again if you open it again, so these can go.',
+      ...(size(mail) >= BIG_FILE ? { size: size(mail), items: [item(mail, size(mail), true, true, 'Copies of attachments you opened.', { label: 'Mail Downloads' })] } : {}) },
+    ...(size(messages) ? [{ id: 'messages', title: 'Messages Attachments', tag: 'Messages', look: 'messages', size: size(messages), text: 'Photos, videos and files from your conversations. Remove them in Messages, or in Storage settings with the Info button beside Messages, so the conversations keep track of what went. Moving the folder would leave gaps in them.', actions: [{ label: 'Open Storage Settings', url: storage }] }] : []),
+    ...(runtimes.length || size(devices) ? [{ id: 'simulators', title: 'Xcode Simulators', tag: 'Developer', look: 'simulators', size: runtimes.reduce((t, r) => t + (r.size ?? 0), 0) + size(devices),
+      text: 'The versions of iOS and the other systems Xcode\'s simulators run, and the simulators themselves. macOS keeps them where only Xcode may change them: remove those you no longer test on in Xcode, Settings, Components.',
+      rows: [...runtimes, ...(size(devices) ? [{ label: 'Simulator devices', sub: 'everything installed in them', size: size(devices) }] : [])], actions: [{ label: 'Open Xcode', url: 'file:///Applications/Xcode.app' }] }] : []),
+    ...(music.some((m) => size(m)) ? [{ id: 'music', title: 'GarageBand and Logic Sounds', tag: 'Music Creation', look: 'music', size: music.reduce((t, m) => t + size(m), 0), text: 'Instruments, loops and samples GarageBand and Logic Pro downloaded. Remove those you do not use in Storage settings, under Music Creation; deleted any other way, the apps ask to download them again.', actions: [{ label: 'Open Storage Settings', url: storage }] }] : []),
+    ...(swap && parseFloat(swap[1]) > 0 ? [{ id: 'swap', title: 'Swap', tag: 'macOS', look: 'system', size: parseFloat(swap[1]) * 1_048_576, text: 'Memory macOS set aside on the disk to make room. It shrinks by itself as memory frees up.' }] : []),
+    { id: 'snapshots', title: 'Time Machine Snapshots', tag: 'Counted as available', look: 'snapshots', text: snapshots ? `${snapshots} local snapshot${snapshots === 1 ? '' : 's'} Time Machine keeps between backups. macOS deletes them by itself when the space is needed, and already counts it as available.` : 'None now. Time Machine keeps local copies between backups, and macOS deletes them by itself when the space is needed.', actions: [{ label: 'Time Machine Settings', url: 'x-apple.systempreferences:com.apple.Time-Machine-Settings.extension' }] },
+    { id: 'trash', title: 'The Trash', tag: 'Trash', look: 'trash', size: size(trash), text: `${trashCount ? `${trashCount} item${trashCount === 1 ? '' : 's'} already removed, still taking space. ` : ''}This app moves things here and never empties it, because that is the one step that cannot be undone: choose Empty in Finder to get the space back.`, actions: [{ label: 'Open Trash', room: 'trash' }] }
   ]
-  return { groups: groups.map((g) => ({ ...g, items: g.items.filter((i) => i.size >= BIG_FILE || i.path === 'snapshots') })).filter((g) => g.items.length), at: Date.now(), notes }
+  return { cards, notes }
 }
 
 // ----- Installers -----
@@ -442,7 +489,13 @@ export async function installersReport(): Promise<CleanReport> {
     }
     if (verdict === 'none') continue
     const what = app ? `${app.name.replace(/\.app$/, '')} ${app.version}`.trim() : ''
-    items.push(item(f.path, size, f.dir, verdict === 'same' || verdict === 'older', `${what ? `Carries ${what}. ` : ''}${VERDICT_NOTE[verdict]}${have?.version && app?.version ? ` Installed: ${have.version}.` : ''}`, { ...(have ? { action: { label: 'Show the app', reveal: have.path } } : {}) }))
+    const where = f.path.startsWith(join(home, 'Downloads')) ? 'Downloads' : 'Desktop'
+    const badge: CleanItem['badges'] = [verdict === 'same' ? { text: 'Same as installed', tone: 'ok' } : verdict === 'older' ? { text: 'Older than installed', tone: 'info' } : verdict === 'newer' ? { text: 'Newer than installed', tone: 'warn' } : { text: 'Version not read', tone: 'muted' }]
+    items.push(item(f.path, size, f.dir, verdict === 'same' || verdict === 'older', VERDICT_NOTE[verdict], {
+      badges: badge, mtime: await mtimeOf(f.path),
+      sub: [what ? `${what} inside` : '', have?.version ? `${have.version} installed` : '', where].filter(Boolean).join(' · '),
+      ...(have ? { app: have.path } : {})
+    }))
   }
   return { groups: items.length ? [{ id: 'installers', title: 'Installers for apps already installed', text: 'Disk images, packages and zips in Downloads and on the Desktop whose app is already installed, at their version or newer. The apps stay installed.', items: items.sort((a, b) => b.size - a.size) }] : [], at: Date.now(), notes: [] }
 }

@@ -12,6 +12,8 @@ export interface MacApp {
   size: number
   /** When Spotlight last saw it opened (ms), or 0 when it has no record. */
   lastUsed: number
+  /** When it arrived on this Mac (ms), or 0. */
+  added: number
   /** Built only for Intel Macs, so it runs through Rosetta. */
   intelOnly: boolean
   running: boolean
@@ -128,7 +130,32 @@ export const SYSTEM_PLACES = ['/Library/Application Support', '/Library/Caches',
 
 // ----- Startup items -----
 
-export type LaunchScope = 'user-agent' | 'agent' | 'daemon' | 'helper'
+export type LaunchScope = 'user-agent' | 'agent' | 'daemon' | 'helper' | 'sysext'
+
+export const SCOPE_NAMES: Record<LaunchScope, string> = {
+  'user-agent': 'Launch agent (your account)', agent: 'Launch agent (all accounts)', daemon: 'Launch daemon', helper: 'Privileged helper tool', sysext: 'System extension'
+}
+
+/** One thing that starts itself, as the Startup Items room groups it (by the app it belongs to, or by kind). */
+export interface StartupItem {
+  path: string
+  label: string
+  scope: LaunchScope
+  program: string
+  missing: boolean
+  apple: boolean
+  /** The app or developer it belongs to ('' for none), and that app's path for its icon. */
+  owner: string
+  ownerApp?: string
+  ownerKind: 'app' | 'developer' | 'none'
+  loaded: boolean
+  runAtLoad: boolean
+  /** Only an administrator can move it. */
+  admin: boolean
+  size: number
+  mtime: number
+  note: string
+}
 
 export interface LaunchItem {
   path: string
@@ -320,8 +347,10 @@ export function groupByApp(rows: ProcessRow[]): AppUsage[] {
 
 export interface MonitorSample {
   at: number
-  /** Processor use, all cores together and each one (0–100). */
+  /** Processor use, all cores together and each one (0–100), and its user and system parts. */
   cpu: number
+  cpuUser: number
+  cpuSys: number
   cores: number[]
   load: [number, number, number]
   memory: MemoryInfo

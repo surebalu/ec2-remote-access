@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process'
-import { access, lstat, mkdir, readdir, readFile, rename, statfs, writeFile, constants } from 'node:fs/promises'
+import { access, lstat, mkdir, readdir, readFile, rename, rm, statfs, writeFile, constants } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { host, type StorageHost } from '../host'
 import {
-  BIG_FILE, diskPartPaths, protectedReason,
-  type DiskInfo, type DiskPart, type DuplicateGroup, type MapNode, type MapView, type RemovedEntry, type RemovedItem, type ScanRootKind, type ScanState, type ScanSummary, type TrashOutcome
+  BIG_FILE, diffSnapshots, diskPartPaths, protectedReason,
+  type DiskInfo, type KindGroup, type NestNode, type ScanChanges, type DiskPart, type DuplicateGroup, type MapNode, type MapView, type RemovedEntry, type RemovedItem, type ScanRootKind, type ScanState, type ScanSummary, type TrashOutcome
 } from '@shared/storage'
 
 /**
@@ -121,13 +121,15 @@ export async function startScan(kind: ScanRootKind, path?: string): Promise<Scan
   state = { status: 'scanning', root, progress: { dirs: 0, files: 0, bytes: 0, path: root } }
   push()
   const started = Date.now()
-  void ask<{ root: string; bytes: number; files: number; dirs: number; unreadable: number; byKind: ScanSummary['byKind'] }>('scan', { root, skip, closed, devices, concurrency: 16 })
+  type Done = { root: string; bytes: number; files: number; dirs: number; unreadable: number; byKind: ScanSummary['byKind']; kindCounts: ScanSummary['kindCounts']; smallBytes: number; smallFiles: number }
+  void ask<Done>('scan', { root, skip, closed, devices, concurrency: 16 })
     .then(async (r) => {
-      const summary: ScanSummary = { root: r.root, kind, at: Date.now(), took: Date.now() - started, bytes: r.bytes, files: r.files, dirs: r.dirs, unreadable: r.unreadable, fullDiskAccess: fda, byKind: r.byKind }
+      const summary: ScanSummary = { root: r.root, kind, at: Date.now(), took: Date.now() - started, bytes: r.bytes, files: r.files, dirs: r.dirs, unreadable: r.unreadable, fullDiskAccess: fda, byKind: r.byKind, kindCounts: r.kindCounts, smallBytes: r.smallBytes, smallFiles: r.smallFiles }
       summary.parts = await partsOf(summary).catch(() => undefined)
       state = { status: 'done', summary, live: true }
       push()
       await writeJson('last-scan.json', summary).catch(() => undefined)
+      await saveSnapshot(summary).catch(() => undefined)
     }, (e: Error) => {
       if (e.message === 'cancelled') return
       state = { status: 'error', error: e.message, ...(state.summary ? { summary: state.summary } : {}) }
@@ -184,6 +186,46 @@ export async function scanQuery<T>(op: string, args: Record<string, unknown>): P
 }
 
 export const storageView = (ref: { id?: number; path?: string }): Promise<MapView> => ask('view', { ...ref, limit: 240 })
+export const storageNest = (ref: { id?: number; path?: string }, dirsOnly: boolean): Promise<{ node: NestNode; chain: { id: number; name: string }[] }> => ask('nest', { ...ref, dirsOnly, per: [14, 10, 6] })
+export const storageAppsNest = (): Promise<{ apps: NestNode[]; rest: { count: number; size: number }; total: number; count: number }> => ask('appsNest', { limit: 24, per: [6, 4] })
+export const storageKinds = (): Promise<KindGroup[]> => ask('kinds', { perKind: 8 })
+/** The Overview's largest folders: never the containers everything is in. */
+export const topFolders = (): Promise<MapNode[]> => { const home = homedir(); return ask('topFolders', { limit: 5, exclude: ['/', '/Users', home, `${home}/Library`, '/Library', '/private', '/private/var'] }) }
+export const reportLists = async (): Promise<{ folders: MapNode[]; files: MapNode[]; recent: MapNode[] }> => ({
+  folders: await ask('largestFolders', { limit: 200 }),
+  files: await ask('largest', { min: BIG_FILE, limit: 200, exclude: [] }),
+  recent: await ask('recentLarge', { min: 100e6, limit: 8 })
+})
+
+// ----- Snapshots: what grew or shrank between scans of the same place -----
+
+const snapDir = (root: string): string => join(dataDir(), 'snapshots', Buffer.from(root).toString('base64url'))
+
+async function saveSnapshot(s: ScanSummary): Promise<void> {
+  const rows = await ask<[string, number][]>('snapshot', { min: 50e6 })
+  const dir = snapDir(s.root)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, `${s.at}.json`), JSON.stringify({ at: s.at, bytes: s.bytes, rows }))
+  // Thirty scans of a place are kept; older ones go.
+  const all = (await readdir(dir)).filter((f) => f.endsWith('.json')).sort()
+  for (const f of all.slice(0, Math.max(0, all.length - 30))) await rm(join(dir, f), { force: true })
+}
+
+/** The scans of the last scanned place, and what changed by 50 MB or more between `base` (or the one before) and the last. */
+export async function scanChanges(base?: number): Promise<ScanChanges> {
+  const root = state.summary?.root
+  if (!root) return { scans: [], changes: [] }
+  const dir = snapDir(root)
+  const files = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith('.json')).sort()
+  const load = async (f: string): Promise<{ at: number; bytes: number; rows: [string, number][] }> => JSON.parse(await readFile(join(dir, f), 'utf8'))
+  const scans = await Promise.all(files.map(async (f) => { const x = await load(f); return { at: x.at, bytes: x.bytes } }))
+  if (files.length < 2) return { scans, changes: [] }
+  const last = await load(files[files.length - 1])
+  const baseFile = base ? files.find((f) => f === `${base}.json`) : files[files.length - 2]
+  if (!baseFile) return { scans, changes: [] }
+  const before = await load(baseFile)
+  return { scans, base: before.at, changes: diffSnapshots(before.rows, last.rows, 50e6) }
+}
 
 /** Where Large Files does not look unless asked: inside libraries and macOS's own folders. */
 const systemAreas = (): string[] => [join(homedir(), 'Library'), '/Library', '/System', '/private', '/usr', '/bin', '/sbin', '/opt', '/cores']

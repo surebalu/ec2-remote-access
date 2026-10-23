@@ -5,9 +5,9 @@ import { basename, join } from 'node:path'
 import type { CleanGroup, CleanItem, CleanReport } from '@shared/cleanup'
 import {
   belongsTo, parseSystemExtensions, entryKey, isIntelOnly, launchProgram, LIBRARY_PLACES, leftoverOf, mdlsDate, mdlsList, nameFromId, splitMdls, startupOwner, SYSTEM_PLACES,
-  type Confidence, type LaunchScope, type MacApp
+  type Confidence, type LaunchScope, type MacApp, type StartupItem
 } from '@shared/macApps'
-import { runningApps } from './cleanup'
+import { runningApps } from './running'
 
 /**
  * The Apps rooms (Unused Apps, Uninstaller, Leftovers, Startup Items), Mac app only: the installed apps with when
@@ -55,7 +55,7 @@ let appCache: { at: number; sized: boolean; apps: MacApp[] } | null = null
 export async function installedApps(withSizes: boolean): Promise<MacApp[]> {
   if (appCache && Date.now() - appCache.at < 120_000 && (appCache.sized || !withSizes)) return appCache.apps
   const paths = await appPaths()
-  const names = ['kMDItemCFBundleIdentifier', 'kMDItemVersion', 'kMDItemLastUsedDate', 'kMDItemExecutableArchitectures']
+  const names = ['kMDItemCFBundleIdentifier', 'kMDItemVersion', 'kMDItemLastUsedDate', 'kMDItemExecutableArchitectures', 'kMDItemDateAdded']
   const meta: string[][] = []
   for (let k = 0; k < paths.length; k += 150) {
     const batch = paths.slice(k, k + 150)
@@ -65,12 +65,12 @@ export async function installedApps(withSizes: boolean): Promise<MacApp[]> {
   const sz = withSizes ? await sizes(paths) : new Map<string, number>()
   const uid = process.getuid?.() ?? 501
   const apps = await Promise.all(paths.map(async (path, i): Promise<MacApp> => {
-    const [id = '', version = '', last = '', archs = ''] = meta[i] ?? []
+    const [id = '', version = '', last = '', archs = '', added = ''] = meta[i] ?? []
     let owner = uid
     try { owner = (await lstat(path)).uid } catch { /* gone */ }
     const writable = await access(path.replace(/\/[^/]+$/, ''), constants.W_OK).then(() => true, () => false)
     return {
-      path, name: basename(path, '.app'), id, version, size: sz.get(path) ?? 0, lastUsed: mdlsDate(last), intelOnly: isIntelOnly(mdlsList(archs)),
+      path, name: basename(path, '.app'), id, version, size: sz.get(path) ?? 0, lastUsed: mdlsDate(last), added: mdlsDate(added), intelOnly: isIntelOnly(mdlsList(archs)),
       running: running.some((r) => r.path === path || (!!id && r.id === id)),
       systemExtension: await exists(join(path, 'Contents/Library/SystemExtensions')),
       admin: owner === 0 || !writable,
@@ -129,76 +129,83 @@ async function knownIds(): Promise<string[]> {
   return [...new Set([...ids, ...receipts, ...running, ...(await installedApps(false)).map((a) => a.id)].filter(Boolean))]
 }
 
+/** What kind of Library place each folder is, as the Leftovers room names it. */
+const PLACE_LABELS: Record<string, string> = {
+  Caches: 'Cache', Logs: 'Logs', Preferences: 'Preferences', 'Preferences/ByHost': 'Preferences (this Mac)', 'Saved Application State': 'Saved State', HTTPStorages: 'HTTP Storage', Cookies: 'Cookies',
+  LaunchAgents: 'Launch Agent', 'Application Support': 'Application Support', Containers: 'Container', 'Group Containers': 'Group Container', WebKit: 'WebKit Data', 'Application Scripts': 'App Scripts',
+  '/Library/Application Support': 'Application Support (all accounts)', '/Library/Caches': 'Cache (all accounts)', '/Library/Preferences': 'Preferences (all accounts)', '/Library/LaunchAgents': 'Launch Agent (all accounts)',
+  '/Library/LaunchDaemons': 'Launch Daemon', '/Library/PrivilegedHelperTools': 'Helper Tool', '/Library/Logs': 'Logs (all accounts)'
+}
+
+/** com.betafish.adblock-mac → "Adblock Mac", and its vendor as a web address, "betafish.com". */
+const titleOf = (id: string): string => nameFromId(id).replace(/\b\w/g, (c) => c.toUpperCase())
+const vendorOf = (id: string): string => { const p = id.split('.'); return p.length > 1 ? `${p[1]}.${p[0]}` : id }
+
 /** Files in the Library that belong to apps no longer on this Mac, grouped by the app they name. */
 export async function leftoversReport(): Promise<CleanReport> {
   const [installed, embedded] = await Promise.all([knownIds(), embeddedNames()])
-  const groups = new Map<string, { verdict: Confidence; items: { path: string; dir: boolean; note: string; tick: boolean }[] }>()
-  for (const place of LIBRARY_PLACES) {
-    for (const e of await list(join(home, 'Library', place.dir))) {
+  const groups = new Map<string, { verdict: Confidence; items: { path: string; dir: boolean; note: string; tick: boolean; label: string; admin: boolean }[] }>()
+  const places = [...LIBRARY_PLACES.map((p) => ({ dir: join(home, 'Library', p.dir), key: p.dir, tick: p.tick, note: p.note, admin: false })), ...SYSTEM_PLACES.map((d) => ({ dir: d, key: d, tick: false, note: 'Installed for every account, in a folder only an administrator can change.', admin: true }))]
+  for (const place of places) {
+    for (const e of await list(place.dir)) {
       const v = leftoverOf(e.name, installed, embedded)
       if (!v || v === 'owned') continue
       const g = groups.get(v.id) ?? { verdict: v.verdict, items: [] }
-      g.items.push({ path: e.path, dir: e.dir, note: place.note, tick: place.tick && v.verdict === 'sure' })
+      g.items.push({ path: e.path, dir: e.dir, note: place.note, tick: place.tick && v.verdict === 'sure', label: PLACE_LABELS[place.key] ?? place.key, admin: place.admin })
       groups.set(v.id, g)
     }
   }
   const all = [...groups.values()].flatMap((g) => g.items.map((i) => i.path))
   const sz = await sizes(all)
+  const mt = new Map(await Promise.all(all.map(async (p) => [p, await lstat(p).then((s) => s.mtimeMs, () => 0)] as const)))
   const out2: CleanGroup[] = [...groups.entries()].map(([id, g]) => ({
     id,
-    title: nameFromId(id),
+    title: titleOf(id),
+    sub: `${vendorOf(id)} · ${g.items.length} ${g.items.length === 1 ? 'item' : 'items'}`,
+    look: 'leftover',
     text: g.verdict === 'sure' ? `${id}: no app with this identifier is installed, and nothing else from its vendor is.` : `${id}: no app with this identifier is installed, but other apps from its vendor are, and may use it. Not ticked for you.`,
-    items: g.items.map((i) => ({ path: i.path, name: basename(i.path), size: sz.get(i.path) ?? 0, dir: i.dir, safe: i.tick, note: i.note }))
+    items: g.items.map((i) => ({
+      path: i.path, name: basename(i.path), label: i.label, size: sz.get(i.path) ?? 0, dir: i.dir, safe: i.tick && !i.admin, note: i.note, mtime: mt.get(i.path) || undefined,
+      badges: [i.tick ? { text: 'Very likely', tone: 'ok' as const } : { text: 'Likely', tone: 'muted' as const }, ...(i.admin ? [{ text: 'Password', tone: 'warn' as const }] : [])],
+      ...(i.admin ? { blocked: 'Only an administrator can move this: show it in Finder and press Command-Delete there.', action: { label: 'Reveal', reveal: i.path } } : {})
+    })).sort((a, b) => b.size - a.size)
   })).sort((a, b) => b.items.reduce((s, i) => s + i.size, 0) - a.items.reduce((s, i) => s + i.size, 0))
-  return { groups: out2, at: Date.now(), notes: ['Only names that are bundle identifiers (com.vendor.app) are judged; folders named in plain words are never guessed at.'] }
+  return { groups: out2, at: Date.now(), notes: [] }
 }
 
 /** Everything that starts itself: launch agents and daemons, helper tools and system extensions, and who owns them. */
-export async function startupReport(): Promise<CleanReport> {
-  const apps = (await installedApps(false)).map((a) => ({ id: a.id, name: a.name }))
+export async function startupItems(): Promise<StartupItem[]> {
+  const installed = await installedApps(false)
+  const apps = installed.map((a) => ({ id: a.id, name: a.name }))
+  const pathOf = (name: string): string | undefined => installed.find((a) => a.name === name)?.path
   const loaded = new Set((await out('launchctl', ['list'], 10_000)).split('\n').map((l) => l.trim().split(/\s+/)[2]).filter(Boolean))
   const read = async (path: string): Promise<Record<string, unknown> | null> => {
     try { return JSON.parse(await out('plutil', ['-convert', 'json', '-o', '-', path], 5000)) as Record<string, unknown> } catch { return null }
   }
-  const scopes: { dir: string; scope: LaunchScope; title: string; text: string }[] = [
-    { dir: join(home, 'Library/LaunchAgents'), scope: 'user-agent', title: 'Launch agents, your account', text: 'Started when you log in. A removed agent stops at your next login.' },
-    { dir: '/Library/LaunchAgents', scope: 'agent', title: 'Launch agents, every account', text: 'Started when anyone logs in. Only an administrator can remove them; Finder asks for the password.' },
-    { dir: '/Library/LaunchDaemons', scope: 'daemon', title: 'Launch daemons', text: 'Started with the Mac, before anyone logs in. A removed daemon stops at the next restart.' }
-  ]
-  const groups: CleanGroup[] = []
-  for (const s of scopes) {
-    const items: CleanItem[] = []
-    for (const e of await list(s.dir)) {
-      if (!e.name.endsWith('.plist')) continue
-      const plist = await read(e.path)
-      const label = typeof plist?.Label === 'string' ? plist.Label : entryKey(e.name)
-      if (label.startsWith('com.apple.')) continue
-      const program = plist ? launchProgram(plist) : ''
-      const missing = !!program && program.startsWith('/') && !(await exists(program))
-      const owner = startupOwner(label, program, apps)
-      const what = !plist ? 'Its file could not be read, so what it runs is unknown.' : !program ? 'It names no program, so launchd has nothing to start.' : missing ? `Its program, ${program}, is no longer there, so launchd has nothing to start.` : `Runs ${program}.`
-      const user = s.scope === 'user-agent'
-      items.push({
-        path: e.path, name: label, size: 0, dir: false,
-        safe: user && missing,
-        note: `${owner ? `From ${owner}.` : 'No installed app matches its name, what it runs, or the apps it names.'} ${what}${user && loaded.has(label) ? ' Running now.' : ''}`,
-        ...(user ? {} : { blocked: 'Only an administrator can move this: show it in Finder and press Command-Delete there.', action: { label: 'Show in Finder', reveal: e.path } })
-      })
-    }
-    if (items.length) groups.push({ id: s.scope, title: s.title, text: s.text, items: items.sort((a, b) => Number(b.safe) - Number(a.safe) || a.name.localeCompare(b.name)) })
+  const items: StartupItem[] = []
+  const add = async (path: string, scope: LaunchScope, plist: Record<string, unknown> | null, labelIn?: string): Promise<void> => {
+    let st = { size: 0, mtime: 0 }
+    try { const x = await lstat(path); st = { size: (x.blocks ?? 0) * 512, mtime: x.mtimeMs } } catch { /* gone */ }
+    const label = labelIn ?? (typeof plist?.Label === 'string' ? plist.Label : entryKey(basename(path)))
+    const program = plist ? launchProgram(plist) : scope === 'helper' ? path : ''
+    const missing = !!program && program.startsWith('/') && !(await exists(program))
+    const owner = startupOwner(label, program, apps)
+    const ownerApp = owner ? pathOf(owner) : undefined
+    const what = scope === 'helper' ? 'A program an app installed to do what needs an administrator, started by a launch daemon.' : !plist ? 'Its file could not be read, so what it runs is unknown.' : !program ? 'It names no program, so launchd has nothing to start.' : missing ? `Its program, ${program}, is no longer there, so launchd has nothing to start.` : `Runs ${program}.`
+    items.push({
+      path, label, scope, program, missing, apple: label.startsWith('com.apple.'), owner, ...(ownerApp ? { ownerApp } : {}),
+      ownerKind: !owner ? 'none' : ownerApp ? 'app' : 'developer',
+      loaded: loaded.has(label), runAtLoad: plist?.RunAtLoad === true || !!plist?.KeepAlive, admin: scope !== 'user-agent', size: st.size, mtime: st.mtime, note: what
+    })
   }
-  const helpers = await list('/Library/PrivilegedHelperTools')
-  if (helpers.length) groups.push({
-    id: 'helper', title: 'Helper tools', text: 'Programs apps install to do what needs an administrator, started by a launch daemon.',
-    items: helpers.map((h) => ({ path: h.path, name: h.name, size: 0, dir: false, safe: false, note: (() => { const o = startupOwner(h.name, '', apps); return o ? `From ${o}.` : 'No installed app matches its name.' })(), blocked: 'Only an administrator can move this.', action: { label: 'Show in Finder', reveal: h.path } }))
-  })
-  const ext = await out('systemextensionsctl', ['list'], 10_000)
-  const exts = parseSystemExtensions(ext)
-  if (exts.length) groups.push({
-    id: 'sysext', title: 'System extensions', text: 'Network filters, endpoint security and drivers apps add to macOS. Only macOS removes them, when their app goes to the Trash in Finder.',
-    items: exts.map((x) => ({ path: `sysext:${x.id}`, name: x.name || x.id, size: 0, dir: false, safe: false, note: `${x.id} · ${x.state}.`, blocked: 'Only macOS removes a system extension.', action: { label: 'Login Items & Extensions', url: 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension' } }))
-  })
-  return { groups, at: Date.now(), notes: ['Apps that open at login, and the switches for apps allowed to run in the background, are kept where only macOS can read them: see Login Items & Extensions in System Settings.'] }
+  const dirs: { dir: string; scope: LaunchScope }[] = [{ dir: join(home, 'Library/LaunchAgents'), scope: 'user-agent' }, { dir: '/Library/LaunchAgents', scope: 'agent' }, { dir: '/Library/LaunchDaemons', scope: 'daemon' }]
+  for (const d of dirs) for (const e of await list(d.dir)) if (e.name.endsWith('.plist')) await add(e.path, d.scope, await read(e.path))
+  for (const h of await list('/Library/PrivilegedHelperTools')) await add(h.path, 'helper', null, h.name)
+  for (const x of parseSystemExtensions(await out('systemextensionsctl', ['list'], 10_000))) {
+    const owner = startupOwner(x.id, '', apps)
+    items.push({ path: `sysext:${x.id}`, label: x.name, scope: 'sysext', program: x.id, missing: false, apple: x.id.startsWith('com.apple.'), owner, ...(pathOf(owner) ? { ownerApp: pathOf(owner) } : {}), ownerKind: !owner ? 'none' : pathOf(owner) ? 'app' : 'developer', loaded: /enabled/.test(x.state), runAtLoad: true, admin: true, size: 0, mtime: 0, note: `${x.id} · ${x.state}. Only macOS removes a system extension, when its app goes to the Trash in Finder.` })
+  }
+  return items
 }
 
 // NSRunningApplication's terminate asks an app to quit as Command-Q does: anything unsaved asks first.

@@ -4,7 +4,7 @@ import {
   groupByApp, KEEP_OPEN, memoryFrom, parseBattery, parseDiskIo, parseNetstat, parsePs, parseSwap, parseVmStat,
   type BatteryInfo, type MonitorSample, type OpenApp
 } from '@shared/macApps'
-import { runningApps } from './cleanup'
+import { runningApps } from './running'
 
 /**
  * The Monitor and Optimize rooms (Mac app only): one reading of the processor, memory, disk, network and battery each
@@ -16,17 +16,19 @@ function out(cmd: string, args: string[], timeout = 10_000): Promise<string> {
   return new Promise((resolve) => execFile(cmd, args, { timeout, maxBuffer: 16 * 1024 * 1024 }, (_err, stdout) => resolve(stdout ?? '')))
 }
 
-let prevCpu: { idle: number; total: number }[] | null = null
+let prevCpu: { idle: number; total: number; user: number; sys: number }[] | null = null
 let prevCounters: { at: number; rx: number; tx: number; read: number; write: number } | null = null
 let battery: { at: number; value: BatteryInfo | null } | null = null
 
-function cpuUse(): { all: number; cores: number[] } {
-  const now = cpus().map((c) => { const t = c.times; return { idle: t.idle, total: t.user + t.nice + t.sys + t.idle + t.irq } })
+function cpuUse(): { all: number; user: number; sys: number; cores: number[] } {
+  const now = cpus().map((c) => { const t = c.times; return { idle: t.idle, total: t.user + t.nice + t.sys + t.idle + t.irq, user: t.user + t.nice, sys: t.sys + t.irq } })
   const before = prevCpu
   prevCpu = now
-  if (!before || before.length !== now.length) return { all: 0, cores: now.map(() => 0) }
+  if (!before || before.length !== now.length) return { all: 0, user: 0, sys: 0, cores: now.map(() => 0) }
   const cores = now.map((c, i) => { const dt = c.total - before[i].total; return dt > 0 ? Math.round((1 - (c.idle - before[i].idle) / dt) * 1000) / 10 : 0 })
-  return { all: Math.round((cores.reduce((s, x) => s + x, 0) / cores.length) * 10) / 10, cores }
+  const dt = now.reduce((s, c, i) => s + c.total - before[i].total, 0) || 1
+  const pct = (k: 'user' | 'sys'): number => Math.round((now.reduce((s, c, i) => s + c[k] - before[i][k], 0) / dt) * 1000) / 10
+  return { all: Math.round((cores.reduce((s, x) => s + x, 0) / cores.length) * 10) / 10, user: pct('user'), sys: pct('sys'), cores }
 }
 
 export async function monitorSample(): Promise<MonitorSample> {
@@ -52,7 +54,7 @@ export async function monitorSample(): Promise<MonitorSample> {
   const apps = groupByApp(parsePs(ps)).filter((a) => a.cpu > 0.2 || a.memory > 150e6)
   const address = Object.entries(networkInterfaces()).filter(([n]) => /^en\d/.test(n)).flatMap(([, list]) => list ?? []).find((a) => a.family === 'IPv4' && !a.internal)?.address ?? null
   return {
-    at: now, cpu: cpu.all, cores: cpu.cores, load: loadavg() as [number, number, number], memory,
+    at: now, cpu: cpu.all, cpuUser: cpu.user, cpuSys: cpu.sys, cores: cpu.cores, load: loadavg() as [number, number, number], memory,
     net: { rx: rate(net.rx, prev?.rx ?? 0), tx: rate(net.tx, prev?.tx ?? 0) },
     disk: { read: rate(disk.read, prev?.read ?? 0), write: rate(disk.write, prev?.write ?? 0) },
     battery: battery.value, uptime: uptime(),

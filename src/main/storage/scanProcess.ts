@@ -28,7 +28,8 @@ const ops: Record<string, (a: Args) => unknown> = {
     if (scanning !== ac) throw new Error('cancelled')
     scanning = null
     tree = t
-    return { root: t.root, bytes: t.size[0], files: t.files[0], dirs: t.dirs, unreadable: t.unreadable, byKind: t.byKind }
+    const d = t.distribution()
+    return { root: t.root, bytes: t.size[0], files: t.files[0], dirs: t.dirs, unreadable: t.unreadable, byKind: d.bytes, kindCounts: d.counts, smallBytes: d.smallBytes, smallFiles: d.smallFiles }
   },
   cancel() { scanning?.abort(); comparing?.abort(); return null },
   view(a) {
@@ -58,6 +59,18 @@ const ops: Record<string, (a: Args) => unknown> = {
     if (comparing === ac) comparing = null
     return groups
   },
+  nest(a) {
+    const t = need()
+    const id = typeof a.id === 'number' ? a.id : t.find(String(a.path ?? t.root))
+    if (id < 0 || id >= t.n) throw new Error('That folder is not in the last scan. Scan again.')
+    return { node: t.nest(id, (a.per as number[]) ?? [14, 10, 6], !!a.dirsOnly), chain: t.view(id, 0, 0).chain }
+  },
+  appsNest(a) { return need().appsNest(Number(a.limit ?? 24), (a.per as number[]) ?? [6, 4]) },
+  kinds(a) { return need().kinds(Number(a.perKind ?? 8)) },
+  topFolders(a) { return need().topFolders(Number(a.limit ?? 5), (a.exclude as string[]) ?? []) },
+  largestFolders(a) { return need().largestFolders(Number(a.limit ?? 8)) },
+  recentLarge(a) { return need().recentLarge(Number(a.min ?? 100e6), Number(a.limit ?? 8)) },
+  snapshot(a) { return need().snapshot(Number(a.min ?? 50e6)) },
   has() { return tree ? { root: tree.root } : null }
 }
 

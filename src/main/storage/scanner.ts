@@ -1,7 +1,7 @@
 import { lstat, open, opendir } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { BIG_FILE, kindOf, isPackageName, type FileKind, type MapNode, type MapView, type ScanProgress } from '../../shared/storage.ts'
+import { BIG_FILE, kindOf, isPackageName, packageKind, type FileKind, type KindGroup, type MapNode, type MapView, type NestNode, type ScanProgress } from '../../shared/storage.ts'
 
 /**
  * The Storage tool's disk scan: walks a folder (or the whole disk) and keeps every folder, and every file of 1 MB or
@@ -49,7 +49,6 @@ export class ScanTree {
   childStart = new Int32Array(0)
   childCount = new Int32Array(0)
   childList = new Int32Array(0)
-  byKind: Partial<Record<FileKind, number>> = {}
   unreadable = 0
   dirs = 0
 
@@ -191,6 +190,166 @@ export class ScanTree {
       small: { bytes: Math.max(0, this.size[i] - childBytes), files: Math.max(0, this.files[i] - childFiles) },
       inner: innerMap
     }
+  }
+
+  /** Bytes and files directly in a folder that the scan counted without names (files under 1 MB). */
+  private own(i: number): { bytes: number; files: number } {
+    let bytes = this.size[i]
+    let files = this.files[i]
+    for (const c of this.children(i)) { bytes -= this.size[c]; files -= this.files[c] }
+    return { bytes: Math.max(0, bytes), files: Math.max(0, files) }
+  }
+
+  /**
+   * Every byte of the scan by kind: files of 1 MB or more by their extension, packages as one item by theirs (Photos'
+   * library is pictures, an app is an app), and what small files add up to in their folders. The parts sum to the scan.
+   */
+  distribution(): { bytes: Partial<Record<FileKind, number>>; counts: Partial<Record<FileKind, number>>; smallBytes: number; smallFiles: number } {
+    const bytes: Partial<Record<FileKind, number>> = {}
+    const counts: Partial<Record<FileKind, number>> = {}
+    let smallBytes = 0
+    let smallFiles = 0
+    for (let i = 0; i < this.n; i++) {
+      const f = this.flags[i]
+      if (f & (F.IN_PACKAGE | F.REMOVED)) continue
+      if (f & F.PACKAGE || !(f & F.DIR)) {
+        const k = f & F.PACKAGE ? packageKind(this.names[i]) : kindOf(this.names[i])
+        bytes[k] = (bytes[k] ?? 0) + this.size[i]
+        counts[k] = (counts[k] ?? 0) + 1
+        continue
+      }
+      const o = this.own(i)
+      smallBytes += o.bytes
+      smallFiles += o.files
+    }
+    return { bytes, counts, smallBytes, smallFiles }
+  }
+
+  /** Entries directly inside a folder: the named ones and the small files counted together. */
+  private itemsOf(i: number): number {
+    if (!(this.flags[i] & F.DIR)) return 1
+    return this.children(i).length + this.own(i).files
+  }
+
+  private nestNode(i: number): NestNode {
+    const n = this.node(i)
+    return { id: i, name: n.name, path: n.path, size: n.size, items: this.itemsOf(i), dir: n.dir, ...(n.package ? { package: true } : {}), ...(n.kind ? { kind: n.kind } : {}), ...(n.more ? { more: true } : {}), ...(n.closed ? { closed: n.closed } : {}) }
+  }
+
+  /**
+   * A folder nested for the Space Map's cards: its largest children, theirs, and theirs again (`per` says how many at
+   * each level), with the rest summed up. A folder whose only entry is one folder (an app's Contents) shows that one's
+   * children instead. `dirsOnly` leaves files out (the Folders view).
+   */
+  nest(i: number, per: number[], dirsOnly = false): NestNode {
+    const node = this.nestNode(i)
+    if (!per.length || !node.dir || node.closed) return node
+    let at = i
+    for (let guard = 0; guard < 4; guard++) {
+      const kids = this.children(at)
+      if (kids.length !== 1 || !(this.flags[kids[0]] & F.DIR) || this.own(at).bytes > this.size[at] * 0.02) break
+      at = kids[0]
+    }
+    const kids = Array.from(this.children(at)).filter((c) => !dirsOnly || this.flags[c] & F.DIR).sort((a, b) => this.size[b] - this.size[a])
+    const shown = kids.slice(0, per[0]).filter((c) => this.size[c] > 0)
+    const restIds = kids.slice(shown.length)
+    const own = this.own(at)
+    const restSize = restIds.reduce((s, c) => s + this.size[c], 0) + own.bytes
+    node.children = shown.map((c) => this.nest(c, per.slice(1), dirsOnly))
+    if (restSize > 0) node.rest = { count: restIds.length + own.files, size: restSize }
+    return node
+  }
+
+  /** The apps in the scan (outside other packages), largest first, each nested two levels; the rest summed up. */
+  appsNest(limit: number, per: number[]): { apps: NestNode[]; rest: { count: number; size: number }; total: number; count: number } {
+    const all: number[] = []
+    for (let i = 1; i < this.n; i++) {
+      const f = this.flags[i]
+      if (f & F.PACKAGE && !(f & (F.IN_PACKAGE | F.REMOVED)) && this.names[i].toLowerCase().endsWith('.app')) all.push(i)
+    }
+    all.sort((a, b) => this.size[b] - this.size[a])
+    const shown = all.slice(0, limit)
+    const rest = all.slice(limit)
+    return {
+      apps: shown.map((i) => this.nest(i, per)),
+      rest: { count: rest.length, size: rest.reduce((s, i) => s + this.size[i], 0) },
+      total: all.reduce((s, i) => s + this.size[i], 0),
+      count: all.length
+    }
+  }
+
+  /** Each kind of file with its largest files and packages (a package nested one level), and the small files. */
+  kinds(perKind: number): KindGroup[] {
+    const by = new Map<FileKind, number[]>()
+    for (let i = 1; i < this.n; i++) {
+      const f = this.flags[i]
+      if (f & (F.IN_PACKAGE | F.REMOVED) || (f & F.DIR && !(f & F.PACKAGE))) continue
+      const k = f & F.PACKAGE ? packageKind(this.names[i]) : kindOf(this.names[i])
+      const l = by.get(k)
+      if (l) l.push(i)
+      else by.set(k, [i])
+    }
+    const d = this.distribution()
+    const groups: KindGroup[] = [...by.entries()].map(([kind, ids]) => {
+      ids.sort((a, b) => this.size[b] - this.size[a])
+      return { kind, size: d.bytes[kind] ?? 0, count: ids.length, top: ids.slice(0, perKind).map((i) => (this.flags[i] & F.PACKAGE ? this.nest(i, [4]) : this.nestNode(i))) }
+    })
+    groups.push({ kind: 'small', size: d.smallBytes, count: d.smallFiles, top: [] })
+    return groups.sort((a, b) => b.size - a.size)
+  }
+
+  /**
+   * The largest folders that say where the space went: never a container like the home folder or a Library (`exclude`),
+   * and never one inside another already listed (Documents, not Documents and the project folder inside it).
+   */
+  topFolders(limit: number, exclude: string[]): MapNode[] {
+    const cands: number[] = []
+    for (let i = 1; i < this.n; i++) {
+      const f = this.flags[i]
+      if (f & F.DIR && !(f & (F.PACKAGE | F.IN_PACKAGE | F.REMOVED))) cands.push(i)
+    }
+    cands.sort((a, b) => this.size[b] - this.size[a])
+    const skip = new Set(exclude)
+    const picked: string[] = []
+    const out: MapNode[] = []
+    for (const i of cands.slice(0, 4000)) {
+      const p = this.pathOf(i)
+      if (skip.has(p) || picked.some((q) => p.startsWith(`${q}/`) || q.startsWith(`${p}/`))) continue
+      picked.push(p)
+      out.push(this.node(i))
+      if (out.length >= limit) break
+    }
+    return out
+  }
+
+  /** Folders by size, containers included (the Report's list), outside packages. */
+  largestFolders(limit: number): MapNode[] {
+    const cands: number[] = []
+    for (let i = 1; i < this.n; i++) {
+      const f = this.flags[i]
+      if (f & F.DIR && !(f & (F.PACKAGE | F.IN_PACKAGE | F.REMOVED))) cands.push(i)
+    }
+    return cands.sort((a, b) => this.size[b] - this.size[a]).slice(0, limit).map((i) => this.node(i))
+  }
+
+  /** Files of `min` bytes or more, newest first (outside packages). */
+  recentLarge(min: number, limit: number): MapNode[] {
+    const hits: number[] = []
+    for (let i = 1; i < this.n; i++) {
+      const f = this.flags[i]
+      if (!(f & (F.DIR | F.IN_PACKAGE | F.REMOVED)) && this.size[i] >= min) hits.push(i)
+    }
+    return hits.sort((a, b) => this.mtime[b] - this.mtime[a]).slice(0, limit).map((i) => this.node(i))
+  }
+
+  /** Every folder of `min` bytes or more with its size, for comparing this scan with a later one. */
+  snapshot(min: number): [string, number][] {
+    const out: [string, number][] = []
+    for (let i = 0; i < this.n; i++) {
+      const f = this.flags[i]
+      if (f & F.DIR && !(f & (F.IN_PACKAGE | F.REMOVED)) && this.size[i] >= min) out.push([this.pathOf(i), this.size[i]])
+    }
+    return out
   }
 
   /** Whether an entry's path starts with any of these folders. */
@@ -416,8 +575,6 @@ export async function walk(opts: WalkOptions): Promise<ScanTree> {
       bytes += b
       if (b >= BIG_FILE) {
         tree.add(idx, name, hidden | inherited, b, st.mtimeMs, st.size, 1)
-        const kind = kindOf(name)
-        tree.byKind[kind] = (tree.byKind[kind] ?? 0) + b
       } else {
         tree.size[idx] += b
         tree.files[idx] += 1

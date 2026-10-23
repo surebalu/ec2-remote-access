@@ -1,35 +1,33 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { bytes, plural, type DuplicateGroup } from '@shared/storage'
+import { bytes, plural, type DuplicateGroup, type MapNode } from '@shared/storage'
 import { Icon } from '../icons'
-import { ItemMenu, NeedsScan, NodeIcon, RoomHead, tilde, TrashBar, useNodeIcons, useScanTree } from './parts'
+import { Badge, changed, GroupHead, Intro, ItemIcon, ItemMenu, ListBar, NeedsScan, Row, TopBar, TrashFooter, useNodeIcons, useScanTree, where } from './parts'
 import { useStorage } from './state'
 
 /**
  * Duplicates: files with identical contents in the last scan, whatever they are called. Files are grouped by length,
  * then compared by their first and last 64 KB, then read in full only if they still match (in the scan process).
- * Every copy but the oldest starts ticked; ticking every copy of a file asks first, since that removes it entirely.
+ * Every copy but the oldest starts ticked; ticking every copy of a file is called out, since that removes it entirely.
  */
 export default function Duplicates(): ReactElement {
-  const { live, version } = useScanTree()
+  const { live } = useScanTree()
   const [groups, setGroups] = useState<DuplicateGroup[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ done: number; total: number; phase: string } | null>(null)
   const [ticks, setTicks] = useState<Set<string>>(new Set())
-  const [menu, setMenu] = useState<{ path: string; size: number; anchor: HTMLElement } | null>(null)
+  const [closed, setClosed] = useState<Set<string>>(new Set())
+  const [menu, setMenu] = useState<{ node: MapNode; anchor: HTMLElement } | null>(null)
   const scanAt = useStorage((s) => s.scan.summary?.at)
 
   useEffect(() => window.api.on('storage:dupProgress', setProgress), [])
-  // A new scan means the old comparison no longer matches it.
   useEffect(() => { setGroups(null) }, [scanAt])
+  const extras = (g: DuplicateGroup[]): string[] => g.flatMap((x) => x.files.slice(1).map((f) => f.path))
   const find = (): void => {
     setBusy(true)
     setError(null)
     setProgress(null)
-    window.api.invoke('storage:duplicates').then((g) => {
-      setGroups(g)
-      setTicks(new Set(g.flatMap((x) => x.files.slice(1).map((f) => f.path))))
-    }, (e: Error) => { if (e.message !== 'cancelled') setError(e.message) }).finally(() => { setBusy(false); setProgress(null) })
+    window.api.invoke('storage:duplicates').then((g) => { setGroups(g); setTicks(new Set(extras(g))) }, (e: Error) => { if (e.message !== 'cancelled') setError(e.message) }).finally(() => { setBusy(false); setProgress(null) })
   }
   // Files that went to the Trash leave their groups; a group of one is no longer a duplicate.
   const trashed = useStorage((s) => s.trashed)
@@ -46,54 +44,44 @@ export default function Duplicates(): ReactElement {
   const picked = files.filter((f) => ticks.has(f.path))
   const wipes = groups?.filter((g) => g.files.every((f) => ticks.has(f.path))).length ?? 0
   const frees = groups?.reduce((s, g) => s + g.files.slice(1).reduce((t, f) => t + f.size, 0), 0) ?? 0
+  const toggle = (path: string, on: boolean): void => setTicks((t) => { const n = new Set(t); if (on) n.add(path); else n.delete(path); return n })
 
-  if (!live) return <div className="plan-scroll st-scroll"><RoomHead icon={<Icon.copy />} title="Duplicates" sub="Identical files, whatever they are called." /><NeedsScan what="duplicate files" /></div>
+  if (!live) return <div className="st-room"><TopBar title="Duplicates" /><div className="st-scroll"><NeedsScan what="duplicate files" /></div></div>
   return (
-    <div className="st-list-room">
-      <RoomHead icon={<Icon.copy />} title="Duplicates" sub={groups ? `${plural(groups.length, 'file')} with copies · removing the extra copies frees ${bytes(frees)}` : 'Files of 1 MB or more compared by their contents.'}>
-        {busy
-          ? <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('storage:cancelDuplicates')}>Stop</button>
-          : <button type="button" className="btn btn-sm btn-primary" onClick={find}><Icon.search />{groups ? 'Compare again' : 'Find duplicates'}</button>}
-      </RoomHead>
-      <p className="st-intro">Compares the contents, not the names, of every file of 1 MB or more in the scan, outside apps, libraries, hidden folders and macOS's own folders. The oldest copy in each set stays ticked off; nothing moves until you choose.</p>
-      <div className="plan-scroll st-list">
+    <div className="st-room">
+      <TopBar title="Duplicates" />
+      <Intro actions={busy
+        ? <button type="button" className="st-button" onClick={() => void window.api.invoke('storage:cancelDuplicates')}>Stop</button>
+        : <button type="button" className="st-primary" onClick={find}><Icon.search />{groups ? 'Compare Again' : 'Find Duplicates'}</button>}>
+        Compares the contents, not the names, of every file of 1 MB or more in the scan, outside apps, libraries, hidden folders and macOS's own folders. The oldest copy in each set stays unticked.
+      </Intro>
+      {groups && <ListBar text={`${plural(groups.length, 'file')} with copies · removing the extra copies frees ${bytes(frees)}`}
+        links={[{ label: 'Select Extra Copies', onClick: () => setTicks(new Set(extras(groups))), disabled: !groups.length }, { label: 'Select None', onClick: () => setTicks(new Set()), disabled: !picked.length }]} />}
+      <div className="st-list">
         {error && <div className="plan-error"><Icon.alert />{error}</div>}
-        {busy && (
-          <div className="st-empty">
-            <div className="st-spinner" aria-hidden="true" />
-            <p>{progress?.phase ?? 'Grouping files by size'}…</p>
-            {progress && <p className="muted">{progress.done.toLocaleString('en-US')} of {plural(progress.total, 'file')}</p>}
-          </div>
-        )}
-        {!busy && !groups && <div className="st-empty"><Icon.copy className="plan-empty-icon" /><p>Find files with identical contents in {version ? 'the last scan' : 'the scan'}.</p></div>}
-        {!busy && groups && !groups.length && <div className="st-empty"><Icon.check className="plan-empty-icon" /><p>No file of 1 MB or more has an identical copy anywhere else in this scan.</p></div>}
-        {!busy && groups?.map((g) => (
-          <section key={g.files[0].path} className="st-group">
-            <header className="st-group-head">
-              <div className="st-group-text">
-                <h3>{g.files[0].name} <span className="muted">{g.files.length} copies · {bytes(g.length)} each</span></h3>
-              </div>
-              <span className="st-size">{bytes(g.files.slice(1).reduce((s, f) => s + f.size, 0))}</span>
-            </header>
-            {g.files.map((f, i) => (
-              <div key={f.path} className="st-row" onContextMenu={(e) => { e.preventDefault(); setMenu({ path: f.path, size: f.size, anchor: e.currentTarget }) }}>
-                <input type="checkbox" className="st-check" checked={ticks.has(f.path)} aria-label="Select"
-                  onChange={(e) => setTicks((t) => { const n = new Set(t); if (e.target.checked) n.add(f.path); else n.delete(f.path); return n })} />
-                <NodeIcon node={f} icons={icons} />
-                <div className="st-row-body">
-                  <div className="st-row-title">{f.name}{i === 0 && <span className="st-badge ok">Oldest</span>}</div>
-                  <div className="st-row-sub" title={f.path}>{tilde(f.path.replace(/\/[^/]+$/, ''))}</div>
-                </div>
-                <span className="st-size">{bytes(f.size)}</span>
-                <button type="button" className="st-more" aria-label="More" onClick={(e) => setMenu({ path: f.path, size: f.size, anchor: e.currentTarget })}><Icon.more /></button>
-              </div>
-            ))}
-          </section>
-        ))}
+        {busy && <div className="st-empty"><div className="st-spinner" aria-hidden="true" /><h3>{progress?.phase ?? 'Grouping files by size'}…</h3>{progress && <p className="muted">{progress.done.toLocaleString('en-US')} of {plural(progress.total, 'file')}</p>}</div>}
+        {!busy && !groups && <div className="st-empty"><span className="st-empty-art"><Icon.copy /></span><h3>Find identical copies</h3><p>Files are grouped by size, then compared by a sample of their contents, then read in full only if they still match.</p></div>}
+        {!busy && groups && !groups.length && <div className="st-empty"><span className="st-empty-art"><Icon.check /></span><h3>No duplicates</h3><p className="muted">No file of 1 MB or more has an identical copy anywhere else in this scan.</p></div>}
+        {!busy && groups?.map((g) => {
+          const key = g.files[0].path
+          const on = g.files.filter((f) => ticks.has(f.path))
+          return (
+            <section key={key} className="st-group">
+              <GroupHead look="duplicates" title={g.files[0].name} sub={`${g.files.length} copies · ${bytes(g.length)} each`} size={g.files.slice(1).reduce((s, f) => s + f.size, 0)}
+                state={on.length === g.files.length ? 'all' : on.length ? 'some' : 'none'} onTick={(v) => { for (const f of v ? g.files.slice(1) : g.files) toggle(f.path, v) }}
+                open={!closed.has(key)} onToggle={() => setClosed((c) => { const n = new Set(c); if (n.has(key)) n.delete(key); else n.add(key); return n })} />
+              {!closed.has(key) && g.files.map((f, i) => (
+                <Row key={f.path} indent checked={ticks.has(f.path)} onCheck={(v) => toggle(f.path, v)} icon={<ItemIcon path={f.path} icons={icons} />}
+                  title={f.name} badges={i === 0 ? <Badge tone="ok">Oldest</Badge> : undefined} sub={`${where(f.path)}${f.mtime ? ` · ${changed(f.mtime)}` : ''}`} size={f.size} reveal={f.path}
+                  onMenu={(anchor) => setMenu({ node: f, anchor })} />
+              ))}
+            </section>
+          )
+        })}
       </div>
-      <TrashBar items={picked.map((f) => ({ path: f.path, size: f.size }))} from="Duplicates"
-        note={wipes ? <span className="st-warn-text">That removes every copy of {plural(wipes, 'file')}, not just the extras.</span> : undefined} />
-      {menu && <ItemMenu node={{ path: menu.path, dir: false, size: menu.size }} anchor={menu.anchor} from="Duplicates" onClose={() => setMenu(null)} />}
+      <TrashFooter items={picked.map((f) => ({ path: f.path, size: f.size }))} from="Duplicates"
+        note={wipes ? <span className="st-warn-text">That removes every copy of {plural(wipes, 'file')}, not just the extras.</span> : 'Everything goes to the Trash, and can be put back.'} />
+      {menu && <ItemMenu node={menu.node} anchor={menu.anchor} from="Duplicates" onClose={() => setMenu(null)} />}
     </div>
   )
 }

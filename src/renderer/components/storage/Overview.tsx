@@ -1,199 +1,303 @@
-import { useState, type ReactElement } from 'react'
-import { ago, bytes, DISK_PARTS, FULL_DISK_ACCESS_URL, KIND_NAMES, plural, type DiskPart, type FileKind } from '@shared/storage'
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
+import { ago, bytes, FULL_DISK_ACCESS_URL, KIND_NAMES, plural, type DiskPart, type FileKind, type MacInfo, type MapNode } from '@shared/storage'
 import { reportSize } from '@shared/cleanup'
+import { useStore } from '../../store'
 import { Icon } from '../icons'
-import { homePath, KIND_COLORS, RoomHead, ScanButtons, ScanProgressCard, ShareBar, tilde, useLoad } from './parts'
-import { openInMap, refreshFda, setRoom, startScan, useStorage, type RoomId } from './state'
+import { AreaChart, Donut, Ring } from './charts'
+import { DiskBar, ItemIcon, KIND_COLORS, PART_COLORS, ScanProgressCard, Segmented, Squircle, TopBar, useIcons, useLoad, useScanTree, where } from './parts'
+import { loadApps, measureReport, openInMap, openInUninstaller, refreshFda, setRoom, startScan, useStorage, type RoomId } from './state'
 
-const PART_COLORS: Record<DiskPart, string> = {
-  apps: '#6366f1', documents: '#3b82f6', downloads: '#06b6d4', pictures: '#10b981', library: '#f59e0b', other: '#a78bfa', trash: '#f43f5e', system: '#64748b'
-}
+/**
+ * Overview: the scan and Optimize as two rings, the disk split into its parts with what is free, what macOS needs and
+ * what takes the most, four figures that each open a room, the largest folders and apps, what to clean up, the kinds of
+ * file, the disk's use over time, the newest large files, and this Mac in words.
+ */
 
-/** Where each part of the bar opens: a folder in the Space Map, or a room. */
-const partTarget = (id: DiskPart): { path?: string; room?: RoomId } => {
-  const h = homePath()
-  return id === 'apps' ? { path: '/Applications' } : id === 'documents' ? { path: h } : id === 'downloads' ? { path: `${h}/Downloads` } : id === 'pictures' ? { path: `${h}/Pictures` }
-    : id === 'library' ? { path: `${h}/Library` } : id === 'trash' ? { room: 'removed' } : id === 'system' ? { path: '/System' } : { path: h }
-}
-
-/** Ways to make room, each opening its room. */
-const CARDS: { room: RoomId; icon: () => ReactElement; title: string; text: string }[] = [
-  { room: 'junk', icon: () => <Icon.sparkles />, title: 'Junk Files', text: 'Caches, logs, build data and old installers, and how much each would free.' },
-  { room: 'ai', icon: () => <Icon.brain />, title: 'AI Models', text: 'Models AI apps downloaded, often tens of gigabytes.' },
-  { room: 'duplicates', icon: () => <Icon.copy />, title: 'Duplicates', text: 'Identical files, whatever they are called, and what removing the extra copies frees.' },
-  { room: 'system', icon: () => <Icon.disk />, title: 'System Data', text: 'Backups, attachments, simulators and what else Storage settings counts there.' },
-  { room: 'unused', icon: () => <Icon.moon />, title: 'Unused Apps', text: 'Apps not opened for months, from Spotlight\'s record.' },
-  { room: 'optimize', icon: () => <Icon.wand />, title: 'Optimize', text: 'Junk nobody will miss and apps nobody is using, in one press.' },
-  { room: 'large', icon: () => <Icon.note />, title: 'Large Files', text: 'Your files of 100 MB or more, biggest first.' },
-  { room: 'hidden', icon: () => <Icon.eyeOff />, title: 'Hidden Files', text: 'The largest things Finder does not show you, with what each one is.' },
-  { room: 'map', icon: () => <Icon.treemap />, title: 'Space Map', text: 'Every folder as a card sized by the space it takes.' },
-  { room: 'removed', icon: () => <Icon.history />, title: 'Recently Removed', text: 'What went to the Trash from here, ready to put back.' }
-]
+const PART_NAMES: Record<DiskPart, string> = { apps: 'Applications', documents: 'Documents', downloads: 'Downloads', pictures: 'Pictures', library: 'App Data', other: 'Other', trash: 'Trash', system: 'System' }
+const BAR_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#22c55e', '#ef4444']
+const SCAN_RING = ['#38bdf8', '#a855f7', '#ec4899', '#f59e0b', '#22c55e']
+const OPTIMIZE_RING = ['#fb7185', '#f97316', '#ef4444', '#f43f5e']
 
 export default function Overview(): ReactElement {
   const disk = useStorage((s) => s.disk)
   const scan = useStorage((s) => s.scan)
   const fda = useStorage((s) => s.fda)
-  const trashed = useStorage((s) => s.trashed)
   const reports = useStorage((s) => s.reports)
-  const trash = useLoad(() => window.api.invoke('storage:trashSize'), [trashed])
-  const [hover, setHover] = useState<DiskPart | 'free' | null>(null)
+  const apps = useStorage((s) => s.apps)
+  const { live, version } = useScanTree()
   const summary = scan.summary
-  const parts = summary?.parts?.length && summary.kind !== 'path' ? summary.parts : null
+
+  // What the cards need, measured in the background while the Overview is open.
+  useEffect(() => { measureReport('junk'); measureReport('leftovers'); void loadApps() }, [])
+  const top = useLoad(() => (live ? window.api.invoke('storage:topFolders') : Promise.resolve([] as MapNode[])), [live, version])
+  const large = useLoad(() => (live ? window.api.invoke('storage:large', 100e6, false) : Promise.resolve([] as MapNode[])), [live, version])
+  const recent = useLoad(() => (live ? window.api.invoke('storage:report').then((r) => r.recent) : Promise.resolve([] as MapNode[])), [live, version])
+  const appsMap = useLoad(() => (live ? window.api.invoke('storage:appsMap') : Promise.resolve(null)), [live, version])
+  const mac = useLoad<MacInfo>(() => window.api.invoke('storage:macInfo'), [])
+
+  const junk = reports.junk
+  const junkSafe = junk ? reportSize(junk, true) : null
+  const junkAll = junk ? reportSize(junk) : null
+  const oldDownloads = junk?.groups.find((g) => g.id === 'old')
+  const leftovers = reports.leftovers ? reportSize(reports.leftovers) : null
+  const unused = useMemo(() => (apps ? apps.filter((a) => !a.path.startsWith('/System/') && (!a.lastUsed || Date.now() - a.lastUsed > 90 * 86_400_000)) : null), [apps])
+  const largeBytes = large.data?.reduce((s, f) => s + f.size, 0) ?? 0
+
   const free = disk?.free ?? 0
   const total = disk?.total ?? 0
   const used = total - free
-  const freeShare = total ? free / total : 1
-  const level = freeShare < 0.05 ? 'crit' : freeShare < 0.1 ? 'warn' : 'ok'
-  // The bar's parts are scaled to the disk's used space, so the bar always adds up to the disk.
-  const partSum = parts ? parts.reduce((s, p) => s + p.bytes, 0) : 0
-  const segs = parts ? parts.map((p) => ({ ...p, share: total ? ((p.bytes / partSum) * used) / total : 0 })) : []
-  const kinds = summary ? (Object.entries(summary.byKind) as [FileKind, number][]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]) : []
-  const kindMax = kinds[0]?.[1] ?? 0
-  const history = disk?.history ?? []
+  const parts = summary?.parts ?? []
+  const system = parts.find((p) => p.id === 'system')?.bytes
+  const biggest = [...parts].filter((p) => p.id !== 'system').sort((a, b) => b.bytes - a.bytes)[0]
+  const level = total && free / total < 0.05 ? 'crit' : total && free / total < 0.1 ? 'warn' : 'ok'
+  const placeName = summary ? (summary.kind === 'mac' ? disk?.name ?? 'Macintosh HD' : summary.kind === 'home' ? 'Your home folder' : summary.root.split('/').pop()) : ''
 
   return (
-    <div className="plan-scroll st-scroll">
-      <RoomHead icon={<Icon.storage />} title="Overview" sub={disk ? `${disk.name} · ${bytes(free)} free of ${bytes(total)}` : 'Reading the disk…'}>
-        {scan.status !== 'scanning' && summary && (
-          <button type="button" className="btn btn-sm" onClick={() => void startScan(summary.kind, summary.kind === 'path' ? summary.root : undefined)}><Icon.refresh />Scan again</button>
+    <div className="st-room">
+      <TopBar title="Overview" />
+      <div className="st-scroll">
+        <div className="st-rings">
+          <div className="st-ring-col">
+            {scan.status === 'scanning' ? (
+              <Ring colors={SCAN_RING} onClick={() => setRoom('map')}>
+                <span className="st-ring-big">{bytes(scan.progress?.bytes ?? 0)}</span>
+                <span className="st-ring-sub">Scanning…</span>
+              </Ring>
+            ) : (
+              <Ring colors={SCAN_RING} onClick={() => void startScan(summary?.kind ?? 'mac', summary?.kind === 'path' ? summary.root : undefined)} title={summary ? 'Scan again' : 'Scan the whole Mac'}>
+                <span className="st-ring-big">{summary ? bytes(summary.bytes) : 'Scan'}</span>
+                <span className="st-ring-link">{summary ? 'Scan Again' : 'Map the disk'}</span>
+              </Ring>
+            )}
+            <h2>{scan.status === 'scanning' ? 'Mapping the disk…' : summary ? `${placeName} is mapped` : 'Find out where the space went'}</h2>
+            <p>{scan.status === 'scanning' ? `${plural(scan.progress?.files ?? 0, 'file')} so far.` : summary ? `Here is where the space went${scan.live ? '' : ' at the last scan'}. Each card opens what acts on it.` : 'One scan maps everything on the disk. Nothing is removed until you say so.'}</p>
+          </div>
+          <div className="st-ring-col">
+            <Ring colors={OPTIMIZE_RING} onClick={() => setRoom('optimize')} title="See what Optimize would clear">
+              <Icon.wand />
+              <span className="st-ring-big sm">Optimize</span>
+              <span className="st-ring-sub warm">{junkSafe === null ? 'Checking…' : junkSafe ? `${bytes(junkSafe)} to free` : 'All clear'}</span>
+            </Ring>
+            <h2>{junkSafe === null ? 'Looking at caches and open apps' : junkSafe ? 'This Mac can be lighter' : 'Nothing worth clearing'}</h2>
+            <p>{junkSafe ? `${bytes(junkSafe)} of junk. One press clears it, after showing what it will do.` : 'Junk nobody will miss, and apps nobody is using, cleared in one press.'}</p>
+          </div>
+        </div>
+
+        {level !== 'ok' && disk && (
+          <div className={`st-banner ${level}`}>
+            <Icon.alert />
+            <div><b>{disk.name} is almost out of space: {bytes(free)} left.</b><p>When it runs out, apps stop working and the Mac can freeze. Clear at least {bytes(Math.max(0, total * 0.1 - free))}, and empty the Trash in Finder: what is in it still takes space.</p></div>
+            <button type="button" className="st-button" onClick={() => setRoom('large')}>Find what can go</button>
+          </div>
         )}
-      </RoomHead>
+        {fda === false && (
+          <div className="st-banner info">
+            <Icon.shield />
+            <div><b>Let the app read your whole disk</b><p>macOS hides Mail, Messages, Safari and other apps' data from any app without Full Disk Access. Scans still run, but those folders stay closed and the totals come up short. Switch EC2 Remote Access on in Privacy &amp; Security, then quit and open it again.</p></div>
+            <div className="st-banner-actions">
+              <button type="button" className="st-primary" onClick={() => void window.api.invoke('shell:open', FULL_DISK_ACCESS_URL)}>Open Settings</button>
+              <button type="button" className="st-button" onClick={() => void refreshFda()}>Check again</button>
+            </div>
+          </div>
+        )}
 
-      {level !== 'ok' && disk && (
-        <div className={`st-banner ${level}`}>
-          <Icon.alert />
-          <div>
-            <b>{disk.name} is almost out of space: {bytes(free)} left.</b>
-            <p>When it runs out, apps stop working and the Mac can freeze. Clear at least {bytes(Math.max(0, total * 0.1 - free))}, and empty the Trash in Finder: what is in it still takes space.</p>
+        <section className="st-panel st-diskcard">
+          <div className="st-diskcard-head">
+            <span className="st-hd"><Icon.disk /></span>
+            <div className="flex-1"><h3>{disk?.name ?? 'Macintosh HD'}</h3><p className="muted">{disk ? `${bytes(used)} of ${bytes(total)} used · ${Math.round((used / total) * 100)}% full` : 'Reading the disk…'}</p></div>
+            <div className="st-avail"><b>{bytes(free)}</b><span>available</span></div>
+            <button type="button" className="st-button" onClick={() => setRoom('map')}>View Details <Icon.chevron /></button>
           </div>
-          <button type="button" className="btn btn-sm" onClick={() => setRoom('large')}>Find what can go</button>
-        </div>
-      )}
-
-      {fda === false && (
-        <div className="st-banner info">
-          <Icon.shield />
-          <div>
-            <b>Let the app read your whole disk</b>
-            <p>macOS hides Mail, Messages, Safari and other apps' data from any app without Full Disk Access. Scans still run, but those folders stay closed and the totals come up short. Switch EC2 Remote Access on in Privacy &amp; Security, then quit and open it again.</p>
+          <DiskBar />
+          <div className="st-facts">
+            <div><h5><i style={{ background: '#64748b' }} />Available</h5><b>{bytes(free)}</b><p>{total ? `${Math.round((free / total) * 100)}% of the disk` : ''}{disk && disk.free > disk.freeNow ? `, counting ${bytes(disk.free - disk.freeNow)} macOS clears by itself when it needs the room.` : '.'}</p></div>
+            <div><h5><i style={{ background: PART_COLORS.system }} />Needed by macOS</h5><b>{system !== undefined ? bytes(system) : '—'}</b><p>macOS itself, its swap and its own files{summary?.unreadable ? `, with what is in the ${summary.unreadable.toLocaleString('en-US')} folders the scan could not read` : ''}.</p></div>
+            <div><h5><i style={{ background: biggest ? PART_COLORS[biggest.id] : '#8b5cf6' }} />Taking the most</h5><b>{biggest ? bytes(biggest.bytes) : '—'}</b>
+              <p>{biggest ? `${PART_NAMES[biggest.id]}, ${Math.round((biggest.bytes / Math.max(1, used)) * 100)}% of the space in use.` : 'Scan the Mac to see what.'}</p>
+              {top.data?.[0] && <button type="button" className="st-link" onClick={() => openInMap(top.data![0].path)}>Largest folder: {top.data[0].name}, {bytes(top.data[0].size)} <Icon.chevron /></button>}
+            </div>
           </div>
-          <div className="st-banner-actions">
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => void window.api.invoke('shell:open', FULL_DISK_ACCESS_URL)}>Open Settings</button>
-            <button type="button" className="btn btn-sm" onClick={() => void refreshFda()}>Check again</button>
-          </div>
-        </div>
-      )}
-
-      <section className="st-card st-diskcard">
-        <div className="st-disk-big">
-          <span><b>{bytes(used)}</b> used</span>
-          <span className="muted"><b>{bytes(free)}</b> free</span>
-        </div>
-        <div className="st-stack" onMouseLeave={() => setHover(null)}>
-          {parts
-            ? segs.map((p) => <span key={p.id} className={hover && hover !== p.id ? 'dim' : ''} style={{ width: `${p.share * 100}%`, background: PART_COLORS[p.id] }} onMouseEnter={() => setHover(p.id)} />)
-            : <span style={{ width: `${total ? (used / total) * 100 : 0}%`, background: 'var(--text-2)' }} />}
-          <span className={`st-stack-free ${hover && hover !== 'free' ? 'dim' : ''}`} style={{ width: `${freeShare * 100}%` }} onMouseEnter={() => setHover('free')} />
-        </div>
-        {parts ? (
-          <div className="st-legend">
-            {DISK_PARTS.filter((d) => parts.some((p) => p.id === d.id)).map((d) => {
-              const p = parts.find((x) => x.id === d.id)!
-              const t = partTarget(d.id)
-              return (
-                <button key={d.id} type="button" className={`st-legend-item ${hover === d.id ? 'on' : ''}`} title={d.hint} onMouseEnter={() => setHover(d.id)} onMouseLeave={() => setHover(null)}
-                  onClick={() => (t.room ? setRoom(t.room) : t.path && openInMap(t.path))}>
-                  <span className="st-dot" style={{ background: PART_COLORS[d.id] }} />
-                  <span className="st-legend-label">{d.label}</span>
-                  <span className="st-legend-size">{bytes(p.bytes)}</span>
-                </button>
-              )
-            })}
-            <span className={`st-legend-item static ${hover === 'free' ? 'on' : ''}`}><span className="st-dot free" /><span className="st-legend-label">Free</span><span className="st-legend-size">{bytes(free)}</span></span>
-          </div>
-        ) : null}
-        <div className="st-scanline">
-          {scan.status === 'scanning' ? null : summary ? (
-            <span className="muted">
-              {summary.kind === 'path' ? `Scanned ${tilde(summary.root)}` : summary.kind === 'home' ? 'Scanned your home folder' : 'Scanned the whole Mac'} {ago(summary.at)}: {plural(summary.files, 'file')}, {bytes(summary.bytes)}, in {Math.max(1, Math.round(summary.took / 1000))} s.
-              {summary.unreadable > 0 && ` ${plural(summary.unreadable, 'folder')} could not be read${summary.fullDiskAccess ? '' : ' without Full Disk Access'}.`}
-              {!scan.live && ' The scan is no longer in memory; scan again to look into it.'}
-            </span>
-          ) : <span className="muted">See what fills the disk, by kind and by folder, in a minute or two. Nothing is removed until you say so.</span>}
-        </div>
-        {scan.status === 'scanning' ? <ScanProgressCard /> : !summary && <ScanButtons />}
-      </section>
-
-      {kinds.length > 0 && (
-        <section className="st-card">
-          <h3 className="st-card-title">By kind <span className="muted">files of 1 MB or more</span></h3>
-          <div className="st-kinds">
-            {kinds.map(([k, v]) => (
-              <div key={k} className="st-kind">
-                <span className="st-dot" style={{ background: KIND_COLORS[k] }} />
-                <span className="st-kind-label">{KIND_NAMES[k]}</span>
-                <ShareBar pct={kindMax ? (v / kindMax) * 100 : 0} color={KIND_COLORS[k]} />
-                <span className="st-size">{bytes(v)}</span>
-              </div>
-            ))}
-          </div>
+          {scan.status === 'scanning' && <ScanProgressCard />}
         </section>
-      )}
 
-      <div className="st-cards">
-        {trash.data != null && trash.data > 0 && (
-          <button type="button" className="st-tile warn" onClick={() => void window.api.invoke('storage:openTrash')}>
-            <Icon.trash />
-            <b>{bytes(trash.data)} in the Trash</b>
-            <span>Still taking space until it is emptied. Opens the Trash in Finder, where Empty is.</span>
-          </button>
+        <div className="st-tiles">
+          <StatTile look="items" big={summary ? (summary.files + summary.dirs).toLocaleString('en-US') : '—'} title="Total Items" sub={summary ? `${summary.files.toLocaleString('en-US')} files · ${summary.dirs.toLocaleString('en-US')} folders` : 'Scan the Mac'} onClick={() => setRoom('report')} />
+          <StatTile look="large" big={live ? bytes(largeBytes) : '—'} title="Large Files" sub={live ? `${plural(large.data?.length ?? 0, 'file')} of 100 MB or more` : 'Scan the Mac'} onClick={() => setRoom('large')} />
+          <StatTile look="junk" big={junkSafe !== null ? bytes(junkSafe) : '…'} title="Junk Files" sub={junkAll !== null && junkSafe !== null ? `Safe to clean, ${bytes(junkAll - junkSafe)} to review` : 'Measuring…'} onClick={() => setRoom('junk')} />
+          <StatTile look="unused" big={unused ? String(unused.length) : '…'} title="Unused Apps" sub={unused ? `${bytes(unused.reduce((s, a) => s + a.size, 0))} can be freed` : 'Measuring…'} onClick={() => setRoom('unused')} />
+        </div>
+
+        <div className="st-cols3">
+          <ListCard title="Largest Folders" icon={<Icon.folder />} onAll={() => setRoom('map')}>
+            {!live && <p className="muted st-card-empty">Scan the Mac to see them.</p>}
+            {top.data?.map((f, i) => (
+              <button key={f.path} type="button" className="st-lrow" onClick={() => openInMap(f.path)} title={f.path}>
+                <span className="st-lrow-icon"><Icon.folder /></span>
+                <span className="st-lrow-main"><span className="st-lrow-name">{f.name}</span><span className="st-bar"><span style={{ width: `${(f.size / (top.data![0].size || 1)) * 100}%`, background: BAR_COLORS[i % BAR_COLORS.length] }} /></span></span>
+                <b>{bytes(f.size)}</b><Icon.chevron />
+              </button>
+            ))}
+          </ListCard>
+          <ListCard title="Top Apps by Size" icon={<Icon.apps />} onAll={() => setRoom('uninstaller')}>
+            {!live && <p className="muted st-card-empty">Scan the Mac to see them.</p>}
+            <AppRows apps={appsMap.data?.apps.slice(0, 5) ?? []} />
+          </ListCard>
+          <ListCard title="Cleanup Recommendations" icon={<Icon.sparkles />}>
+            <Rec look="junk" title="Junk Files" sub="Caches, logs and build data" size={junkSafe} button="Clean" primary room="junk" />
+            <Rec look="downloads-old" title="Old Downloads" sub="Not opened for three months" size={junk ? (oldDownloads?.items.reduce((s, i) => s + i.size, 0) ?? 0) : null} button="Review" room="junk" />
+            <Rec look="unused" title="Unused Apps" sub="Not opened in 3 months" size={unused ? unused.reduce((s, a) => s + a.size, 0) : null} button="Review" room="unused" />
+            <Rec look="duplicates" title="Duplicate Files" sub="Identical copies, by content" size={undefined} button="Find" room="duplicates" />
+            <Rec look="large" title="Large Files" sub="Files of 100 MB or more" size={live ? largeBytes : undefined} button="Review" room="large" />
+            <Rec look="leftover" title="Leftovers" sub="From apps no longer here" size={leftovers} button="Review" room="leftovers" />
+          </ListCard>
+        </div>
+
+        <div className="st-cols3">
+          <KindsCard />
+          <TrendCard />
+          <ListCard title="Recent Large Files" icon={<Icon.history />} onAll={() => setRoom('large')}>
+            {!live && <p className="muted st-card-empty">Scan the Mac to see them.</p>}
+            <RecentRows files={recent.data ?? []} />
+          </ListCard>
+        </div>
+
+        {mac.data && (
+          <section className="st-panel st-macinfo">
+            <span className="st-hd"><Icon.monitor /></span>
+            <dl>
+              <div><dt>macOS</dt><dd>{mac.data.os}</dd></div>
+              <div><dt>Model</dt><dd>{mac.data.model}</dd></div>
+              <div><dt>Processor</dt><dd>{mac.data.chip}</dd></div>
+              <div><dt>Memory</dt><dd>{Math.round(mac.data.memory / 1024 ** 3)} GB</dd></div>
+              <div><dt>Startup Disk</dt><dd>{mac.data.disk}</dd></div>
+              <div><dt>Last Scan</dt><dd>{summary ? new Date(summary.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not yet'}</dd></div>
+            </dl>
+            <button type="button" className="st-button" onClick={() => {
+              const m = mac.data!
+              void window.api.invoke('clipboard:write', `macOS: ${m.os}\nModel: ${m.model}\nProcessor: ${m.chip}\nMemory: ${Math.round(m.memory / 1024 ** 3)} GB\nStartup disk: ${m.disk}${disk ? ` (${bytes(free)} free of ${bytes(total)})` : ''}`).then(() => useStore.getState().toast('success', 'Copied'))
+            }}>Copy</button>
+          </section>
         )}
-        {CARDS.map((c) => {
-          const r = reports[c.room]
-          const can = r ? reportSize(r, true) : 0
-          return (
-            <button key={c.room} type="button" className="st-tile" onClick={() => setRoom(c.room)}>
-              {c.icon()}
-              <b>{c.title}{r && can > 0 && <span className="st-tile-size"> · {bytes(can)} can go</span>}</b>
-              <span>{c.text}</span>
-            </button>
-          )
-        })}
       </div>
-
-      {history.length > 1 && <Trend history={history} />}
     </div>
   )
 }
 
-/** The disk's use, one reading a day, over the last 7, 30 or 90 days. */
-function Trend({ history }: { history: { day: string; used: number; total: number }[] }): ReactElement {
-  const [days, setDays] = useState(30)
-  const pts = history.slice(-days)
-  const max = Math.max(...pts.map((p) => p.total))
-  const min = Math.min(...pts.map((p) => p.used)) * 0.98
-  const w = 600
-  const h = 90
-  const x = (i: number): number => (pts.length < 2 ? 0 : (i / (pts.length - 1)) * w)
-  const y = (v: number): number => h - ((v - min) / Math.max(1, max - min)) * h
-  const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.used).toFixed(1)}`).join(' ')
+function StatTile({ look, big, title, sub, onClick }: { look: string; big: string; title: string; sub: string; onClick: () => void }): ReactElement {
+  return (
+    <button type="button" className="st-stat" onClick={onClick}>
+      <Squircle look={look} size={46} />
+      <span className="st-stat-text"><b>{big}</b><span>{title}</span><small>{sub}</small></span>
+      <Icon.chevron />
+    </button>
+  )
+}
+
+function ListCard({ title, icon, onAll, children }: { title: string; icon: ReactElement; onAll?: () => void; children: ReactNode }): ReactElement {
+  return (
+    <section className="st-panel st-listcard">
+      <header><span className="st-listcard-icon">{icon}</span><h3>{title}</h3><span className="flex-1" />{onAll && <button type="button" className="st-button sm" onClick={onAll}>View All</button>}</header>
+      <div className="st-listcard-body">{children}</div>
+    </section>
+  )
+}
+
+function AppRows({ apps }: { apps: { path: string; name: string; size: number }[] }): ReactElement {
+  const icons = useIcons(apps.map((a) => a.path))
+  return (
+    <>
+      {apps.map((a) => (
+        <button key={a.path} type="button" className="st-lrow" onClick={() => openInUninstaller([a.path])} title={a.path}>
+          <ItemIcon path={a.path} icons={icons} size={24} />
+          <span className="st-lrow-main"><span className="st-lrow-name">{a.name.replace(/\.app$/, '')}</span></span>
+          <b>{bytes(a.size)}</b><Icon.chevron />
+        </button>
+      ))}
+    </>
+  )
+}
+
+function RecentRows({ files }: { files: MapNode[] }): ReactElement {
+  const icons = useIcons(files.map((f) => f.path))
+  return (
+    <>
+      {files.slice(0, 5).map((f) => (
+        <button key={f.path} type="button" className="st-lrow tall" onClick={() => void window.api.invoke('local:quickLook', f.path)} title={f.path}>
+          <ItemIcon path={f.path} icons={icons} size={24} />
+          <span className="st-lrow-main"><span className="st-lrow-name">{f.name}</span><span className="st-lrow-sub">{where(f.path)}</span></span>
+          <span className="st-lrow-end"><b>{bytes(f.size)}</b><small>{f.mtime ? ago(f.mtime) : ''}</small></span>
+        </button>
+      ))}
+    </>
+  )
+}
+
+function Rec({ look, title, sub, size, button, room, primary }: { look: string; title: string; sub: string; size: number | null | undefined; button: string; room: RoomId; primary?: boolean }): ReactElement {
+  return (
+    <div className="st-rec">
+      <Squircle look={look} size={30} />
+      <span className="st-lrow-main"><span className="st-lrow-name">{title}</span><span className="st-lrow-sub">{sub}</span></span>
+      <b className="st-rec-size">{size == null ? '…' : bytes(size, '0 bytes')}</b>
+      <button type="button" className={primary ? 'st-primary sm' : 'st-button sm'} onClick={() => setRoom(room)}>{button}</button>
+    </div>
+  )
+}
+
+/** Every byte of the scan by kind, with the small files counted together. */
+function KindsCard(): ReactElement {
+  const summary = useStorage((s) => s.scan.summary)
+  const kinds = useMemo(() => {
+    if (!summary) return []
+    const list: { id: FileKind | 'small'; label: string; value: number }[] = (Object.entries(summary.byKind) as [FileKind, number][]).filter(([, v]) => v > 0).map(([k, v]) => ({ id: k, label: KIND_NAMES[k], value: v }))
+    if (summary.smallBytes) list.push({ id: 'small', label: 'Smaller Files', value: summary.smallBytes })
+    list.sort((a, b) => b.value - a.value)
+    // Six named, the rest together.
+    const head = list.slice(0, 6)
+    const rest = list.slice(6).reduce((s, x) => s + x.value, 0)
+    return rest ? [...head, { id: 'small' as const, label: 'The Rest', value: rest }] : head
+  }, [summary])
+  const total = kinds.reduce((s, k) => s + k.value, 0)
+  const color = (k: { id: FileKind | 'small'; label: string }): string => (k.label === 'The Rest' ? '#475569' : KIND_COLORS[k.id])
+  return (
+    <section className="st-panel st-listcard">
+      <header><span className="st-listcard-icon"><Icon.storage /></span><h3>File Type Distribution</h3></header>
+      {!kinds.length ? <p className="muted st-card-empty">Scan the Mac to see what fills it.</p> : (
+        <div className="st-kinds">
+          <Donut parts={kinds.map((k) => ({ value: k.value, color: color(k) }))}><b>{bytes(total)}</b><span>Total</span></Donut>
+          <div className="st-kinds-legend">
+            {kinds.map((k) => (
+              <div key={k.label}><span className="st-dot" style={{ background: color(k) }} /><span className="flex-1">{k.label}</span><b>{bytes(k.value)}</b><small>{Math.round((k.value / (total || 1)) * 100)}%</small></div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** The disk's use over 7, 30 or 90 days, one reading a day. */
+function TrendCard(): ReactElement {
+  const disk = useStorage((s) => s.disk)
+  const [days, setDays] = useState<'7' | '30' | '90'>('30')
+  const pts = (disk?.history ?? []).slice(-Number(days))
   const change = pts.length > 1 ? pts[pts.length - 1].used - pts[0].used : 0
   return (
-    <section className="st-card">
-      <h3 className="st-card-title">
-        Used space
-        <span className="muted">{change === 0 ? 'no change' : `${change > 0 ? 'up' : 'down'} ${bytes(Math.abs(change))}`} since {pts[0].day}</span>
-        <span className="flex-1" />
-        <span className="plan-segment" role="radiogroup" aria-label="Days">
-          {[7, 30, 90].map((d) => <button key={d} type="button" role="radio" aria-checked={days === d} className={days === d ? 'on' : ''} onClick={() => setDays(d)}>{d} days</button>)}
-        </span>
-      </h3>
-      <svg className="st-trend" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label="Used space over time">
-        <polyline points={`0,${h} ${line} ${w},${h}`} className="st-trend-fill" />
-        <polyline points={line} className="st-trend-line" />
-      </svg>
-      <p className="muted st-trend-note">One reading a day while the app runs, kept on this Mac.</p>
+    <section className="st-panel st-listcard">
+      <header><span className="st-listcard-icon"><Icon.activity /></span><h3>Storage Trend</h3><span className="flex-1" />
+        <Segmented small value={days} onChange={setDays} options={[{ id: '7', label: '7D' }, { id: '30', label: '30D' }, { id: '90', label: '90D' }]} />
+      </header>
+      <p className="muted st-trend-sub">{disk?.name ?? 'Macintosh HD'}, the startup disk</p>
+      {pts.length > 1 ? (
+        <>
+          <AreaChart series={[{ label: 'Used', color: '#3b82f6', values: pts.map((p) => p.used) }]} times={pts.map((p) => new Date(`${p.day}T12:00`).getTime())} format={(v) => bytes(v)} height={120} label={(t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' })} />
+          <p className="st-trend-note">{change === 0 ? 'No change' : `${change > 0 ? 'Up' : 'Down'} ${bytes(Math.abs(change))}`} over {pts.length} days.</p>
+        </>
+      ) : (
+        <div className="st-trend-empty">
+          <b>{disk ? `${bytes(disk.total - disk.free)} used today` : '—'}</b>
+          <p className="muted">The app notes the disk's use once a day while it runs, and keeps it on this Mac. The trend draws itself from the second day.</p>
+        </div>
+      )}
     </section>
   )
 }

@@ -40,9 +40,11 @@ import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } fr
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
-import { aiReport, installersReport, junkReport, packageReceipts, systemReport } from './storage/cleanup'
-import { appFiles, forgetApps, installedApps, leftoversReport, quitApps, startupReport } from './storage/macApps'
+import { aiReport, installersReport, junkReport, packageReceipts, systemCards } from './storage/cleanup'
+import { appFiles, forgetApps, installedApps, leftoversReport, quitApps, startupItems } from './storage/macApps'
 import { monitorSample, openApps } from './storage/monitor'
+import { itemDates, macInfo, scanTargets } from './storage/insight'
+import { reportLists, scanChanges, storageAppsNest, storageKinds, storageNest, topFolders } from './storage/storage'
 import { cancelDuplicates, cancelScan, diskInfo, findDuplicates, forgetRemoved, fullDiskAccess, hiddenItems, largeFiles, moveToTrash, openTrash, pickScanFolder, putBack, removedItems, searchScan, startScan, storageState, storageView, trashSize } from './storage/storage'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
@@ -160,6 +162,15 @@ export const handlers: Handlers = {
   'storage:fullDiskAccess': () => fullDiskAccess(),
   'storage:disk': () => diskInfo(),
   'storage:view': (ref) => storageView(ref),
+  'storage:nest': (ref, dirsOnly) => storageNest(ref, dirsOnly),
+  'storage:appsMap': () => storageAppsNest(),
+  'storage:kinds': () => storageKinds(),
+  'storage:topFolders': () => topFolders(),
+  'storage:report': () => reportLists(),
+  'storage:changes': (base) => scanChanges(base),
+  'storage:macInfo': () => macInfo(),
+  'storage:targets': () => scanTargets(),
+  'storage:dates': (path) => itemDates(path),
   'storage:large': (min, everywhere) => largeFiles(min, everywhere),
   'storage:search': (query, min, sort) => searchScan(query, min, sort),
   'storage:hidden': () => hiddenItems(),
@@ -173,13 +184,13 @@ export const handlers: Handlers = {
   'storage:openTrash': () => openTrash(),
   'storage:junk': () => junkReport(),
   'storage:ai': () => aiReport(),
-  'storage:systemData': () => systemReport(),
+  'storage:systemData': () => systemCards(),
   'storage:installers': () => installersReport(),
   'storage:receipts': () => packageReceipts(),
   'storage:apps': (withSizes) => installedApps(withSizes),
   'storage:appFiles': (path) => appFiles(path),
   'storage:leftovers': () => leftoversReport(),
-  'storage:startup': () => startupReport(),
+  'storage:startup': () => startupItems(),
   'storage:quitApps': (pids) => quitApps(pids),
   'storage:monitor': () => monitorSample(),
   'storage:openApps': () => openApps(),
