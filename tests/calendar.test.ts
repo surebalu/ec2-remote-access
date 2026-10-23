@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { layoutDay, monthDays, occurrences, parseEventInput, weekDays, type CalEvent } from '../src/shared/calendar.ts'
+import { layoutDay, monthDays, occurrences, parseEventInput, weekDays, weekSpan, type CalEvent } from '../src/shared/calendar.ts'
 import { icsTime, parseIcs, toIcs } from '../src/shared/ics.ts'
+import { addDays } from '../src/shared/naturalDate.ts'
 
 // Times below are read as New York local time, whatever this machine is set to.
 process.env.TZ = 'America/New_York'
@@ -13,6 +14,18 @@ test('month and week grids start on Sunday', () => {
   const m = monthDays('2026-10-15')
   assert.deepEqual([m.length, m[0], m[4], m[41]], [42, '2026-09-27', '2026-10-01', '2026-11-07'])
   assert.deepEqual(weekDays('2026-10-22'), ['2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24'])
+})
+
+test('a narrow column spans three days from the cursor, a wide one the whole week', () => {
+  assert.deepEqual(weekSpan('2026-10-22', false), weekDays('2026-10-22'))
+  assert.deepEqual(weekSpan('2026-10-22', true), ['2026-10-22', '2026-10-23', '2026-10-24'])
+  assert.deepEqual(weekSpan('2026-10-30', true), ['2026-10-30', '2026-10-31', '2026-11-01'], 'over a month end')
+  // Next/Previous steps by the length of the span, so the spans meet with no gap and no repeat.
+  for (const narrow of [false, true]) {
+    const a = weekSpan('2026-10-30', narrow)
+    const b = weekSpan(addDays('2026-10-30', a.length), narrow)
+    assert.equal(addDays(a[a.length - 1], 1), b[0], `${narrow ? 'narrow' : 'wide'}: the next span starts the day after`)
+  }
 })
 
 test('occurrences: repeats, skipped days, several days, past midnight', () => {

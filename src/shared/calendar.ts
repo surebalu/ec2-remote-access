@@ -94,6 +94,13 @@ export function monthDays(anyDayInMonth: string): string[] {
 /** The seven days of the week a day is in (Sunday first). */
 export const weekDays = (day: string): string[] => Array.from({ length: 7 }, (_, i) => addDays(weekStart(day), i))
 
+/** How many days the week view spans on a phone or a narrow pane: seven columns there would be too thin to read. */
+const NARROW_WEEK = 3
+
+/** The days the week view shows: the whole week, or NARROW_WEEK days from the cursor when the column is narrow. */
+export const weekSpan = (day: string, narrow: boolean): string[] =>
+  (narrow ? Array.from({ length: NARROW_WEEK }, (_, i) => addDays(day, i)) : weekDays(day))
+
 /**
  * Side by side for overlapping timed events of one day: each gets a column and how many columns its group of
  * overlapping events needs, so a 9–10 and a 9:30–11 sit half-width next to each other.
