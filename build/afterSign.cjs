@@ -31,10 +31,13 @@ exports.default = async function afterSign(context) {
   const identity = localIdentity()
   // No timestamp: a development signature does not need Apple's timestamp server, and the build stays offline.
   const sign = (args) => execFileSync('codesign', ['--force', '--timestamp=none', '--sign', identity, ...args], { stdio: 'inherit' })
-  // --deep signs nested bundles and helpers, not a bare executable in Contents/Resources: sign the dictation helper
-  // first, so the app's seal below covers its signed form. (With a Developer ID, electron-builder signs every Mach-O.)
-  const dictation = path.join(appPath, 'Contents', 'Resources', 'dictation', 'ec2ra-dictate')
-  if (existsSync(dictation)) sign(['--identifier', 'com.mainspring.ec2-remote-access.dictate', dictation])
+  // --deep signs nested bundles and helpers, not a bare executable in Contents/Resources: sign the native helpers
+  // first, so the app's seal below covers their signed form. (With a Developer ID, electron-builder signs every Mach-O.)
+  const helpers = [['dictation', 'ec2ra-dictate', 'dictate'], ['control', 'ec2ra-control', 'control']]
+  for (const [dir, name, id] of helpers) {
+    const bin = path.join(appPath, 'Contents', 'Resources', dir, name)
+    if (existsSync(bin)) sign(['--identifier', `com.mainspring.ec2-remote-access.${id}`, bin])
+  }
   console.log(`  • ${identity === '-' ? 'ad-hoc signing (no Developer ID or Apple Development certificate)' : `signing with ${identity}`}  app=${appPath}`)
   sign(['--deep', appPath])
 }

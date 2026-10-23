@@ -37,6 +37,7 @@ import ServicesDialog from './components/services/ServicesDialog'
 import DbLocksDialog from './components/dblocks/DbLocksDialog'
 import { installToolUsage } from './toolUsage'
 import { installVoice } from './voice'
+import { setRoom, STORAGE_ROOMS, type RoomId } from './components/storage/state'
 
 export default function App(): ReactElement {
   const init = useStore((s) => s.init)
@@ -159,6 +160,16 @@ export default function App(): ReactElement {
     else if (c.kind === 'ask') st.askAssistant(c.app, c.text)
     else if (c.kind === 'today') void window.api.invoke('notes:daily').then((p) => st.openNotes(p), (e: Error) => st.toast('error', e.message))
     else if (c.kind === 'links') st.showInLinks({ view: c.view, id: c.id })
+    else if (c.kind === 'storage') {
+      if (c.room && (STORAGE_ROOMS as readonly string[]).includes(c.room)) setRoom(c.room as RoomId)
+      st.openTool('storage')
+    }
+    else if (c.kind === 'settings') {
+      // The dialog opens on the section it last showed (SettingsDialog reads this as it mounts).
+      try { if (c.section) localStorage.setItem('ui.settingsSection', c.section) } catch { /* storage off */ }
+      st.set({ settingsOpen: false })
+      setTimeout(() => useStore.getState().set({ settingsOpen: true }), 0)
+    }
   }), [])
 
   // ⌘B shows or hides the hosts sidebar. Here rather than in the sidebar, which unmounts while hidden; on document so

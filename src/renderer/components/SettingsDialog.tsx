@@ -13,13 +13,15 @@ import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTh
 import { isDarkMode, MAC_TOOLS } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
 import QuicklinkSettings from './QuicklinkSettings'
+import WindowSettings from './WindowSettings'
+import { otherGlobalKeys } from '@shared/hotkeys'
 import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
 import { DEFAULT_UI_FONT, UI_FONTS } from '../uiFont'
 import { ZOOM_SECTIONS } from '../sectionZoom'
 import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
-type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'data' | 'keyboard' | 'launcher' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
+type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'data' | 'keyboard' | 'windows' | 'launcher' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
 
 const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: 'general', label: 'General', blurb: 'Appearance, how hosts are found and how connections are routed.', icon: Icon.settings },
@@ -29,6 +31,7 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
   { id: 'notes', label: 'Notes', blurb: 'Where your Markdown notes live.', icon: Icon.note },
   { id: 'data', label: 'Data', blurb: 'Where what you make in the app is kept, and a copy on your NAS.', icon: Icon.disk },
   { id: 'keyboard', label: 'Keyboard', blurb: 'Your own shortcut for each section down the left edge, Claude and ChatGPT included.', icon: Icon.keyboard },
+  { id: 'windows', label: 'Windows', blurb: 'Keys that put the window in front on a half, a third or a ninth of the screen, and keys that open your apps, from any app.', icon: Icon.grid },
   { id: 'launcher', label: 'Launcher', blurb: 'Quicklinks: a word you type in the launcher to open a page. The launcher’s own key is under Keyboard.', icon: Icon.launcher },
   { id: 'voice', label: 'Voice', blurb: 'Talk instead of typing, wherever you type in the app.', icon: Icon.mic },
   { id: 'services', label: 'Services', blurb: 'The 3DEXPERIENCE services, and the systemd units service control starts, stops and restarts.', icon: Icon.layers },
@@ -310,8 +313,8 @@ function KeyboardSettings({ draft, onChange, onGlobal }: { draft: Settings; onCh
   const sections = RAIL_SECTIONS.filter((x) => IN_ELECTRON || !(MAC_TOOLS as readonly string[]).includes(x))
   const launcherKey = draft.launcherKey ?? ''
   const globalKey = (t: GlobalTarget): string => draft[GLOBAL_KEYS[t].field] ?? GLOBAL_KEYS[t].fallback
-  const globals = (except?: GlobalTarget): { combo: string; does: string }[] =>
-    (Object.keys(GLOBAL_KEYS) as GlobalTarget[]).filter((t) => t !== except).map((t) => ({ combo: globalKey(t), does: GLOBAL_KEYS[t].does }))
+  // Every key that works from any app (window layouts' and app hotkeys' too), but the one being recorded.
+  const globals = (except?: GlobalTarget): { combo: string; does: string }[] => otherGlobalKeys(draft, except ?? '')
 
   const refreshStatus = (): void => {
     if (!IN_ELECTRON) return
@@ -496,7 +499,7 @@ export default function SettingsDialog(): ReactElement | null {
   const [section, setSection] = useState<SectionId>(() => {
     try {
       const saved = localStorage.getItem(LAST_SECTION) as SectionId | null
-      return saved && SECTIONS.some((x) => x.id === saved) && (saved !== 'voice' || CAN_DICTATE) ? saved : 'general'
+      return saved && SECTIONS.some((x) => x.id === saved) && (saved !== 'voice' || CAN_DICTATE) && (saved !== 'windows' || IN_ELECTRON) ? saved : 'general'
     } catch { return 'general' }
   })
   const [themeFilter, setThemeFilter] = useState<'all' | 'dark' | 'light'>('all')
@@ -873,14 +876,17 @@ export default function SettingsDialog(): ReactElement | null {
       </Group>
     </>
   )
-  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, data: <DataSettings />, keyboard, launcher: <QuicklinkSettings />, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
+  const windows = (
+    <WindowSettings draft={draft} onPatch={async (patch) => { setDraft((d) => (d ? { ...d, ...patch } : d)); await s.saveSettings(patch) }} />
+  )
+  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, data: <DataSettings />, keyboard, windows, launcher: <QuicklinkSettings />, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
 
   return (
     <Modal title="Settings" onClose={close} width="max-w-[880px]" bare>
       <div className="settings">
         <nav className="settings-nav" aria-label="Settings sections">
           <div className="settings-nav-title">Settings</div>
-          {SECTIONS.filter((x) => x.id !== 'voice' || CAN_DICTATE).map((x) => (
+          {SECTIONS.filter((x) => (x.id !== 'voice' || CAN_DICTATE) && (x.id !== 'windows' || IN_ELECTRON)).map((x) => (
             <button key={x.id} type="button" data-section={x.id} className={`settings-nav-item ${section === x.id ? 'on' : ''}`} aria-current={section === x.id ? 'page' : undefined} onClick={() => setSection(x.id)}>
               <x.icon />
               {x.label}

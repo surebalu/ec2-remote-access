@@ -361,6 +361,8 @@ html[data-sidebar="collapsed"] .titlebar .brand-name { display: none; }
 .host-details { width: 330px; flex-shrink: 0; border-color: var(--border); }
 .detail-value:hover { color: var(--accent); }
 .switcher-result { display: flex; width: 100%; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; }
+/* A site under the Browser's tab (the Browser's own tabs, to switch straight to one). */
+.switcher-result.nested { width: calc(100% - 22px); margin-left: 22px; }
 .switcher-result.on { background: var(--accent-soft); border-color: var(--accent); }
 .switcher-result svg { flex-shrink: 0; color: var(--accent); }
 button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -1395,6 +1397,18 @@ html[data-tabs-crowded] .search-pill-text { display: none; }
 .set-status.warn .dot { background: var(--warn); }
 .set-about { display: flex; align-items: center; gap: 14px; margin: 4px 0 8px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: linear-gradient(135deg, var(--accent-soft), transparent 60%), var(--panel); }
 .set-about-mark { width: 48px; height: 48px; border-radius: 12px; font-size: 18px; line-height: 48px; }
+.set-group-hint { margin: -2px 0 6px 4px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+/* Settings → Windows: the layout groups fold; app hotkeys pick an app from the Mac's list. */
+.set-group-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; cursor: pointer; }
+.set-group-toggle svg { width: 12px; height: 12px; }
+.set-group-toggle:hover { color: var(--text); }
+.set-app-icon { flex-shrink: 0; width: 18px; height: 18px; object-fit: contain; }
+.set-app-pick { display: flex; flex-direction: column; gap: 6px; }
+.set-app-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
+.set-app-list button { display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 12px; text-align: left; }
+.set-app-list button:hover { background: var(--accent-soft); }
+.set-app-list .muted { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.set-app-pick > .btn { align-self: flex-start; }
 .set-list { display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.45; }
 .set-list li { display: flex; gap: 8px; }
 .set-list svg { flex-shrink: 0; width: 15px; height: 15px; margin-top: 1px; color: var(--ok); }
@@ -1887,6 +1901,35 @@ html.launcher-page, html.launcher-page body { background: transparent; }
 .launcher-form-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 8px; }
 .launcher-form-buttons .kbd { margin-left: 4px; font-size: 9.5px; }
 .launcher-action.on { background: var(--accent-soft-2); }
+/* The launcher's modes (launcher/modes.tsx): a back chip in the search field, a line of news under it, the emoji grid. */
+.launcher-mode { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: 24px; padding: 0 8px 0 5px; border-radius: 6px; background: var(--accent-soft-2); color: var(--accent); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.launcher-mode svg { width: 12px; height: 12px; }
+.launcher-mode:hover { background: var(--accent-soft); }
+.launcher-notice { display: flex; flex-shrink: 0; align-items: center; gap: 7px; padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+.launcher-notice svg { flex-shrink: 0; width: 13px; height: 13px; }
+.launcher-notice.ok { background: var(--ok-soft); color: var(--text); }
+.launcher-notice.ok svg { color: var(--ok); }
+.launcher-notice.err { background: var(--err-soft); color: var(--text); }
+.launcher-notice.err svg { color: var(--err); }
+.launcher-cells { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 2px 2px 6px; }
+.launcher-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 8px; font-size: 24px; line-height: 1; cursor: default; }
+.launcher-cell.on { background: var(--accent-soft-2); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.launcher-emoji { font-size: 22px; line-height: 1; }
+.launcher-item .launcher-emoji { font-size: 17px; }
+.launcher-emoji-sm { font-size: 15px; line-height: 1; }
+.launcher-emoji-detail { display: flex; flex-direction: column; align-items: center; padding-top: 10px; }
+.launcher-emoji-big { margin-bottom: 10px; font-size: 76px; line-height: 1.1; }
+.launcher-meter { font-variant-numeric: tabular-nums; }
+.launcher-big-text { color: var(--text); font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: center; }
+.launcher-facts-big { height: auto; min-height: 64px; padding: 4px 0; color: var(--accent); }
+.launcher-facts-big .layout-glyph { color: var(--accent); }
+.launcher-note { margin-top: 10px; }
+.launcher-capture { display: block; padding: 6px 8px; border-radius: 6px; background: var(--panel-2); font: 11px/1.45 var(--mono-font); text-align: left; white-space: pre-wrap; }
+.launcher-go { width: 11px; height: 11px; opacity: .6; }
+.launcher-spin { animation: launcher-spin 1.2s linear infinite; }
+@keyframes launcher-spin { to { transform: rotate(360deg); } }
+.layout-glyph { display: block; flex-shrink: 0; color: var(--text-2); }
+.launcher-item.on .layout-glyph { color: var(--accent); }
 
 /* ---------- Health (components/health): the 3DEXPERIENCE platform at a glance ---------- */
 .lvl-ok { --lvl: var(--ok); --lvl-soft: var(--ok-soft); }

@@ -75,6 +75,9 @@ export const defaultSettings: Settings = {
   launcherKey: '',
   linkSaveKey: 'ctrl+s',
   linkFindKey: 'ctrl+f',
+  windowKeys: {},
+  windowGap: 0,
+  appHotkeys: [],
   onePasswordStayApproved: true,
   quicklinks: []
 }

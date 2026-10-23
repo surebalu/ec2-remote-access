@@ -119,3 +119,18 @@ test('writing .ics and reading it back', () => {
   assert.deepEqual(back[0].repeat, { freq: 'weekly', interval: 2, byDay: [1, 3], until: '2026-12-31' })
   assert.deepEqual([back[0].exdates, back[0].notes, back[0].uid], [['2026-10-21'], 'Agenda:\n- items', 'x1@ec2-remote-access'])
 })
+
+test('a Mac calendar’s events on local days and times', async () => {
+  const { macEventToCal } = await import('../src/shared/calendar.ts')
+  const t = (y: number, m: number, d: number, h = 0, min = 0): number => new Date(y, m - 1, d, h, min).getTime()
+  const timed = macEventToCal({ id: 'a@1', calendarId: 'g', title: 'Standup', start: t(2026, 10, 23, 9, 30), end: t(2026, 10, 23, 9, 45), allDay: false, location: 'Meet' }, 'list1')
+  assert.deepEqual(timed, { id: 'mac:a@1', type: 'event', calendarId: 'list1', title: 'Standup', updatedAt: 0, location: 'Meet', date: '2026-10-23', start: '09:30', end: '09:45' })
+  // EventKit ends an all-day event a second before midnight; a feed may end it at midnight.
+  const day = macEventToCal({ id: 'b', calendarId: 'g', title: 'Holiday', start: t(2026, 11, 26), end: t(2026, 11, 26, 23, 59) + 59_000, allDay: true }, 'list1')
+  assert.equal(day.date, '2026-11-26')
+  assert.equal(day.endDate, undefined)
+  const trip = macEventToCal({ id: 'c', calendarId: 'g', title: '', start: t(2026, 12, 1), end: t(2026, 12, 4), allDay: true }, 'list1')
+  assert.deepEqual([trip.title, trip.date, trip.endDate], ['(No title)', '2026-12-01', '2026-12-03'])
+  const late = macEventToCal({ id: 'd', calendarId: 'g', title: 'Release', start: t(2026, 10, 23, 22), end: t(2026, 10, 24, 1), allDay: false }, 'list1')
+  assert.deepEqual([late.date, late.endDate, late.start, late.end], ['2026-10-23', '2026-10-24', '22:00', '01:00'])
+})

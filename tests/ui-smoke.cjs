@@ -86,6 +86,10 @@ app.on('session-created', (ses) => {
 // The launcher: a few installed apps, what it counted and what it was asked to do.
 const launcherApps = ['Safari', 'Slack', 'Visual Studio Code', 'System Settings'].map((name) => ({ name, path: `/Applications/${name}.app` }))
 let launcherUsage = {}
+// What macOS allows the app in the fixture: Accessibility for window layouts, and the Calendars permission.
+let wmAccess = false
+let macCalStatus = 'notDetermined'
+const macEventReads = []
 const launcherDone = []
 // While the launcher's window is up, notes:search finds notes by name.
 let launcherNotes = false
@@ -685,6 +689,42 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       if (id) launcherUsage = { ...launcherUsage, [id]: { count: (launcherUsage[id]?.count ?? 0) + 1, last: Date.now() } }
       return
     }
+    // The window helper and the launcher's Mac tools (main/desktopKeys.ts, main/macTools.ts), recorded, never real.
+    case 'wm:status': return { helper: true, accessibility: wmAccess, calendar: macCalStatus, keys: Object.entries(settings.windowKeys ?? {}).map(([id, combo]) => ({ id: `window:${id}`, combo, registered: id !== 'maximize' })) }
+    case 'wm:askAccess': wmAccess = true; launcherDone.push([channel]); return true
+    case 'wm:layout': case 'wm:openPrivacy': launcherDone.push([channel, ...args]); return
+    case 'launcher:processes': return [
+      { pid: 4242, ppid: 1, user: 'fixture', cpu: 87.5, memory: 1.2e9, name: 'Runaway', command: '/Applications/Runaway.app/Contents/MacOS/Runaway', app: '/Applications/Runaway.app' },
+      { pid: 501, ppid: 1, user: 'fixture', cpu: 3.1, memory: 4e8, name: 'Slack', command: '/Applications/Slack.app/Contents/MacOS/Slack', app: '/Applications/Slack.app' },
+      { pid: 88, ppid: 1, user: 'root', cpu: 0, memory: 2e6, name: 'syslogd', command: '/usr/sbin/syslogd' }
+    ]
+    case 'launcher:kill': case 'launcher:quitAll': case 'launcher:paste': case 'notes:capture': {
+      launcherDone.push([channel, ...args])
+      return channel === 'launcher:paste' ? 'pasted' : channel === 'notes:capture' ? 'Daily/2026-10-23.md' : channel === 'launcher:quitAll' ? 2 : undefined
+    }
+    case 'launcher:network': return { addresses: [{ label: 'Public IPv4', address: '203.0.113.7', note: 'How websites and AWS security groups see this Mac' }, { label: 'Wi-Fi (en0)', address: '192.168.0.20', note: '192.168.0.20/24' }, { label: 'Tailscale', address: '100.101.7.3' }, { label: 'Router', address: '192.168.0.1' }] }
+    case 'launcher:speedTest': return { download: 412_345_678, upload: 23_456_789, rpm: 1234, idleMs: 18, interface: 'en0', server: 'fixture' }
+    case 'launcher:downloads': return [
+      { name: 'invoice-october.pdf', path: '/Users/fixture/Downloads/invoice-october.pdf', size: 245_000, dir: false, added: now - 3600_000 },
+      { name: 'ubuntu-24.04.iso', path: '/Users/fixture/Downloads/ubuntu-24.04.iso', size: 6.1e9, dir: false, added: now - 3 * 86400_000 }
+    ]
+    case 'maccal:status': return { available: true, status: macCalStatus }
+    case 'maccal:ask': macCalStatus = 'authorized'; return macCalStatus
+    case 'maccal:calendars': return [
+      { id: 'g-work', title: 'surendra@mainspring.example', account: 'surendra@mainspring.example', kind: 'caldav', color: '#1a73e8', writable: true },
+      { id: 'g-holidays', title: 'Holidays in United States', account: 'surendra@mainspring.example', kind: 'caldav', color: '#0b8043', writable: false },
+      { id: 'i-home', title: 'Home', account: 'iCloud', kind: 'icloud', color: '#ff9500', writable: true }
+    ]
+    case 'maccal:events': {
+      const [from, to, ids] = args
+      const at = (d, h, m = 0) => { const x = new Date(from); x.setDate(x.getDate() + 7 + d); x.setHours(h, m, 0, 0); return x.getTime() }
+      macEventReads.push(ids)
+      return ids.includes('g-work') ? [
+        { id: 'standup@1', calendarId: 'g-work', title: 'Platform standup', start: at(1, 9, 30), end: at(1, 9, 45), allDay: false, location: 'Google Meet' },
+        { id: 'review@1', calendarId: 'g-work', title: 'Release review', start: at(2, 14), end: at(2, 15), allDay: false }
+      ].filter((e) => e.start >= from && e.start < to) : []
+    }
+    case 'maccal:settings': launcherDone.push([channel, ...args]); return
     default: throw new Error(`Unexpected fixture IPC: ${channel}`)
   }
 })
@@ -874,6 +914,22 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('.cal-sub-ok')?.textContent.includes('Found 1 event')`)
     await click('Subscribe')
     await until(`[...document.querySelectorAll('.cal-allday-col .cal-chip')].some((c) => c.textContent.includes('Team offsite'))`)
+    // Calendars on this Mac (a Google Workspace account in Internet Accounts): macOS is asked once, a calendar is
+    // picked, and its events are in the week, read-only.
+    await js(`[...document.querySelectorAll('.plan-nav')].find((b) => b.textContent.includes('Calendars on this Mac')).click()`)
+    await until(`[...document.querySelectorAll('.cal-mac button')].some((b) => b.textContent.startsWith('Allow access'))`)
+    await click('Allow access to Calendars…')
+    await until(`document.querySelectorAll('.cal-mac-row').length === 3`)
+    await js(`[...document.querySelectorAll('.cal-mac-row')].find((r) => r.textContent.includes('surendra@mainspring.example')).querySelector('input').click()`)
+    await screenshot('calendar-mac.png')
+    await click('Add 1 calendar')
+    await until(`[...document.querySelectorAll('.cal-block')].some((b) => b.textContent.includes('Platform standup'))`)
+    assert.ok(Object.values(recordDocs.calendar.items).some((c) => c.type === 'calendar' && c.mac === 'g-work' && c.color === '#1a73e8'), 'added with its colour')
+    assert.ok(macEventReads.at(-1).includes('g-work'))
+    await js(`[...document.querySelectorAll('.cal-block')].find((b) => b.textContent.includes('Platform standup')).click()`)
+    await until(`document.querySelector('.cal-readonly')?.textContent.includes('a calendar on this Mac') && document.querySelector('.cal-readonly').textContent.includes('Google Meet')`)
+    await click('Close')
+    await until(`!document.querySelector('.cal-readonly')`)
     await click('Month')
     // Links: importing from Anybox (folders, tags, a note), search with a keyword, adding a link by its address.
     await js(`document.querySelector('.app-rail [aria-label="Links"]').click()`)
@@ -2722,6 +2778,15 @@ app.whenReady().then(async () => {
     await bshot('claude.png')
     bwin.webContents.send('web:window', { webContentsId: claudeGuest().id, url: page('/one'), background: false })
     await buntil(`document.querySelector('button[aria-label="Browser"]').classList.contains('on')`, 'a link to another site opens in the Browser')
+    // ⌘K lists the Browser's sites under its tab, to switch straight to one.
+    await new Promise((r) => setTimeout(r, 450))
+    bwin.webContents.send('app:command', { kind: 'switcher' })
+    await buntil(`[...document.querySelectorAll('.switcher-result')].filter((r) => r.textContent.includes('Open site')).length >= 2`, 'the quick switcher lists the open sites')
+    await bshot('switcher-sites.png')
+    await bjs(`(() => { const i = document.querySelector('[aria-label="Find a host or open session"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'one'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await buntil(`[...document.querySelectorAll('.switcher-result')].some((r) => r.textContent.includes('Open site') && r.textContent.includes('127.0.0.1'))`, 'a site by its address')
+    await bjs(`[...document.querySelectorAll('.switcher-result')].find((r) => r.textContent.includes('Open site')).click()`)
+    await buntil(`!document.querySelector('.switcher-result') && document.querySelector('button[aria-label="Browser"]').classList.contains('on')`, 'picking a site switches to it')
 
     // Settings → Keyboard: record ⌃⌘C for Claude (⌘C is refused), take ⇧⌘N from Notes for ChatGPT, restore defaults.
     await bkey(',')
@@ -2771,6 +2836,36 @@ app.whenReady().then(async () => {
     assert.match(await bjs(`document.querySelector('[data-shortcut-row="launcher"]').closest('.set-row').querySelector('.set-key-note').textContent`), /Raycast/)
     for (let n = 0; n < 60 && launcherDone.filter((d) => d[0] === 'launcher:pause').length < pausesBefore + 2; n++) await new Promise((r) => setTimeout(r, 30))
     assert.deepEqual(launcherDone.filter((d) => d[0] === 'launcher:pause').slice(pausesBefore).map((d) => d[1]), [true, false], 'the key is let go while recording')
+    // Settings → Windows: Accessibility asked for, Rectangle's keys in one click (one held by another app is named), a
+    // ninth's key recorded (a clash refused first), and a hotkey for Slack.
+    wmAccess = false
+    await bjs(`document.querySelector('.settings-nav-item[data-section="windows"]').click()`)
+    await buntil(`document.querySelector('.settings-body')?.textContent.includes('Not allowed yet')`, 'windows section, Accessibility not on')
+    await bjs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Allow…').click()`)
+    await buntil(`document.querySelector('.settings-body').textContent.includes('Allowed: the keys')`, 'allowed')
+    await bjs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Use suggested keys').click()`)
+    await buntil(`document.querySelector('[aria-label="Key for Left Half"]')?.textContent === '⌃⌥←'`, 'suggested keys')
+    assert.equal(settings.windowKeys['next-display'], 'ctrl+alt+cmd+right')
+    await bjs(`document.querySelector('[data-layout-group="Size"] .set-group-toggle').click()`)
+    await buntil(`document.querySelector('[data-shortcut-row="window:maximize"]')?.closest('.set-row').querySelector('.set-key-error')?.textContent.includes('another app')`, 'a key macOS kept for another app is named')
+    await bjs(`document.querySelector('[data-layout-group="Ninths"] .set-group-toggle').click()`)
+    await bjs(`document.querySelector('[aria-label="Key for Middle Center Ninth"]').click()`)
+    await buntil(`document.querySelector('[aria-label="Key for Middle Center Ninth"]').classList.contains('recording')`, 'recording a ninth')
+    await press('ArrowLeft', 'ArrowLeft', { ctrlKey: true, altKey: true })
+    await buntil(`document.querySelector('[data-shortcut-row="window:middle-center-ninth"]').closest('.set-row').querySelector('.set-key-error')?.textContent.includes('Left Half')`, 'a key in use is refused')
+    await press('5', 'Digit5', { ctrlKey: true, altKey: true })
+    await buntil(`document.querySelector('[aria-label="Key for Middle Center Ninth"]').textContent === '⌃⌥5'`, 'the ninth has its key')
+    assert.equal(settings.windowKeys['middle-center-ninth'], 'ctrl+alt+5')
+    await bjs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent.includes('Add an app')).click()`)
+    await buntil(`!!document.querySelector('[aria-label="Find an app"]')`, 'the app picker')
+    await bjs(`(() => { const i = document.querySelector('[aria-label="Find an app"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'sla'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await buntil(`[...document.querySelectorAll('.set-app-list button')].some((b) => b.textContent.startsWith('Slack'))`, 'Slack found')
+    await bjs(`document.querySelector('[aria-label="Find an app"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`)
+    await buntil(`document.querySelector('[aria-label="Key for Slack"]')?.classList.contains('recording')`, 'its key is recorded at once')
+    await press('S', 'KeyS', { ctrlKey: true, altKey: true, shiftKey: true })
+    await buntil(`document.querySelector('[aria-label="Key for Slack"]').textContent === '⌃⌥⇧S'`, 'the app hotkey')
+    assert.deepEqual(settings.appHotkeys.map((h) => [h.name, h.path, h.combo]), [['Slack', '/Applications/Slack.app', 'ctrl+alt+shift+s']])
+    await bshot('settings-windows.png')
     await bjs(`document.querySelector('.settings button[aria-label="Close dialog"]').click()`)
     await buntil(`!document.querySelector('.modal-backdrop')`, 'settings closed')
     assert.match(await bjs(`document.querySelector('button[aria-label="Claude"]').title`), /\(⌃⌘C\)$/, 'the rail shows the key')
@@ -2866,6 +2961,8 @@ app.whenReady().then(async () => {
       assert.ok(launcherDone.some(test), what)
     }
     launcherNotes = true
+    // Accessibility is off in the launcher's run until its Allow (Settings turned it on above).
+    wmAccess = false
     await lwin.loadFile(resolve('out/renderer/index.html'), { query: { launcher: '1' } })
     await luntil(`[...document.querySelectorAll('.launcher-group')].some((g) => g.textContent === 'Favorite Hosts') && document.body.textContent.includes('web-prod-01')`, 'suggestions: favorite hosts')
     assert.equal(await ljs(`document.documentElement.classList.contains('launcher-page')`), true)
@@ -2959,6 +3056,81 @@ app.whenReady().then(async () => {
     // Opened since: Visual Studio Code is a recent item now.
     lwin.webContents.send('launcher:shown', { at: Date.now() })
     await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Recent"] .launcher-title')].some((t) => t.textContent === 'Visual Studio Code')`, 'recent items')
+    // Raycast's commands: a window layout (Accessibility asked for first), the emoji grid typed into the app in front,
+    // Kill Process, My IP, Speed Test, Downloads, Capture to today's note and Quit All Apps.
+    const commandRow = (title) => `[...document.querySelectorAll('[role="group"][aria-label="Commands"] .launcher-item')].find((r) => r.querySelector('.launcher-title').textContent === ${JSON.stringify(title)})`
+    await ltype('left half')
+    await luntil(`${picked} === 'Left Half' && document.querySelector('.launcher-foot').textContent.includes('Allow Window Control')`, 'a window layout, asking for Accessibility first')
+    await lkey('Enter')
+    await done('Allow asks macOS', (d) => d[0] === 'wm:askAccess')
+    await luntil(`document.querySelector('.launcher-foot').textContent.includes('Move the Window')`, 'then it moves windows')
+    await lshot('launcher-window.png')
+    await lkey('Enter')
+    await done('↩ moves the window in front', (d) => d[0] === 'wm:layout' && d[1] === 'left-half')
+    await ltype('ninth')
+    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Window Management"] .launcher-title')].some((t) => t.textContent === 'Middle Center Ninth')`, 'ninths for a large screen')
+    await ltype('emoji')
+    await luntil(`${picked} === 'Search Emoji'`, 'the emoji command')
+    await lkey('Enter')
+    await luntil(`document.querySelector('.launcher-mode')?.textContent === 'Emoji' && document.querySelectorAll('.launcher-cell').length > 100`, 'the emoji grid')
+    await ltype('rocket')
+    await luntil(`document.querySelector('.launcher-cell.on')?.getAttribute('aria-label') === 'Rocket' && document.querySelector('.launcher-emoji-big')?.textContent === '🚀'`, 'an emoji by name')
+    await lshot('launcher-emoji.png')
+    await lkey('Enter')
+    await done('↩ types it into the app in front', (d) => d[0] === 'launcher:paste' && d[1] === '🚀')
+    await ltype('')
+    await lkey('Backspace')
+    await luntil(`!document.querySelector('.launcher-mode')`, '⌫ on an empty field goes back to search')
+    await ltype('kill process')
+    await luntil(`${picked} === 'Kill Process'`, 'kill process')
+    await lkey('Enter')
+    await luntil(`${picked} === 'Runaway' && document.querySelector('.launcher-mode')?.textContent === 'Kill Process'`, 'the busiest process first')
+    await lshot('launcher-kill.png')
+    await lkey('Enter')
+    await done('↩ asks it to quit', (d) => d[0] === 'launcher:kill' && d[1] === 4242 && d[2] === false)
+    await luntil(`document.querySelector('.launcher-notice')?.textContent.includes('Runaway')`, 'and says so')
+    await ltype('slack')
+    await luntil(`${picked} === 'Slack'`, 'filtered by name')
+    await lkey('Enter', { metaKey: true })
+    await done('⌘↩ force quits', (d) => d[0] === 'launcher:kill' && d[1] === 501 && d[2] === true)
+    await lkey('Escape')
+    await lkey('Escape')
+    await luntil(`!document.querySelector('.launcher-mode') && document.querySelector('.launcher-search input').value === ''`, 'Esc clears, then goes back')
+    await ltype('my ip')
+    await luntil(`${picked} === 'My IP Address'`, 'my ip')
+    await lkey('Enter')
+    await luntil(`${picked} === '203.0.113.7'`, 'the public address first')
+    await lkey('Enter')
+    for (let n = 0; n < 60 && !calls.some((c) => c.channel === 'clipboard:write' && c.args[0] === '203.0.113.7'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'clipboard:write' && c.args[0] === '203.0.113.7'), '↩ copies the address')
+    await lkey('Escape')
+    await ltype('speed test')
+    await luntil(`${picked} === 'Speed Test'`, 'speed test')
+    await lkey('Enter')
+    await luntil(`${picked} === '412 Mbps' && [...document.querySelectorAll('.launcher-title')].some((t) => t.textContent === '1234 RPM · High')`, 'the result')
+    await lkey('Escape')
+    await ltype('downloads')
+    await luntil(`!!${commandRow('Downloads')}`, 'the downloads command')
+    await ljs(`${commandRow('Downloads')}.click()`)
+    await luntil(`${picked} === 'invoice-october.pdf' && [...document.querySelectorAll('.launcher-group')].map((g) => g.textContent).join() === 'Today,This Week'`, 'downloads, newest first, by when they came')
+    await lkey('C', { metaKey: true, shiftKey: true, code: 'KeyC' })
+    for (let n = 0; n < 60 && !calls.some((c) => c.channel === 'finder:copy' && c.args[0][0] === '/Users/fixture/Downloads/invoice-october.pdf'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'finder:copy' && c.args[0][0] === '/Users/fixture/Downloads/invoice-october.pdf'), '⇧⌘C copies the file')
+    await lkey('Escape')
+    await ltype('capture')
+    await luntil(`!!${commandRow('Capture to Today’s Note')}`, 'the capture command')
+    await ljs(`${commandRow('Capture to Today’s Note')}.click()`)
+    await luntil(`document.querySelector('.launcher-mode')?.textContent === 'Capture'`, 'capture mode')
+    await ltype('call Sam about the release')
+    await luntil(`${picked} === 'Add “call Sam about the release”'`, 'what will be added')
+    await lkey('Enter')
+    await done('↩ adds it to today’s note', (d) => d[0] === 'notes:capture' && d[1] === 'call Sam about the release' && d[2] === false)
+    await luntil(`document.querySelector('.launcher-notice')?.textContent.includes('Added to 2026-10-23.md') && document.querySelector('.launcher-search input').value === ''`, 'added, ready for the next one')
+    await lkey('Escape')
+    await ltype('quit all')
+    await luntil(`${picked} === 'Quit All Apps…'`, 'quit all apps')
+    await lkey('Enter')
+    await done('main asks first, then quits them', (d) => d[0] === 'launcher:quitAll')
     lwin.destroy()
     launcherNotes = false
 

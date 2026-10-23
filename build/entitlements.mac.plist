@@ -13,5 +13,7 @@
   <key>com.apple.security.files.user-selected.read-only</key><true/>
   <!-- Voice dictation: the microphone, for the app and its ec2ra-dictate helper (entitlementsInherit) -->
   <key>com.apple.security.device.audio-input</key><true/>
+  <!-- The Calendar's "Calendars on this Mac", read by the ec2ra-control helper -->
+  <key>com.apple.security.personal-information.calendars</key><true/>
 </dict>
 </plist>

@@ -1,10 +1,10 @@
 import { workspaceSummary } from '@shared/workspaces'
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
-import { consoleHome } from '@shared/browser'
-import type { Instance } from '@shared/types'
+import { consoleHome, hostOf, spaceIdForProfile } from '@shared/browser'
+import type { BrowserState, Instance } from '@shared/types'
 import { formatCombo, type ShortcutTarget } from '@shared/keyCombos'
-import { DESKTOP_TOOLS, filteredInstances, isSession, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind } from '../store'
+import { DESKTOP_TOOLS, filteredInstances, isSession, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind, type WebTabInfo } from '../store'
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
@@ -13,6 +13,7 @@ import { APP_THEMES } from '../appThemes'
 import { openKeyboardSettings, openRadial, sectionKeyLabel, terminalAction } from '../shortcuts'
 import Modal from './Modal'
 import { Icon } from './icons'
+import { Favicon } from './browser/parts'
 
 type IconFn = (p: { className?: string }) => ReactElement
 
@@ -23,6 +24,10 @@ interface Result {
   /** Host the result is about, for Shift+Enter (details). */
   key?: string
   icon: IconFn
+  /** Drawn instead of `icon` (a site's favicon). */
+  image?: ReactElement
+  /** Shown indented under the row before it (a site under the Browser's tab). */
+  nested?: boolean
   hint: string
   action: () => void
 }
@@ -119,6 +124,24 @@ function commands(): Command[] {
   return cmds.filter((c) => c.when !== false)
 }
 
+/** The tabs a saved Browser state holds, for when the Browser is not open in this window (store.webTabs is null). */
+function savedWebTabs(b: BrowserState | null, names: (space: string) => string): WebTabInfo[] {
+  if (!b) return []
+  return b.tabs.filter((t) => /^https?:/.test(t.url || t.homeUrl || '')).map((t) => ({
+    id: t.id, title: t.name || t.title, url: t.url || t.homeUrl || '', favicon: t.favicon, space: t.spaceId, spaceName: names(t.spaceId), pinned: t.pinned, favorite: t.favorite, current: b.activeTab[t.spaceId] === t.id
+  }))
+}
+
+/** A site in the Browser, to switch straight to its tab (in its own space). */
+function siteResult(t: WebTabInfo): Result {
+  const host = hostOf(t.url)
+  return {
+    id: `site:${t.id}`, title: t.title || host, subtitle: `${t.favorite ? 'Favorite' : t.pinned ? 'Pinned site' : 'Open site'} · ${t.spaceName} · ${host}`,
+    icon: Icon.globe, image: <Favicon src={t.favicon} url={t.url} size={16} />, hint: 'Switch',
+    action: () => useStore.getState().openBrowser({ tab: t.id })
+  }
+}
+
 const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
 const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, storage: Icon.storage, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark }
@@ -188,6 +211,18 @@ export default function QuickSwitcher(): ReactElement {
   const q = commandMode ? query.slice(1).trim() : query.trim()
   const recentRank = (key: string): number => { const n = s.recentHosts.indexOf(key); return n < 0 ? 100 : n }
   const visible = visibleInstances(s)
+  // The Browser's sites: live from the Browser tab, or as it last saved them when it is not open in this window.
+  const [saved, setSaved] = useState<BrowserState | null>(null)
+  useEffect(() => {
+    if (s.webTabs === null && hasBrowser()) void window.api.invoke('browser:load').then(setSaved, () => undefined)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const spaceName = (id: string): string => {
+    const own = saved?.spaces.find((x) => x.id === id)
+    if (own) return own.name
+    const p = s.profiles.find((x) => spaceIdForProfile(x.name) === id)
+    return p ? (s.settings?.accountMeta?.[p.name]?.label ?? p.name) : 'Browser'
+  }
+  const sites = s.webTabs ?? savedWebTabs(saved, spaceName)
 
   const cmdResults: Result[] = commands()
     .filter((c) => !q || fuzzy(`${c.title} ${c.keywords ?? ''}`, q))
@@ -202,9 +237,19 @@ export default function QuickSwitcher(): ReactElement {
       recentRank(a.key) - recentRank(b.key) || Number(s.isFavorite(b.key)) - Number(s.isFavorite(a.key)) || a.name.localeCompare(b.name)
     )
     const tabs = s.tabs.filter((t) => !t.transient && `${t.title} ${t.shellLabel ?? ''} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
+    // Every word in the site's title, address or space; the Browser's own tab stays first, its sites right under it.
+    const siteHits = sites.filter((t) => !q || fuzzy(`${t.title} ${t.url} ${t.spaceName} site web`, q))
+      .sort((a, b) => Number(!!b.current) - Number(!!a.current) || Number(!!b.favorite) - Number(!!a.favorite) || Number(!!b.pinned) - Number(!!a.pinned))
+    const tabResults: Result[] = tabs.flatMap((t) => {
+      const r: Result = { id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `Open ${t.kind.toUpperCase()} session · ${t.status}` : t.kind === 'browser' && sites.length ? `Open tab · ${sites.length} site${sites.length === 1 ? '' : 's'}` : 'Open tab', key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch' }
+      return t.kind === 'browser' ? [r, ...siteHits.slice(0, 25).map((x) => ({ ...siteResult(x), nested: true }))] : [r]
+    })
+    // Sites whose Browser tab is not open here (a detached Browser, or the Browser closed since): still listed.
+    const orphanSites = tabs.some((t) => t.kind === 'browser') ? [] : siteHits.slice(0, q ? 25 : 12).map(siteResult)
     results = [
       ...hostVerbs(query, visible),
-      ...tabs.map((t) => ({ id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `Open ${t.kind.toUpperCase()} session · ${t.status}` : 'Open tab', key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch' })),
+      ...tabResults,
+      ...orphanSites,
       ...hosts.map((i) => {
         const available = ['ssm', 'direct'].includes(routeOf(i, s.settings).route)
         return { id: i.key, title: i.name, subtitle: `${i.profile} · ${i.region} · ${i.instanceId}${i.staleReason ? ' · cached' : ''}`, key: i.key,
@@ -244,8 +289,8 @@ export default function QuickSwitcher(): ReactElement {
     <p className="muted my-3 text-xs">{query ? `${results.length}${results.length === 60 ? '+' : ''} result${results.length === 1 ? '' : 's'}` : beside ? 'Shown side by side with it; drag a pane’s header to move it, or its border to resize' : 'Open sessions, recent connections, and favorites first'}</p>
     <div ref={listRef} id={listId} role="listbox" aria-label="Hosts and sessions" className="max-h-[50vh] overflow-y-auto space-y-1">
       {results.map((item, n) => <button key={item.id} id={`${listId}-${n}`} type="button" role="option" aria-selected={n === index} tabIndex={-1}
-        className={`switcher-result ${n === index ? 'on' : ''}`} onMouseMove={() => setSelected(n)} onClick={() => activate(n)}>
-        <item.icon /><span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">{item.title}</span>{item.subtitle && <span className="muted block truncate text-[11px]">{item.subtitle}</span>}</span>
+        className={`switcher-result ${n === index ? 'on' : ''} ${item.nested ? 'nested' : ''}`} onMouseMove={() => setSelected(n)} onClick={() => activate(n)}>
+        {item.image ?? <item.icon />}<span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">{item.title}</span>{item.subtitle && <span className="muted block truncate text-[11px]">{item.subtitle}</span>}</span>
         {item.hint && <span className="muted text-[11px]">{item.hint}</span>}
       </button>)}
       {!results.length && <p className="muted py-10 text-center">{commandMode ? 'No matching commands.' : 'No matching hosts or sessions. Try a name, IP, or account, or type > for commands.'}</p>}

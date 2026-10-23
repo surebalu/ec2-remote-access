@@ -27,6 +27,8 @@ import { restoreSessionCookies, saveSessionCookies } from './sessionCookies'
 import { mainWindow, setMainWindow } from './windows'
 import { closeLauncher, updateLauncherKey } from './launcherWindow'
 import { closeLinksPanel, updateLinksPanelKeys } from './linksPanel'
+import { closeDesktopKeys, updateDesktopKeys } from './desktopKeys'
+import { closeControl } from './macControl'
 import { closeToolWindows } from './toolWindows'
 
 setHost(electronHost)
@@ -78,7 +80,7 @@ function createWindow(): void {
   })
   setMainWindow(win)
   // The launcher's hidden window would otherwise keep the app running with no window to show.
-  win.on('closed', () => { closeLauncher(); closeLinksPanel(); closeToolWindows() })
+  win.on('closed', () => { closeLauncher(); closeLinksPanel(); closeDesktopKeys(); closeToolWindows() })
   initWebviews(win)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.webContents.on('console-message', (ev) => {
@@ -105,12 +107,14 @@ app.whenReady().then(async () => {
     updateTray()
     updateLauncherKey()
     updateLinksPanelKeys()
+    updateDesktopKeys()
   })
   setMenu()
   createWindow()
   updateTray()
   updateLauncherKey()
   updateLinksPanelKeys()
+  updateDesktopKeys()
   updateDataFolder()
   // The Storage tool's disk trend: one reading a day while the app runs, whether or not the tool is open.
   if (process.platform === 'darwin') {
@@ -124,6 +128,7 @@ app.whenReady().then(async () => {
       createWindow()
       updateLauncherKey()
       updateLinksPanelKeys()
+      updateDesktopKeys()
     }
   })
 })
@@ -138,6 +143,7 @@ app.on('before-quit', (e) => {
   closeOnePassword()
   closeStorage()
   closeMonitor()
+  closeControl()
   Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder()])
     .then(() => stopProxy())
     .catch(() => undefined)

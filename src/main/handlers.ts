@@ -14,7 +14,7 @@ import { opLogins, opSecrets } from './onepassword'
 import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
 import { localGitStatus } from './localgit'
 import { loginMatches } from '@shared/browser'
-import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
+import { appendNote, captureToday, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
 import { deleteBoard, listBoards, loadBoard, saveBoard } from './boards'
 import { checkDataFolder, copyLinkFiles, dataStatus, syncNow, updateDataFolder } from './dataFolder'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
@@ -40,6 +40,9 @@ import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } fr
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
+import { downloads, killProcess, networkInfo, pasteText, processes, quitAllApps, speedTest } from './macTools'
+import { control, controlPath, controlStatus, NO_HELPER } from './macControl'
+import type { MacCalendar, MacEvent } from '@shared/calendar'
 import { aiReport, installersReport, junkReport, packageReceipts, systemCards } from './storage/cleanup'
 import { appFiles, forgetApps, installedApps, leftoversReport, quitApps, startupItems } from './storage/macApps'
 import { monitorSample, openApps } from './storage/monitor'
@@ -121,6 +124,19 @@ export const handlers: Handlers = {
   'links:anybox': () => readAnybox(),
   'links:preview': (url) => linkPreview(url),
   'calendar:feed': (url) => calendarFeed(url),
+  'maccal:status': async () => {
+    if (!host().mac) return { available: false, status: 'unknown', message: 'Calendars on a Mac are read by the Mac app: open the Calendar there, or reach the app through the Mac’s Phone access.' }
+    if (!controlPath()) return { available: false, status: 'unknown', message: NO_HELPER }
+    return { available: true, status: (await controlStatus()).calendar }
+  },
+  'maccal:ask': () => control<string>('askCalendar', {}, 5 * 60_000),
+  'maccal:calendars': () => control<MacCalendar[]>('calendars'),
+  'maccal:events': (from, to, ids) => (Array.isArray(ids) && ids.length ? control<MacEvent[]>('events', { from: Number(from), to: Number(to), calendars: ids.filter((x) => typeof x === 'string') }, 20_000) : Promise.resolve([])),
+  'maccal:settings': async (pane) => {
+    if (pane === 'privacy') await host().mac?.openPrivacy('calendars')
+    else await host().openExternal('x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension')
+  },
+  'notes:capture': (text, task) => captureToday(String(text ?? ''), !!task),
   'shell:open': async (url) => {
     if (/^https?:\/\//.test(url)) await host().openExternal(url)
   },
@@ -281,6 +297,22 @@ export const handlers: Handlers = {
   'launcher:hide': async () => host().launcher?.hide(),
   'launcher:pause': async (paused) => host().launcher?.pause(!!paused),
   'launcher:status': async () => host().launcher?.status() ?? { key: '', registered: false },
+  'launcher:processes': () => processes(),
+  'launcher:kill': async (pid, force) => killProcess(Number(pid), !!force),
+  'launcher:network': () => networkInfo(),
+  'launcher:speedTest': () => speedTest(),
+  'launcher:downloads': () => downloads(),
+  'launcher:quitAll': () => quitAllApps(),
+  'launcher:paste': (text) => pasteText(String(text ?? '')),
+  'wm:status': async () => ({ ...(await controlStatus()), keys: host().mac?.hotkeys() ?? [] }),
+  'wm:layout': async (id) => {
+    const mac = host().mac
+    if (!mac) throw new Error('Window layouts need the Mac app.')
+    host().launcher?.hide()
+    await mac.layout(String(id))
+  },
+  'wm:askAccess': async () => !!(await control<boolean>('askAccessibility', {}, 15_000)),
+  'wm:openPrivacy': async (pane) => host().mac?.openPrivacy(pane === 'calendars' ? 'calendars' : 'accessibility'),
   'finder:places': () => finderPlaces(),
   'finder:recents': () => finderRecents(),
   'finder:search': (query, dir) => finderSearch(query, dir),

@@ -51,6 +51,20 @@ export interface Tab {
   workspaceSource?: string
 }
 
+/** One of the Browser's tabs, as the quick switcher lists it. */
+export interface WebTabInfo {
+  id: string
+  title: string
+  url: string
+  favicon?: string
+  space: string
+  spaceName: string
+  pinned?: boolean
+  favorite?: boolean
+  /** The tab the Browser shows in its space now. */
+  current?: boolean
+}
+
 export interface BrowserRequest {
   workspace?: WorkspaceBrowser
   url?: string
@@ -199,6 +213,8 @@ interface State {
   openBrowser: (req?: BrowserRequest) => void
   /** The latest open request for the Browser tab to carry out (nonce makes repeats distinct). */
   browserRequest: (BrowserRequest & { nonce: number }) | null
+  /** The Browser's tabs as it shows them now, for the quick switcher's sites (null while the Browser is not open here). */
+  webTabs: WebTabInfo[] | null
   /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
   openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
   terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; workspace?: { id: string; terminal: WorkspaceTerminal }; nonce: number } | null
@@ -504,6 +520,7 @@ export const useStore = create<State>((set, get) => ({
   },
   openBoard: () => { if (!relayed('board', 'openBoard', [])) get().setActive(get().toolTab('board')) },
   browserRequest: null,
+  webTabs: null,
   openBrowser: (req) => {
     if (relayed('browser', 'openBrowser', [req])) return
     const id = get().toolTab('browser')

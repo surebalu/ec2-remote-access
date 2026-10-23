@@ -194,6 +194,25 @@ export async function appendNote(rel: string, text: string): Promise<void> {
   await appendFile(abs, `${lead}${text.replace(/\s+$/, '')}\n`, 'utf8')
 }
 
+/**
+ * Quick capture to today's note (the launcher's Capture, Raycast's Obsidian "Append to Daily Note"): one list item,
+ * "- 14:05 text" or a task "- [ ] text", right under the items captured before it. Returns the note's path.
+ */
+export async function captureToday(text: string, task: boolean): Promise<string> {
+  const line = text.replace(/\s+/g, ' ').trim()
+  if (!line) throw new Error('Type something to capture.')
+  const rel = await dailyNote()
+  const abs = notePath(root(), rel)
+  const current = await readFile(abs, 'utf8').catch(() => '')
+  const last = current.trimEnd().split('\n').pop() ?? ''
+  // Straight after a list item; a blank line before the first item after a heading or a paragraph.
+  const lead = !current ? '' : /^\s*[-*+] /.test(last) ? (current.endsWith('\n') ? '' : '\n') : current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n'
+  const now = new Date()
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  await appendFile(abs, `${lead}${task ? `- [ ] ${line}` : `- ${time} ${line}`}\n`, 'utf8')
+  return rel
+}
+
 /** Case-insensitive search over note names and contents; names first, then up to three lines per note. */
 export async function searchNotes(query: string): Promise<NoteHit[]> {
   const q = query.trim().toLowerCase()
