@@ -303,3 +303,15 @@ img.link-icon { width: 24px; height: 24px; }
 .links-crumbs button { overflow: hidden; padding: 2px 5px; border-radius: 6px; color: var(--muted); font-weight: 600; text-overflow: ellipsis; }
 .links-crumbs button:hover { background: var(--panel-2); color: var(--text); }
 .links-crumbs svg { flex-shrink: 0; width: 11px; height: 11px; }
+
+/* Calendars on this Mac (CalendarTab's MacCalendarsDialog). */
+.cal-mac-ask { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; }
+.cal-mac-ask p { margin: 0; }
+.cal-mac-list { display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; }
+.cal-mac-account h5 { margin: 0 0 4px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.cal-mac-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 12.5px; }
+.cal-mac-row:hover { background: var(--accent-soft); }
+.cal-mac-row.added { opacity: .65; }
+.cal-mac-row .muted { margin-left: auto; font-size: 11px; }
+.cal-mac-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; }
+.cal-sub-google { align-self: flex-start; gap: 6px; }

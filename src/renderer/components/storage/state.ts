@@ -9,7 +9,8 @@ import { useStore } from '../../store'
  * and the last move to the Trash (for its Put Back bar). Rooms keep their own lists and reload when `trashed` moves.
  */
 
-export type RoomId = 'overview' | 'map' | 'search' | 'large' | 'hidden' | 'junk' | 'ai' | 'system' | 'duplicates' | 'installers' | 'unused' | 'uninstaller' | 'leftovers' | 'startup' | 'monitor' | 'optimize' | 'removed' | 'report'
+export const STORAGE_ROOMS = ['overview', 'map', 'search', 'large', 'hidden', 'junk', 'ai', 'system', 'duplicates', 'installers', 'unused', 'uninstaller', 'leftovers', 'startup', 'monitor', 'optimize', 'removed', 'report'] as const
+export type RoomId = (typeof STORAGE_ROOMS)[number]
 
 const ROOM_KEY = 'storage.room'
 const savedRoom = (): RoomId => { try { return (localStorage.getItem(ROOM_KEY) as RoomId | null) ?? 'overview' } catch { return 'overview' } }

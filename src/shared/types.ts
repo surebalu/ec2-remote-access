@@ -231,6 +231,15 @@ export interface Settings {
   linkSaveKey?: string
   linkFindKey?: string
   /**
+   * Window layouts' keys, from any app (Settings → Windows; src/shared/windowLayouts.ts): layout id → combination such
+   * as 'ctrl+alt+left'. None by default; "Use suggested keys" fills in Rectangle's.
+   */
+  windowKeys?: Record<string, string>
+  /** Points left between windows placed by a layout, and around the screen's edge. 0 by default. */
+  windowGap?: number
+  /** Keys that open an app from any app, or hide it when it is already in front (Settings → Windows). */
+  appHotkeys?: AppHotkey[]
+  /**
    * The data folder (Settings → Data; main/dataFolder.ts), typically a share on a NAS: Tasks, Calendar, Links and the
    * whiteboards are merged into it whenever it can be reached, while this Mac keeps working from its own copy. ''
    * for none, the default.
@@ -568,6 +577,16 @@ export interface BrowserState {
  * tab, a page in the Browser (a tab or space of its own), an account's AWS console (signed in), a question for Claude or
  * ChatGPT, a note, today's note; or a host's files, Run Command, a port forward, or starting or stopping it.
  */
+/** A key that opens (or hides) one app, from any app. */
+export interface AppHotkey {
+  id: string
+  /** The app bundle, /Applications/Slack.app. */
+  path: string
+  name: string
+  /** As keyCombos.ts writes them: 'ctrl+alt+s'. */
+  combo: string
+}
+
 export type AppCommand =
   | { kind: 'connect'; key: string }
   | { kind: 'switcher' }
@@ -589,6 +608,10 @@ export type AppCommand =
   | { kind: 'today' }
   /** Links, showing a view ('tag:aws', 'folder:<id>') or with an item selected (the Links search panel's ⌘↵). */
   | { kind: 'links'; view?: string; id?: string }
+  /** Storage, in one of its rooms ('monitor'). */
+  | { kind: 'storage'; room?: string }
+  /** Settings, at a section ('windows', 'keyboard'). */
+  | { kind: 'settings'; section?: string }
 
 /* ---------- Run Command (SSM SendCommand on many hosts) ---------- */
 

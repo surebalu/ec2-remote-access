@@ -4,7 +4,7 @@ dist
 .DS_Store
 *.log
 *.tsbuildinfo
-# Native helpers built by scripts/build-dictation.sh (build/ itself holds tracked packaging files).
+# Native helpers built by scripts/build-native.sh (build/ itself holds tracked packaging files).
 build/native/
 
 # Claude Code agent worktrees

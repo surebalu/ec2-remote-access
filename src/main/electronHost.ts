@@ -2,13 +2,14 @@ import { addExtensionFolder, clickExtension, installFromStore, listExtensions, r
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, screen, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Host, LauncherHost, LinksPanelHost, ToolWindowsHost, VoiceHost } from './host'
+import type { Host, LauncherHost, LinksPanelHost, MacHost, ToolWindowsHost, VoiceHost } from './host'
 import { broadcastToPhones } from './phoneAccess'
 import { cancelDownload, fillPage } from './webviews'
 import { mainWindow } from './windows'
 import { fileIcons, hideLauncher, launcherCommand, launcherConfirm, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
 import { attachTool, detachTool, detachedTools, relayToTool, toolWindowList } from './toolWindows'
 import { electronStorage } from './storage/scanClient'
+import { applyLayout, desktopKeysStatus, openPrivacy, pauseDesktopKeys } from './desktopKeys'
 import { hideLinksPanel, linksPanelCommand, linksPanelPage, linksPanelStatus, openAutomationSettings, pauseLinksPanelKeys, resizeLinksPanel, setOwnPage, showLinksPanel } from './linksPanel'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
@@ -16,7 +17,7 @@ const electronVoice: VoiceHost = {
   helperPath() {
     if (process.platform !== 'darwin') return null
     // Packaged: copied into Resources/dictation (electron-builder extraResources); in development, what
-    // scripts/build-dictation.sh built, as tray.ts finds its icon.
+    // scripts/build-native.sh built, as tray.ts finds its icon.
     const p = app.isPackaged ? join(process.resourcesPath, 'dictation', 'ec2ra-dictate') : join(app.getAppPath(), 'build', 'native', 'ec2ra-dictate')
     return existsSync(p) ? p : null
   },
@@ -37,12 +38,24 @@ const electronLauncher: LauncherHost = {
   hide: hideLauncher,
   command: launcherCommand,
   // Settings is recording a key: every key that works from any app is let go, the Links panels' too.
-  pause: (p) => { pauseLauncherKey(p); pauseLinksPanelKeys(p) },
+  pause: (p) => { pauseLauncherKey(p); pauseLinksPanelKeys(p); pauseDesktopKeys(p) },
   status: launcherStatus,
   icons: fileIcons,
   thumbnail,
   quickLook: launcherQuickLook,
   confirm: launcherConfirm
+}
+
+/** Window layouts, app hotkeys and the Mac's calendars: the ec2ra-control helper beside the app's resources. */
+const electronMac: MacHost = {
+  controlPath() {
+    if (process.platform !== 'darwin') return null
+    const p = app.isPackaged ? join(process.resourcesPath, 'control', 'ec2ra-control') : join(app.getAppPath(), 'build', 'native', 'ec2ra-control')
+    return existsSync(p) ? p : null
+  },
+  layout: applyLayout,
+  hotkeys: desktopKeysStatus,
+  openPrivacy
 }
 
 const electronToolWindows: ToolWindowsHost = { detach: detachTool, attach: attachTool, list: detachedTools, relay: relayToTool }
@@ -143,5 +156,6 @@ export const electronHost: Host = {
   linksPanel: electronLinksPanel,
   toolWindows: electronToolWindows,
   extensions: { list: listExtensions, installFromStore, addFolder: addExtensionFolder, setEnabled: setExtensionEnabled, remove: removeExtension, action: clickExtension },
-  storage: process.platform === 'darwin' ? electronStorage : null
+  storage: process.platform === 'darwin' ? electronStorage : null,
+  mac: process.platform === 'darwin' ? electronMac : null
 }

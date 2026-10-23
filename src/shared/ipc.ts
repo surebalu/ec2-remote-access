@@ -19,6 +19,8 @@ import type {
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, DataStatus, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
 import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
+import type { DownloadItem, NetworkInfo, ProcessInfo, SpeedResult } from './macTools'
+import type { MacCalendar, MacEvent } from './calendar'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -227,6 +229,20 @@ export interface IpcApi {
   'linksPanel:status': () => Promise<Record<LinksPanelMode, { key: string; registered: boolean }>>
   /** An iCal subscription's .ics text (webcal:// works too). */
   'calendar:feed': (url: string) => Promise<string>
+  /**
+   * The calendars macOS has (Internet Accounts: Google Workspace, iCloud, Exchange), read on the Mac running the app
+   * (phones see them through it); `status` is the Calendars permission (authorized, denied, notDetermined…), asking nothing.
+   */
+  'maccal:status': () => Promise<{ available: boolean; status: string; message?: string }>
+  /** macOS's question for the Calendars permission (a click in the Calendar asks it); the permission afterwards. */
+  'maccal:ask': () => Promise<string>
+  'maccal:calendars': () => Promise<MacCalendar[]>
+  /** Events of these Mac calendars between two times (epoch ms), repeats expanded. */
+  'maccal:events': (from: number, to: number, ids: string[]) => Promise<MacEvent[]>
+  /** Opens System Settings at Internet Accounts (to add a Google account) or Privacy → Calendars. */
+  'maccal:settings': (pane: 'accounts' | 'privacy') => Promise<void>
+  /** One quick line in today's note: "- 14:05 text", or a task "- [ ] text". Returns the note's path. */
+  'notes:capture': (text: string, task: boolean) => Promise<string>
   /** Saves a PNG (data: URL) into the notes folder (EC2 Remote/Boards) and returns its path there, for ![[embeds]]. */
   'notes:saveImage': (name: string, dataUrl: string) => Promise<string>
   /** Opens a note in the Obsidian app. */
@@ -315,6 +331,30 @@ export interface IpcApi {
   'launcher:pause': (paused: boolean) => Promise<void>
   /** The launcher's key, and whether macOS gave it to the app (another app may hold it). */
   'launcher:status': () => Promise<{ key: string; registered: boolean }>
+  /** Every process, busiest first (Kill Process). */
+  'launcher:processes': () => Promise<ProcessInfo[]>
+  /** Ends a process: SIGTERM, or SIGKILL with `force`. */
+  'launcher:kill': (pid: number, force: boolean) => Promise<void>
+  /** This Mac's public and local addresses, router and DNS servers (My IP). */
+  'launcher:network': () => Promise<NetworkInfo>
+  /** macOS's networkQuality: download, upload and responsiveness, in about twenty seconds. */
+  'launcher:speedTest': () => Promise<SpeedResult>
+  /** The Downloads folder, newest arrival first. */
+  'launcher:downloads': () => Promise<DownloadItem[]>
+  /** Asks every open app but Finder and this one to quit, after saying which; how many accepted. */
+  'launcher:quitAll': () => Promise<number>
+  /** Puts text on the clipboard and pastes it into the app in front (needs Accessibility; else it is only copied). */
+  'launcher:paste': (text: string) => Promise<'pasted' | 'copied'>
+  /**
+   * Window layouts and app hotkeys (Mac app only): the helper, what macOS allows (Accessibility, Calendars), and each
+   * key in Settings → Windows with whether macOS gave it to the app.
+   */
+  'wm:status': () => Promise<{ helper: boolean; accessibility: boolean; calendar: string; keys: { id: string; combo: string; registered: boolean }[] }>
+  /** Moves the window in front to a layout (src/shared/windowLayouts.ts). */
+  'wm:layout': (id: string) => Promise<void>
+  /** macOS's question for the Accessibility permission (from a click); whether it is on now. */
+  'wm:askAccess': () => Promise<boolean>
+  'wm:openPrivacy': (pane: 'accessibility' | 'calendars') => Promise<void>
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>

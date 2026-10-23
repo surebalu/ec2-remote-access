@@ -1,10 +1,11 @@
 import { workspaceSummary } from '@shared/workspaces'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AppCommand, AwsProfile, BrowserState, Instance, NoteHit, Settings } from '@shared/types'
+import type { AwsProfile, BrowserState, Instance, NoteHit, Settings } from '@shared/types'
 import type { RecentFile } from '@shared/finder'
 import { displayPath, formatDate, formatSize, parentOf } from '@shared/finder'
 import { calculate, convert, formatNumber, issueKey, jiraSite, matchScore, recentIds, usageBoost, type LauncherApp, type LauncherPreview, type LauncherUsage, type SystemAction } from '@shared/launcher'
+import { WINDOW_LAYOUTS, type WindowLayout } from '@shared/windowLayouts'
 import { comboOf, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
 import { manualToInstance } from '@shared/manual'
 import { matchesHost } from '@shared/hostSearch'
@@ -14,6 +15,10 @@ import { applyAppearance } from '../store'
 import { applyUiFont } from '../uiFont'
 import { Icon } from '../components/icons'
 import { Favicon } from '../components/browser/parts'
+import LayoutGlyph from '../components/LayoutGlyph'
+import { copy, external, hide, inApp, openPath, quickLook, reveal, system, used } from './actions'
+import { MODES, useModeView } from './modes'
+import type { Action, Group, LauncherMode, Row } from './rows'
 
 /**
  * The launcher: Raycast's search bar for this Mac and this app, in its own floating window (main/launcherWindow.ts)
@@ -24,43 +29,6 @@ import { Favicon } from '../components/browser/parts'
  * second, ⌘Y is Quick Look, ⌘K lists every action. The app's window carries out anything inside the app
  * (launcher:command → app:command).
  */
-
-interface Action {
-  title: string
-  /** A combination as keyCombos.ts writes them: 'enter' for the first action, 'cmd+enter' for the second. */
-  key?: string
-  run: () => void
-}
-
-/** What the side pane shows for a result. */
-type Detail =
-  | { kind: 'path'; path: string }
-  | { kind: 'host'; host: Instance }
-  | { kind: 'note'; path: string; text: string }
-  | { kind: 'web'; url: string; space: string; favicon?: string }
-  | { kind: 'calc'; value: number; expr: string; unit?: string }
-  | { kind: 'quicklink'; link: Quicklink; url: string }
-
-interface Row {
-  id: string
-  title: string
-  subtitle?: string
-  /** Words it is also found by. */
-  keywords?: string
-  icon: ReactNode
-  /** A file or app whose icon (the app that opens it, for a file) replaces `icon` once it has loaded. */
-  iconPath?: string
-  accessory?: ReactNode
-  detail?: Detail
-  actions: Action[]
-}
-
-interface Group {
-  title: string
-  rows: Row[]
-  /** How well its first row matches, which orders the groups between the calculator and web search. */
-  best?: number
-}
 
 interface Data {
   apps: LauncherApp[]
@@ -87,32 +55,6 @@ const SECTION_WORDS: Record<RailSection, string> = {
   notes: 'obsidian markdown', board: 'whiteboard draw sketch', claude: 'ai chat anthropic', chatgpt: 'ai chat openai gpt'
 }
 
-const hide = (): void => void window.api.invoke('launcher:hide')
-const used = (id: string): void => void window.api.invoke('launcher:used', id).catch(() => undefined)
-/** Has the app's window do `c` (it comes to the front), counting a use of `id`. */
-const inApp = (id: string, c: AppCommand) => (): void => {
-  used(id)
-  void window.api.invoke('launcher:command', c)
-}
-const openPath = (id: string, path: string) => (): void => void window.api.invoke('launcher:open', path, id).catch(() => undefined)
-const copy = (text: string) => (): void => {
-  void window.api.invoke('clipboard:write', text)
-  hide()
-}
-const external = (url: string) => (): void => {
-  void window.api.invoke('shell:open', url)
-  hide()
-}
-const reveal = (path: string) => (): void => {
-  void window.api.invoke('local:reveal', path)
-  hide()
-}
-const quickLook = (path: string) => (): void => void window.api.invoke('launcher:quickLook', path)
-const system = (id: string, action: SystemAction) => (): void => {
-  used(id)
-  void window.api.invoke('launcher:system', action).catch(() => undefined)
-}
-
 /** The Mac commands, found by name only (never in the empty launcher). */
 const MAC_COMMANDS: { action: SystemAction; title: string; subtitle: string; words: string; icon: ReactElement }[] = [
   { action: 'sleep', title: 'Sleep', subtitle: 'Put the Mac to sleep', words: 'sleep suspend', icon: <Icon.moon /> },
@@ -124,7 +66,20 @@ const MAC_COMMANDS: { action: SystemAction; title: string; subtitle: string; wor
   { action: 'shutdown', title: 'Shut Down…', subtitle: 'Asks first', words: 'shut down shutdown power off', icon: <Icon.alert /> }
 ]
 
+/** Raycast-style tools: each opens a list of its own in the launcher (modes.tsx). Found by name only. */
+const TOOL_MODES: { mode: LauncherMode; title: string; subtitle: string; words: string; icon: ReactElement }[] = [
+  { mode: 'emoji', title: 'Search Emoji', subtitle: 'Find one and type it into the app in front', words: 'emoji emoticon smiley symbol face', icon: <span className="launcher-emoji-sm">😀</span> },
+  { mode: 'processes', title: 'Kill Process', subtitle: 'End a process that hangs or eats the processor', words: 'kill process force quit task end activity monitor pid', icon: <Icon.x /> },
+  { mode: 'network', title: 'My IP Address', subtitle: 'Public and local addresses, the router and DNS', words: 'ip address network public local wifi myip external', icon: <Icon.globe /> },
+  { mode: 'speed', title: 'Speed Test', subtitle: 'Download, upload and responsiveness (macOS networkQuality)', words: 'speedtest internet bandwidth network quality connection', icon: <Icon.gauge /> },
+  { mode: 'monitor', title: 'System Monitor', subtitle: 'Processor, memory, disk, network and battery now', words: 'cpu memory ram activity monitor battery uptime load usage', icon: <Icon.activity /> },
+  { mode: 'downloads', title: 'Downloads', subtitle: 'Your latest downloads: open, copy, show or trash them', words: 'downloads recent downloaded files manager', icon: <Icon.download /> },
+  { mode: 'capture', title: 'Capture to Today’s Note', subtitle: 'Add a line or a task to the daily note (Obsidian)', words: 'obsidian daily note append quick capture journal memo inbox task add', icon: <Icon.noteAdd /> }
+]
+
 const baseName = (p: string): string => p.replace(/\/+$/, '').split('/').pop() ?? p
+/** Emoji per row in the grid (launcher-cells in styles.css lays out the same number). */
+const GRID_COLUMNS = 8
 
 /** The best of the title's and the keywords' match, plus how often and lately it was used. */
 function rankRows(rows: Row[], q: string, usage: LauncherUsage, now: number): { rows: Row[]; best: number } {
@@ -162,9 +117,17 @@ export default function Launcher(): ReactElement {
   /** The Create/Edit Quicklink form, over the list; `id` is '' for a new one. */
   const [form, setForm] = useState<Quicklink | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  /** A tool's own list (Search Emoji, Kill Process…), or the launcher's search. */
+  const [mode, setMode] = useState<LauncherMode | null>(null)
+  /** A line under the search field: what a tool did, or why it could not. */
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** What macOS allows the app (window layouts and pasting need Accessibility). */
+  const [wm, setWm] = useState<{ helper: boolean; accessibility: boolean } | null>(null)
 
   const load = async (): Promise<void> => {
     const soft = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback)
+    void window.api.invoke('wm:status').then((st) => setWm({ helper: st.helper, accessibility: st.accessibility }), () => setWm(null))
     const [apps, usage, settings, cached, profiles, browser, home] = await Promise.all([
       soft(window.api.invoke('launcher:apps'), [] as LauncherApp[]),
       soft(window.api.invoke('launcher:usage'), {} as LauncherUsage),
@@ -194,10 +157,34 @@ export default function Launcher(): ReactElement {
       setNotes([])
       setPreviews({})
       setForm(null)
+      setMode(null)
+      setNotice(null)
       setTimeout(() => input.current?.focus(), 0)
       void load()
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const showNotice = (text: string, tone: 'ok' | 'err' = 'ok'): void => {
+    setNotice({ text, tone })
+    clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => setNotice(null), tone === 'err' ? 8000 : 4000)
+  }
+  const enterMode = (m: LauncherMode): void => {
+    used(`tool:${m}`)
+    setMode(m)
+    setQ('')
+    setSel(0)
+    setPanel(null)
+    setNotice(null)
+    setTimeout(() => input.current?.focus(), 0)
+  }
+  const leaveMode = (): void => {
+    setMode(null)
+    setQ('')
+    setSel(0)
+    setNotice(null)
+  }
+  const modeView = useModeView(mode, q, { home: data.home, canPaste: !!wm?.accessibility, notice: showNotice, setQuery: setQ })
 
   // ----- rows -----
   const settings = data.settings
@@ -270,13 +257,16 @@ export default function Launcher(): ReactElement {
     const id = `note:${path}`
     return {
       id, title: baseName(path).replace(/\.md$/i, ''), subtitle: text || parentOf(path), icon: <Icon.note />, detail: { kind: 'note', path, text },
-      actions: [{ title: 'Open in Notes', key: 'enter', run: inApp(id, { kind: 'note', path }) }]
+      actions: [
+        { title: 'Open in Notes', key: 'enter', run: inApp(id, { kind: 'note', path }) },
+        { title: 'Open in Obsidian', key: 'cmd+enter', run: () => { used(id); void window.api.invoke('notes:openInObsidian', path).then(hide, (e: Error) => showNotice(e.message, 'err')) } }
+      ]
     }
   }
 
-  const webRow = (o: { id: string; title: string; url: string; space: string; tab?: string; favicon?: string; pinned?: boolean }): Row => ({
+  const webRow = (o: { id: string; title: string; url: string; space: string; tab?: string; favicon?: string; pinned?: boolean; open?: boolean }): Row => ({
     id: o.id, title: o.title || hostOf(o.url), subtitle: `${spaceName(o.space)} · ${hostOf(o.url)}`, keywords: o.url,
-    icon: <Favicon src={o.favicon} url={o.url} size={18} />, accessory: o.pinned ? <Icon.star className="launcher-pin" /> : undefined,
+    icon: <Favicon src={o.favicon} url={o.url} size={18} />, accessory: o.pinned ? <Icon.star className="launcher-pin" /> : o.open ? <span className="launcher-state">Open tab</span> : undefined,
     detail: { kind: 'web', url: o.url, space: o.space, favicon: o.favicon },
     actions: [
       { title: `Open in ${spaceName(o.space)}`, key: 'enter', run: inApp(o.id, { kind: 'browse', url: o.url, space: o.space, tab: o.tab }) },
@@ -356,6 +346,53 @@ export default function Launcher(): ReactElement {
     })
   ], [data, keys.hosts, keys.overview, keys.health, keys.devtools, keys.tasks, keys.calendar, keys.links, keys.local, keys.finder, keys.browser, keys.notes, keys.board, keys.claude, keys.chatgpt]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** The latest download, for the one-step commands. */
+  const latest = (act: (path: string) => void) => (): void => {
+    window.api.invoke('launcher:downloads').then((list) => {
+      if (list[0]) act(list[0].path)
+      else showNotice('Downloads is empty.', 'err')
+    }, (e: Error) => showNotice(e.message, 'err'))
+  }
+  const toolRows: Row[] = [
+    ...TOOL_MODES.map((t): Row => ({
+      id: `tool:${t.mode}`, title: t.title, subtitle: t.subtitle, keywords: t.words, icon: t.icon, accessory: <Icon.chevron className="launcher-go" />,
+      actions: [{ title: `Open ${MODES[t.mode].title}`, key: 'enter', run: () => enterMode(t.mode) }]
+    })),
+    { id: 'tool:latest-open', title: 'Open Latest Download', subtitle: 'The newest file in Downloads', keywords: 'downloads recent last newest file', icon: <Icon.download />,
+      actions: [{ title: 'Open', key: 'enter', run: latest((p) => openPath('tool:latest-open', p)()) }, { title: 'Show in Finder', key: 'cmd+enter', run: latest((p) => reveal(p)()) }] },
+    { id: 'tool:latest-copy', title: 'Copy Latest Download', subtitle: 'The file itself, to paste into Finder, Mail or Slack', keywords: 'downloads recent last newest file copy clipboard', icon: <Icon.copy />,
+      actions: [{ title: 'Copy File', key: 'enter', run: latest((p) => { used('tool:latest-copy'); void window.api.invoke('finder:copy', [p]).then(hide, (e: Error) => showNotice(e.message, 'err')) }) }, { title: 'Copy Path', key: 'cmd+enter', run: latest((p) => copy(p)()) }] },
+    { id: 'tool:latest-reveal', title: 'Show Latest Download in Finder', subtitle: 'Downloads, with the newest file selected', keywords: 'downloads recent last newest file finder reveal', icon: <Icon.finder />,
+      actions: [{ title: 'Show in Finder', key: 'enter', run: latest((p) => { used('tool:latest-reveal'); reveal(p)() }) }] },
+    { id: 'tool:quit-all', title: 'Quit All Apps…', subtitle: 'Every open app but Finder and this one; asks first', keywords: 'quit close all apps applications clean desktop', icon: <Icon.power />,
+      actions: [{ title: 'Quit All Apps…', key: 'enter', run: () => { used('tool:quit-all'); void window.api.invoke('launcher:quitAll').catch(() => undefined) } }] },
+    { id: 'cmd:today-obsidian', title: 'Open Today’s Note in Obsidian', subtitle: 'The daily note, in the Obsidian app', keywords: 'obsidian daily note journal today', icon: <Icon.note />,
+      actions: [{ title: 'Open in Obsidian', key: 'enter', run: () => { used('cmd:today-obsidian'); void window.api.invoke('notes:daily').then((p) => window.api.invoke('notes:openInObsidian', p)).then(hide, (e: Error) => showNotice(e.message, 'err')) } }] },
+    { id: 'tool:window-keys', title: 'Window Layout and App Keys…', subtitle: 'Settings → Windows: a key for any layout or app', keywords: 'hotkey shortcut window layout app hotkeys rectangle keys settings', icon: <Icon.keyboard />,
+      actions: [{ title: 'Open Settings', key: 'enter', run: inApp('tool:window-keys', { kind: 'settings', section: 'windows' }) }] }
+  ]
+  const windowKeys = settings?.windowKeys ?? {}
+  const allowWindows = (): void => {
+    void window.api.invoke('wm:askAccess').then((ok) => {
+      setWm((w) => (w ? { ...w, accessibility: ok } : w))
+      if (!ok) showNotice('Turn on EC2 Remote Access in System Settings → Privacy & Security → Accessibility, then try again.', 'err')
+    }, (e: Error) => showNotice(e.message, 'err'))
+  }
+  const windowRow = (l: WindowLayout): Row => {
+    const id = `window:${l.id}`
+    const blocked = wm ? (!wm.helper || !wm.accessibility) : false
+    return {
+      id, title: l.name, subtitle: `Window · ${l.group}`, keywords: `window ${l.group} ${l.words ?? ''} resize move snap layout`, icon: <LayoutGlyph layout={l} />,
+      accessory: windowKeys[l.id] ? <kbd className="kbd">{formatCombo(windowKeys[l.id])}</kbd> : undefined,
+      detail: { kind: 'facts', title: l.name, big: <LayoutGlyph layout={l} size={120} />, facts: [['Group', l.group], ['Key', windowKeys[l.id] ? formatCombo(windowKeys[l.id]) : 'None (⌘↩ sets one)']],
+        note: !wm?.helper && wm ? 'This build has no window helper (scripts/build-native.sh).' : blocked ? 'Moving other apps’ windows needs the Accessibility permission: ↩ asks macOS for it.' : 'Moves the window in front (the app you were in before the launcher).' },
+      actions: [
+        blocked && wm?.helper ? { title: 'Allow Window Control…', key: 'enter', run: allowWindows } : { title: 'Move the Window', key: 'enter', run: () => { used(id); void window.api.invoke('wm:layout', l.id).catch(() => undefined) } },
+        { title: 'Set a Key…', key: 'cmd+enter', run: inApp(id, { kind: 'settings', section: 'windows' }) }
+      ]
+    }
+  }
+
   /** Browser favorites and pinned tabs (each opens in its own space), then pages from history, newest of each address. */
   const webRows: Row[] = useMemo(() => {
     const b = data.browser
@@ -370,7 +407,14 @@ export default function Launcher(): ReactElement {
       seen.add(k)
       history.push(webRow({ id: `web:${h.spaceId}:${h.url}`, title: h.title, url: h.url, space: h.spaceId }))
     }
-    return [...kept.map((t) => webRow({ id: `web:tab:${t.id}`, title: t.name || t.title, url: t.url || t.homeUrl || '', space: t.spaceId, tab: t.id, favicon: t.favicon, pinned: true })), ...history]
+    // The Browser's open tabs (Today), each switched to rather than opened again.
+    const open = b.tabs.filter((t) => !t.favorite && !t.pinned && /^https?:/.test(t.url))
+    for (const t of open) seen.add(`${t.spaceId} ${t.url}`)
+    return [
+      ...kept.map((t) => webRow({ id: `web:tab:${t.id}`, title: t.name || t.title, url: t.url || t.homeUrl || '', space: t.spaceId, tab: t.id, favicon: t.favicon, pinned: true })),
+      ...open.map((t) => webRow({ id: `web:tab:${t.id}`, title: t.title, url: t.url, space: t.spaceId, tab: t.id, favicon: t.favicon, open: true })),
+      ...history.filter((h) => !open.some((t) => `web:${t.spaceId}:${t.url}` === h.id))
+    ]
   }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = q.trim()
@@ -468,6 +512,10 @@ export default function Launcher(): ReactElement {
       actions: [{ title: c.title.replace(/…$/, ''), key: 'enter', run: system(`mac:${c.action}`, c.action) }]
     })), query, data.usage, now)
     middle.push({ title: 'Mac', rows: mac.rows.slice(0, 4), best: mac.best })
+    const tools = rankRows(toolRows, query, data.usage, now)
+    middle.push({ title: 'Commands', rows: tools.rows.slice(0, 5), best: tools.best })
+    const windows = rankRows(WINDOW_LAYOUTS.map(windowRow), query, data.usage, now)
+    middle.push({ title: 'Window Management', rows: windows.rows.slice(0, 6), best: windows.best })
     // Groups in the order of their best match (a stable sort keeps this order on ties).
     out.push(...middle.filter((g) => g.rows.length).sort((a, b) => (b.best ?? 0) - (a.best ?? 0)))
     const url = normalizeInput(query)
@@ -486,9 +534,10 @@ export default function Launcher(): ReactElement {
     )
     out.push({ title: 'Search', rows: search })
     return out
-  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows, links]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows, links, wm]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const rows = useMemo(() => groups.flatMap((g) => g.rows), [groups])
+  const shownGroups = mode ? modeView.groups : groups
+  const rows = useMemo(() => shownGroups.flatMap((g) => g.rows), [shownGroups])
   const current = rows[Math.min(sel, rows.length - 1)]
   useEffect(() => setSel(0), [query])
 
@@ -513,7 +562,7 @@ export default function Launcher(): ReactElement {
   }, [previewPath]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    list.current?.querySelector('.launcher-item.on')?.scrollIntoView({ block: 'nearest' })
+    list.current?.querySelector('.launcher-item.on, .launcher-cell.on')?.scrollIntoView({ block: 'nearest' })
   }, [sel, rows])
 
   const run = (a: Action | undefined): void => {
@@ -531,6 +580,17 @@ export default function Launcher(): ReactElement {
     }
     const down = e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')
     const up = e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+    if (panel === null && mode && plain && e.key === 'Backspace' && !q) { e.preventDefault(); return leaveMode() }
+    // The emoji grid: arrows move across and down it, as in Raycast (the field's caret gives up ← → there).
+    if (panel === null && modeView.grid && plain && rows.length) {
+      const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' ? -GRID_COLUMNS : e.key === 'ArrowDown' ? GRID_COLUMNS : 0
+      if (step) {
+        e.preventDefault()
+        setSel((n) => Math.min(rows.length - 1, Math.max(0, n + step)))
+        return
+      }
+    }
     if (panel !== null) {
       if (down) return move(1, actions.length, (fn) => setPanel((n) => fn(n ?? 0)))
       if (up) return move(-1, actions.length, (fn) => setPanel((n) => fn(n ?? 0)))
@@ -542,6 +602,7 @@ export default function Launcher(): ReactElement {
     if (e.key === 'Escape') {
       e.preventDefault()
       if (q) setQ('')
+      else if (mode) leaveMode()
       else hide()
       return
     }
@@ -564,22 +625,40 @@ export default function Launcher(): ReactElement {
     <div className="launcher-frame" onMouseDown={(e) => { if (e.target === e.currentTarget) hide() }}>
       <div className="launcher" role="dialog" aria-label="Launcher">
         <div className="launcher-search">
-          <Icon.search className="launcher-search-icon" />
+          {mode
+            ? <button type="button" className="launcher-mode" title="Back to search (⌫ or Esc)" onMouseDown={(e) => e.preventDefault()} onClick={leaveMode}><Icon.back />{MODES[mode].title}</button>
+            : <Icon.search className="launcher-search-icon" />}
           <input
             ref={input}
             autoFocus
             spellCheck={false}
-            aria-label="Search apps, files, hosts and commands"
-            placeholder="Search apps, files, hosts, notes…"
+            aria-label={mode ? MODES[mode].title : 'Search apps, files, hosts and commands'}
+            placeholder={mode ? MODES[mode].placeholder : 'Search apps, files, hosts, notes…'}
             value={q}
             onChange={(e) => { setQ(e.target.value); setPanel(null) }}
             onKeyDown={onKeyDown}
           />
           {q && <button type="button" className="launcher-clear" aria-label="Clear" onMouseDown={(e) => e.preventDefault()} onClick={() => setQ('')}><Icon.x /></button>}
         </div>
+        {notice && <div className={`launcher-notice ${notice.tone}`} role="status">{notice.tone === 'ok' ? <Icon.check /> : <Icon.alert />}{notice.text}</div>}
         <div className="launcher-body">
-          <div className="launcher-list" ref={list}>
-            {groups.map((g) => (
+          <div className={`launcher-list ${modeView.grid && mode ? 'grid' : ''}`} ref={list}>
+            {mode && modeView.grid ? shownGroups.map((g) => (
+              <div key={g.title} role="group" aria-label={g.title}>
+                <div className="launcher-group">{g.title}</div>
+                <div className="launcher-cells">
+                  {g.rows.map((r) => {
+                    const at = ++index
+                    return (
+                      <div key={r.id} role="option" aria-selected={at === sel} aria-label={r.title} title={r.title} className={`launcher-cell ${at === sel ? 'on' : ''}`}
+                        onMouseMove={() => { if (sel !== at) setSel(at) }} onMouseDown={(e) => e.preventDefault()} onClick={() => run(r.actions[0])}>
+                        {r.icon}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )) : shownGroups.map((g) => (
               <div key={g.title} role="group" aria-label={g.title}>
                 <div className="launcher-group">{g.title}</div>
                 {g.rows.map((r) => {
@@ -606,7 +685,7 @@ export default function Launcher(): ReactElement {
                 })}
               </div>
             ))}
-            {!rows.length && <div className="launcher-empty">Loading…</div>}
+            {!rows.length && <div className="launcher-empty">{mode ? modeView.empty ?? 'Nothing here.' : 'Loading…'}</div>}
           </div>
           <aside className="launcher-detail" aria-label="Details">
             {current && <DetailPane row={current} preview={previewPath ? previews[previewPath] : undefined} icon={current.iconPath ? icons[current.iconPath] : ''} home={data.home} accountLabel={accountLabel} spaceName={spaceName} />}
@@ -741,6 +820,25 @@ function DetailPane({ row, preview, icon, home, accountLabel, spaceName }: {
           ['Address', <span className="launcher-url">{d.link.url}</span>]
         ])}
         {takesQuery(d.link) && <p className="launcher-snippet">Type “{d.link.keyword || d.link.name} something” to put the words where the address says {'{query}'}.</p>}
+      </>
+    )
+  }
+  if (d?.kind === 'emoji') {
+    return (
+      <div className="launcher-emoji-detail">
+        <div className="launcher-emoji-big">{d.char}</div>
+        <div className="launcher-detail-title">{d.name}</div>
+        <p className="launcher-snippet">{d.words.slice(0, 14).join(' · ')}</p>
+      </div>
+    )
+  }
+  if (d?.kind === 'facts') {
+    return (
+      <>
+        {d.big && <div className="launcher-thumb host launcher-facts-big">{d.big}</div>}
+        <div className="launcher-detail-title">{d.title}</div>
+        {facts(d.facts)}
+        {d.note && <div className="launcher-snippet launcher-note">{d.note}</div>}
       </>
     )
   }

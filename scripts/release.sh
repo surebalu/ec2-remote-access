@@ -18,7 +18,7 @@ echo "▶ Building EC2 Remote Access $VERSION"
 if [ -z "${CSC_LINK:-}${CSC_NAME:-}" ]; then echo "  (no Developer ID configured: producing ad-hoc signed, un-notarized build)"; fi
 if [ $PUBLISH -eq 1 ] && [ -z "${UPDATE_URL:-}" ]; then echo "--publish requires UPDATE_URL"; exit 1; fi
 pnpm typecheck
-bash scripts/build-dictation.sh
+bash scripts/build-native.sh
 pnpm exec electron-vite build
 pnpm exec electron-builder --config electron-builder.config.cjs --mac --publish never
 echo; echo "▶ Artifacts:"; ls -1 dist/*.dmg dist/*.zip dist/latest-mac.yml 2>/dev/null || true

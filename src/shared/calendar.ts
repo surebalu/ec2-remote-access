@@ -15,7 +15,38 @@ export interface CalendarList extends RecordItem {
   hidden?: boolean
   /** An iCal (.ics) link it is read from; such a calendar is read-only here. */
   url?: string
+  /**
+   * A calendar macOS has (System Settings → Internet Accounts: Google Workspace, iCloud, Exchange), by its EventKit
+   * identifier, read through the ec2ra-control helper on the Mac running the app; read-only here too.
+   */
+  mac?: string
   order: number
+}
+
+/** A calendar macOS has, as the helper lists them. */
+export interface MacCalendar {
+  id: string
+  title: string
+  /** The account it belongs to: "name@company.com" for Google, "iCloud", "On My Mac". */
+  account: string
+  /** local, exchange, caldav (Google), icloud, subscribed, birthdays, other. */
+  kind: string
+  color: string
+  writable: boolean
+}
+
+/** One event (one occurrence of a repeating one) from a Mac calendar; times are epoch milliseconds. */
+export interface MacEvent {
+  id: string
+  calendarId: string
+  title: string
+  start: number
+  end: number
+  allDay: boolean
+  location?: string
+  notes?: string
+  url?: string
+  cancelled?: boolean
 }
 
 export interface CalEvent extends RecordItem {
@@ -150,4 +181,26 @@ export function parseEventInput(input: string, defaultDay: string, now: Date = n
     repeat: w.repeat,
     found: w.found
   }
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+const localDay = (t: number): string => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
+const localTime = (t: number): string => { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
+
+/**
+ * A Mac calendar's event as the Calendar draws events, on this Mac's local days and times, in the app's calendar
+ * `listId`. An all-day event ends at midnight after its last day (or a second before it, as EventKit gives it).
+ */
+export function macEventToCal(e: MacEvent, listId: string): CalEvent {
+  const base = { id: `mac:${e.id}`, type: 'event' as const, calendarId: listId, title: e.title || '(No title)', updatedAt: 0, ...(e.location ? { location: e.location } : {}), ...(e.notes ? { notes: e.notes } : {}), ...(e.url ? { url: e.url } : {}) }
+  if (e.allDay) {
+    const date = localDay(e.start)
+    const lastEnd = new Date(e.end)
+    const atMidnight = lastEnd.getHours() === 0 && lastEnd.getMinutes() === 0
+    const last = localDay(atMidnight ? e.end - 1 : e.end)
+    return { ...base, date, ...(last > date ? { endDate: last } : {}) }
+  }
+  const date = localDay(e.start)
+  const endDay = localDay(Math.max(e.start, e.end - 1))
+  return { ...base, date, start: localTime(e.start), end: localTime(Math.max(e.start, e.end)), ...(endDay > date ? { endDate: endDay } : {}) }
 }

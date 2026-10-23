@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Embedded into the ec2ra-control binary (__TEXT,__info_plist) by scripts/build-native.sh. Inside the app, macOS
+  attributes the helper's Accessibility and Calendars access to EC2 Remote Access and shows the app's own descriptions
+  (mac.extendInfo in electron-builder.config.cjs); these apply when the helper is the responsible process itself.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.mainspring.ec2-remote-access.control</string>
+  <key>CFBundleName</key><string>ec2ra-control</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>Shows the events of the calendars on this Mac (Google Workspace, iCloud, Exchange) in the app's Calendar.</string>
+  <key>NSCalendarsUsageDescription</key><string>Shows the events of the calendars on this Mac (Google Workspace, iCloud, Exchange) in the app's Calendar.</string>
+</dict>
+</plist>

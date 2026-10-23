@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type RefObject } from 'react'
-import { CALENDAR_COLORS, layoutDay, monthDays, occurrences, parseEventInput, weekSpan, type CalEvent, type CalendarList, type Occurrence } from '@shared/calendar'
+import { CALENDAR_COLORS, layoutDay, macEventToCal, monthDays, occurrences, parseEventInput, weekSpan, type CalEvent, type CalendarList, type MacCalendar, type Occurrence } from '@shared/calendar'
 import { parseIcs, toIcs } from '@shared/ics'
 import { addDays, addMonths, dayName, daysBetween, fromMinutes, fromYmd, monthName, relativeDay, repeatLabel, timeLabel, toMinutes, ymd, type Repeat } from '@shared/naturalDate'
 import { itemsOf, putOp, puts, type RecordOp } from '@shared/records'
@@ -7,6 +7,7 @@ import { completeTask, type Task } from '@shared/tasks'
 import { applyRecords, useRecords } from '../../records'
 import { setTabKeys } from '../../shortcuts'
 import { useStore, type Tab } from '../../store'
+import { hasBrowser } from '../../quickConnect'
 import { Icon } from '../icons'
 import Modal from '../Modal'
 import { downloadText, newId, pickTextFile, typing, UndoBar, useLocal, useToday } from './parts'
@@ -42,6 +43,13 @@ const repeatId = (r?: Repeat): string => (!r ? '' : REPEATS.find((x) => x.repeat
 /** Subscribed calendars' events by calendar, kept for the page so switching tabs does not fetch again. */
 const feeds = new Map<string, { at: number; events: CalEvent[]; error?: string; url: string }>()
 const FEED_TTL = 30 * 60_000
+/** Mac calendars' events (Google Workspace through Internet Accounts…), by calendar, for the range last read. */
+const macFeeds = new Map<string, CalEvent[]>()
+let macRange = ''
+let macError = ''
+const MAC_TTL = 5 * 60_000
+/** Read from somewhere else (an iCal link, or a calendar macOS has), so read-only here. */
+const isRemote = (c: CalendarList | undefined): boolean => !!c?.url || !!c?.mac
 
 interface Item {
   key: string
@@ -89,7 +97,7 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
 
   const calendars = useMemo(() => (doc ? itemsOf<CalendarList>(doc, 'calendar').sort((a, b) => a.order - b.order) : []), [doc])
   const calById = useMemo(() => new Map(calendars.map((c) => [c.id, c])), [calendars])
-  const local = calendars.filter((c) => !c.url)
+  const local = calendars.filter((c) => !isRemote(c))
   const events = useMemo(() => (doc ? itemsOf<CalEvent>(doc, 'event') : []), [doc])
 
   // Subscriptions: fetched when shown and every half hour.
@@ -116,6 +124,9 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
     return () => { stop = true; clearInterval(t); window.removeEventListener('ec2ra:calendar-refresh', refresh) }
   }, [active, calendars])
 
+  const [macTick, setMacTick] = useState(0)
+  const [macPicking, setMacPicking] = useState(false)
+
   const range = useMemo((): [string, string] => {
     if (view === 'month') { const d = monthDays(cursor); return [d[0], d[41]] }
     if (view === 'week') { const d = weekSpan(cursor, narrow); return [d[0], d[d.length - 1]] }
@@ -123,13 +134,50 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
     return [cursor, addDays(cursor, 59)]
   }, [view, cursor, narrow])
 
+  // Mac calendars: the shown range (a week either side) read through the Mac app when shown, on a new range, every
+  // five minutes and on Refresh. One read for all of them; EventKit expands repeats itself.
+  const macCals = calendars.filter((c) => c.mac && !c.hidden)
+  const macIds = macCals.map((c) => `${c.id}=${c.mac}`).join(',')
+  useEffect(() => {
+    if (!active || !macCals.length) return
+    let stop = false
+    const pull = async (force = false): Promise<void> => {
+      const from = fromYmd(addDays(range[0], -7)).getTime()
+      const to = fromYmd(addDays(range[1], 8)).getTime()
+      const key = `${from}-${to}-${macIds}`
+      if (!force && key === macRange) return
+      try {
+        const got = await window.api.invoke('maccal:events', from, to, macCals.map((c) => c.mac!))
+        if (stop) return
+        macFeeds.clear()
+        for (const c of macCals) macFeeds.set(c.id, got.filter((e) => e.calendarId === c.mac && !e.cancelled).map((e) => macEventToCal(e, c.id)))
+        macRange = key
+        macError = ''
+      } catch (e) {
+        macError = (e as Error).message
+        macRange = ''
+      }
+      if (!stop) setMacTick((n) => n + 1)
+    }
+    void pull()
+    const t = setInterval(() => void pull(true), MAC_TTL)
+    const refresh = (): void => void pull(true)
+    window.addEventListener('ec2ra:calendar-refresh', refresh)
+    return () => { stop = true; clearInterval(t); window.removeEventListener('ec2ra:calendar-refresh', refresh) }
+  }, [active, macIds, range[0], range[1]]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const items = useMemo((): Item[] => {
     void feedTick
+    void macTick
     const shown = new Set(calendars.filter((c) => !c.hidden).map((c) => c.id))
-    const all = [...events.filter((e) => shown.has(e.calendarId)), ...calendars.filter((c) => c.url && !c.hidden).flatMap((c) => feeds.get(c.id)?.events ?? [])]
+    const all = [
+      ...events.filter((e) => shown.has(e.calendarId)),
+      ...calendars.filter((c) => c.url && !c.hidden).flatMap((c) => feeds.get(c.id)?.events ?? []),
+      ...calendars.filter((c) => c.mac && !c.hidden).flatMap((c) => macFeeds.get(c.id) ?? [])
+    ]
     const out: Item[] = occurrences(all, range[0], range[1]).map((o: Occurrence) => {
       const cal = calById.get(o.event.calendarId)
-      return { key: o.key, day: o.day, allDay: o.allDay, start: o.start, end: o.end, first: o.first, last: o.last, title: o.event.title, color: cal?.color ?? CALENDAR_COLORS[0], event: o.event, readOnly: !!cal?.url }
+      return { key: o.key, day: o.day, allDay: o.allDay, start: o.start, end: o.end, first: o.first, last: o.last, title: o.event.title, color: cal?.color ?? CALENDAR_COLORS[0], event: o.event, readOnly: isRemote(cal) }
     })
     if (showTasks === 'on' && tasksDoc) {
       for (const t of itemsOf<Task>(tasksDoc, 'task')) {
@@ -140,7 +188,7 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
       }
     }
     return out.sort((a, b) => a.day.localeCompare(b.day) || Number(b.allDay) - Number(a.allDay) || (a.start ?? 0) - (b.start ?? 0))
-  }, [events, calendars, calById, range, showTasks, tasksDoc, today, feedTick])
+  }, [events, calendars, calById, range, showTasks, tasksDoc, today, feedTick, macTick])
   const byDay = useMemo(() => {
     const m = new Map<string, Item[]>()
     for (const it of items) m.set(it.day, [...(m.get(it.day) ?? []), it])
@@ -258,11 +306,12 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
             if (name) void applyRecords('calendar', puts([{ id: newId(), type: 'calendar', name, color: CALENDAR_COLORS[calendars.length % CALENDAR_COLORS.length], order: calendars.length + 1, updatedAt: Date.now() } as CalendarList]))
           }}><Icon.plus /></button></h4>
           {calendars.map((c) => (
-            <CalendarRow key={c.id} cal={c} feed={feeds.get(c.id)} onChange={(next) => void applyRecords('calendar', puts([next]))} onExport={() => exportIcs(c)}
+            <CalendarRow key={c.id} cal={c} feed={c.mac ? (macError ? { error: macError, events: [] } : undefined) : feeds.get(c.id)} onChange={(next) => void applyRecords('calendar', puts([next]))} onExport={() => exportIcs(c)}
               onRefresh={() => window.dispatchEvent(new Event('ec2ra:calendar-refresh'))}
               onDelete={() => {
                 const own = events.filter((e) => e.calendarId === c.id)
-                if (!window.confirm(`Delete the calendar “${c.name}”${own.length ? ` and its ${own.length} event${own.length === 1 ? '' : 's'}` : ''}?`)) return
+                const ask = c.mac ? `Remove “${c.name}” from this Calendar? It stays in macOS and in its account (Google, iCloud…).` : `Delete the calendar “${c.name}”${own.length ? ` and its ${own.length} event${own.length === 1 ? '' : 's'}` : ''}?`
+                if (!window.confirm(ask)) return
                 void applyRecords('calendar', [...own.map((e) => ({ op: 'delete' as const, id: e.id })), { op: 'delete', id: c.id }])
                 setUndo({ label: `Deleted “${c.name}”`, key: Date.now(), ops: puts([c, ...own]) })
               }} />
@@ -270,6 +319,7 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
           {!calendars.length && <p className="plan-side-hint">Add an event and a “Personal” calendar is made for it.</p>}
           <label className="cal-toggle"><input type="checkbox" checked={showTasks === 'on'} onChange={(e) => setShowTasks(e.target.checked ? 'on' : 'off')} />Show tasks</label>
           <h4>Import and subscribe</h4>
+          <button type="button" className="plan-nav" onClick={() => setMacPicking(true)}><Icon.calendar />Calendars on this Mac…</button>
           <button type="button" className="plan-nav" onClick={() => setSubscribing(true)}><Icon.globe />Subscribe to a calendar…</button>
           <button type="button" className="plan-nav" onClick={() => void importIcs()}><Icon.download />Import .ics file…</button>
           <button type="button" className="plan-nav" onClick={() => exportIcs()}><Icon.share />Export all (.ics)</button>
@@ -295,8 +345,13 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
         </div>
       </div>
 
-      {editing && <EventEditor event={editing.event} isNew={editing.isNew} calendars={calendars} readOnly={!!calById.get(editing.event.calendarId)?.url}
+      {editing && <EventEditor event={editing.event} isNew={editing.isNew} calendars={calendars} readOnly={isRemote(calById.get(editing.event.calendarId))} fromMac={!!calById.get(editing.event.calendarId)?.mac}
         onSave={(e) => { saveEvent(e); setEditing(null) }} onDelete={() => { deleteEvent(editing.event); setEditing(null) }} onClose={() => setEditing(null)} />}
+      {macPicking && <MacCalendarsDialog have={calendars} onClose={() => setMacPicking(false)} onAdd={(list) => {
+        void applyRecords('calendar', puts(list.map((m, i) => ({ id: newId(), type: 'calendar', name: m.title, mac: m.id, color: /^#[0-9a-f]{6}$/i.test(m.color) ? m.color : CALENDAR_COLORS[(calendars.length + i) % CALENDAR_COLORS.length], order: calendars.length + 1 + i, updatedAt: Date.now() } as CalendarList))))
+        macRange = ''
+        setMacPicking(false)
+      }} />}
       {subscribing && <SubscribeDialog onClose={() => setSubscribing(false)} onAdd={(name, url) => {
         void applyRecords('calendar', puts([{ id: newId(), type: 'calendar', name, url, color: CALENDAR_COLORS[(calendars.length + 3) % CALENDAR_COLORS.length], order: calendars.length + 1, updatedAt: Date.now() } as CalendarList]))
         setSubscribing(false)
@@ -345,10 +400,11 @@ function CalendarRow({ cal, feed, onChange, onDelete, onExport, onRefresh }: { c
   const [menu, setMenu] = useState(false)
   return (
     <div className="cal-row">
-      <label className="cal-row-main" title={cal.url ? `Subscribed: ${cal.url.replace(/(https?:\/\/[^/]+\/).*/, '$1…')}` : cal.name}>
+      <label className="cal-row-main" title={cal.url ? `Subscribed: ${cal.url.replace(/(https?:\/\/[^/]+\/).*/, '$1…')}` : cal.mac ? `${cal.name}: a calendar on this Mac (read-only here)` : cal.name}>
         <input type="checkbox" checked={!cal.hidden} onChange={() => onChange({ ...cal, hidden: !cal.hidden || undefined })} style={{ accentColor: cal.color }} aria-label={`Show ${cal.name}`} />
         <span className="plan-nav-label">{cal.name}</span>
         {cal.url && <Icon.globe className="cal-row-sub" />}
+        {cal.mac && <Icon.monitor className="cal-row-sub" />}
       </label>
       <button type="button" className="plan-add" aria-label={`${cal.name} options`} onClick={() => setMenu(!menu)}><Icon.more /></button>
       {feed?.error && <p className="cal-row-error" title={feed.error}>{feed.error}</p>}
@@ -356,8 +412,8 @@ function CalendarRow({ cal, feed, onChange, onDelete, onExport, onRefresh }: { c
         <div className="cal-row-menu" onMouseLeave={() => setMenu(false)}>
           <div className="cal-colors">{CALENDAR_COLORS.map((c) => <button key={c} type="button" aria-label={`Colour ${c}`} className={c === cal.color ? 'on' : ''} style={{ background: c }} onClick={() => onChange({ ...cal, color: c })} />)}</div>
           <button type="button" onClick={() => { const name = window.prompt('Rename calendar', cal.name)?.trim(); if (name) onChange({ ...cal, name }); setMenu(false) }}>Rename…</button>
-          {cal.url ? <button type="button" onClick={() => { onRefresh(); setMenu(false) }}>Refresh now</button> : <button type="button" onClick={() => { onExport(); setMenu(false) }}>Export .ics</button>}
-          <button type="button" className="danger" onClick={() => { setMenu(false); onDelete() }}>{cal.url ? 'Unsubscribe' : 'Delete…'}</button>
+          {isRemote(cal) ? <button type="button" onClick={() => { onRefresh(); setMenu(false) }}>Refresh now</button> : <button type="button" onClick={() => { onExport(); setMenu(false) }}>Export .ics</button>}
+          <button type="button" className="danger" onClick={() => { setMenu(false); onDelete() }}>{cal.url ? 'Unsubscribe' : cal.mac ? 'Remove from here' : 'Delete…'}</button>
         </div>
       )}
     </div>
@@ -480,11 +536,11 @@ function AgendaView({ from, today, byDay, onOpen, onToggle }: { from: string; to
   )
 }
 
-function EventEditor({ event, isNew, calendars, readOnly, onSave, onDelete, onClose }: { event: CalEvent; isNew: boolean; calendars: CalendarList[]; readOnly: boolean; onSave: (e: CalEvent) => void; onDelete: () => void; onClose: () => void }): ReactElement {
+function EventEditor({ event, isNew, calendars, readOnly, fromMac, onSave, onDelete, onClose }: { event: CalEvent; isNew: boolean; calendars: CalendarList[]; readOnly: boolean; fromMac?: boolean; onSave: (e: CalEvent) => void; onDelete: () => void; onClose: () => void }): ReactElement {
   const [e, setE] = useState<CalEvent>(event)
   const set = (patch: Partial<CalEvent>): void => setE((x) => ({ ...x, ...patch }))
   const allDay = !e.start
-  const writable = calendars.filter((c) => !c.url)
+  const writable = calendars.filter((c) => !isRemote(c))
   const valid = e.title.trim() && e.date && (!e.endDate || e.endDate >= e.date)
   return (
     <Modal title={readOnly ? e.title : isNew ? 'New event' : 'Edit event'} onClose={onClose}>
@@ -494,7 +550,8 @@ function EventEditor({ event, isNew, calendars, readOnly, onSave, onDelete, onCl
           {e.repeat && <p><Icon.refresh />{repeatLabel(e.repeat)}</p>}
           {e.location && <p><Icon.globe />{e.location}</p>}
           {e.notes && <p className="cal-readonly-notes">{e.notes}</p>}
-          <p className="muted">From a subscribed calendar: change it where it comes from.</p>
+          {e.url && /^https?:\/\//.test(e.url) && <p><Icon.globe /><a href={e.url} target="_blank" rel="noreferrer">{e.url.replace(/^https?:\/\//, '').slice(0, 60)}</a></p>}
+          <p className="muted">{fromMac ? 'From a calendar on this Mac: change it in Google Calendar or the Calendar app.' : 'From a subscribed calendar: change it where it comes from.'}</p>
           <div className="cal-edit-foot"><span className="flex-1" /><button type="button" className="btn btn-sm" onClick={onClose}>Close</button></div>
         </div>
       ) : (
@@ -547,7 +604,9 @@ function SubscribeDialog({ onAdd, onClose }: { onAdd: (name: string, url: string
   return (
     <Modal title="Subscribe to a calendar" onClose={onClose}>
       <form className="cal-edit" onSubmit={(e) => { e.preventDefault(); if (state.count !== undefined) onAdd(name.trim() || 'Subscribed', url.trim()); else void check() }}>
-        <p className="muted cal-sub-help">Paste the calendar's iCal link. In Google Calendar: Settings → your calendar → <b>Secret address in iCal format</b>. In iCloud: share the calendar as Public and copy its link. Outlook: Settings → Shared calendars → Publish → ICS. It is read-only here and refreshed every 30 minutes.</p>
+        <p className="muted cal-sub-help">Paste the calendar's iCal link. In Google Calendar (Google Workspace too): Settings → your calendar under “Settings for my calendars” → Integrate calendar → <b>Secret address in iCal format</b>. In iCloud: share the calendar as Public and copy its link. Outlook: Settings → Shared calendars → Publish → ICS. It is read-only here and refreshed every 30 minutes.</p>
+        <p className="muted cal-sub-help">No secret address in Google Calendar? Your Workspace administrator has turned it off: add your Google account to the Mac instead (Calendars on this Mac).</p>
+        <button type="button" className="btn btn-sm cal-sub-google" onClick={() => { const url = 'https://calendar.google.com/calendar/u/0/r/settings'; if (hasBrowser()) useStore.getState().openBrowser({ url }); else void window.api.invoke('shell:open', url) }}><Icon.globe />Open Google Calendar’s settings</button>
         <input className="input" autoFocus value={url} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label="iCal link" onChange={(e) => { setUrl(e.target.value); setState({}) }} />
         <input className="input" value={name} placeholder="Name (optional)" aria-label="Name" onChange={(e) => setName(e.target.value)} />
         {state.error && <div className="plan-error"><Icon.alert />{state.error}</div>}
@@ -558,6 +617,92 @@ function SubscribeDialog({ onAdd, onClose }: { onAdd: (name: string, url: string
           <button type="submit" className="btn btn-sm btn-primary" disabled={!url.trim() || state.busy}>{state.busy ? 'Checking…' : state.count !== undefined ? 'Subscribe' : 'Check link'}</button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+/**
+ * Calendars on this Mac: what macOS has in Internet Accounts (a Google Workspace account, iCloud, Exchange), read by
+ * the Mac app through EventKit (the ec2ra-control helper). The first time, macOS asks whether the app may read them.
+ * Picked calendars are added to this Calendar, read-only; their events stay where they are.
+ */
+function MacCalendarsDialog({ have, onAdd, onClose }: { have: CalendarList[]; onAdd: (list: MacCalendar[]) => void; onClose: () => void }): ReactElement {
+  const [state, setState] = useState<{ status?: string; message?: string; available?: boolean; list?: MacCalendar[]; error?: string; busy?: boolean }>({})
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const already = new Set(have.map((c) => c.mac).filter(Boolean))
+  const load = async (): Promise<void> => {
+    try {
+      const st = await window.api.invoke('maccal:status')
+      if (!st.available || st.status !== 'authorized') { setState({ ...st }); return }
+      const list = await window.api.invoke('maccal:calendars')
+      setState({ ...st, list })
+    } catch (e) { setState({ error: (e as Error).message }) }
+  }
+  useEffect(() => { void load() }, [])
+  // Back from System Settings with an account added or access given: read again.
+  useEffect(() => {
+    const again = (): void => void load()
+    window.addEventListener('focus', again)
+    return () => window.removeEventListener('focus', again)
+  }, [])
+  const ask = async (): Promise<void> => {
+    setState((s) => ({ ...s, busy: true }))
+    try {
+      const status = await window.api.invoke('maccal:ask')
+      if (status !== 'authorized') setState({ status, available: true, message: 'macOS did not allow it. Turn on EC2 Remote Access in System Settings → Privacy & Security → Calendars.' })
+      else await load()
+    } catch (e) { setState({ error: (e as Error).message }) }
+  }
+  const accounts = new Map<string, MacCalendar[]>()
+  for (const c of state.list ?? []) {
+    if (c.kind === 'birthdays') continue
+    accounts.set(c.account || 'On My Mac', [...(accounts.get(c.account || 'On My Mac') ?? []), c])
+  }
+  const toggle = (id: string): void => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const status = state.status
+  return (
+    <Modal title="Calendars on this Mac" onClose={onClose}>
+      <div className="cal-edit cal-mac">
+        <p className="muted cal-sub-help">Your work calendar, without an iCal link: add your Google Workspace account in <b>System Settings → Internet Accounts</b> with Calendars on, and its calendars show up here. The app reads them on this Mac (phones paired with it see them too); nothing is copied to a server.</p>
+        {state.error && <div className="plan-error"><Icon.alert />{state.error}</div>}
+        {state.available === false && <div className="plan-error"><Icon.alert />{state.message}</div>}
+        {state.available && status === 'notDetermined' && (
+          <div className="cal-mac-ask">
+            <p>The app needs your permission to read the calendars macOS has.</p>
+            <button type="button" className="btn btn-sm btn-primary" disabled={state.busy} onClick={() => void ask()}>{state.busy ? 'Waiting for macOS…' : 'Allow access to Calendars…'}</button>
+          </div>
+        )}
+        {state.available && (status === 'denied' || status === 'restricted' || status === 'writeOnly') && (
+          <div className="cal-mac-ask">
+            <p>{state.message ?? 'macOS does not let the app read calendars. Turn on EC2 Remote Access in Privacy & Security → Calendars (full access).'}</p>
+            <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('maccal:settings', 'privacy')}>Open Privacy Settings</button>
+          </div>
+        )}
+        {state.list && (
+          <div className="cal-mac-list" role="group" aria-label="Calendars on this Mac">
+            {[...accounts.entries()].map(([account, list]) => (
+              <div key={account} className="cal-mac-account">
+                <h5>{account}</h5>
+                {list.map((c) => (
+                  <label key={c.id} className={`cal-mac-row ${already.has(c.id) ? 'added' : ''}`}>
+                    <input type="checkbox" disabled={already.has(c.id)} checked={already.has(c.id) || picked.has(c.id)} onChange={() => toggle(c.id)} style={{ accentColor: c.color || undefined }} />
+                    <span className="cal-mac-dot" style={{ background: c.color || 'var(--muted)' }} />
+                    <span className="plan-nav-label">{c.title}</span>
+                    {already.has(c.id) && <span className="muted">Added</span>}
+                  </label>
+                ))}
+              </div>
+            ))}
+            {!accounts.size && <p className="muted">macOS has no calendars yet. Add an account in Internet Accounts.</p>}
+          </div>
+        )}
+        <div className="cal-edit-foot">
+          {state.available && <button type="button" className="btn btn-sm btn-ghost" onClick={() => void window.api.invoke('maccal:settings', 'accounts')}>Internet Accounts…</button>}
+          <span className="flex-1" />
+          <button type="button" className="btn btn-sm" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-sm btn-primary" disabled={!picked.size} onClick={() => onAdd((state.list ?? []).filter((c) => picked.has(c.id)))}>Add {picked.size || ''} calendar{picked.size === 1 ? '' : 's'}</button>
+        </div>
+      </div>
     </Modal>
   )
 }

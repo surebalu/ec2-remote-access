@@ -7,9 +7,11 @@ const signed = !!(process.env.CSC_LINK || process.env.CSC_NAME)
 const notarize = signed && !!(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID)
 const updateUrl = process.env.UPDATE_URL
 const { existsSync } = require('node:fs')
-// Built by scripts/build-dictation.sh; without Xcode's Swift compiler the app ships without dictation.
+// Built by scripts/build-native.sh; without Xcode's Swift compiler the app ships without dictation or window layouts.
 const dictationHelper = 'build/native/ec2ra-dictate'
-if (!existsSync(dictationHelper)) console.warn(`  • ${dictationHelper} is missing: packaging without voice dictation (run scripts/build-dictation.sh)`)
+const controlHelper = 'build/native/ec2ra-control'
+if (!existsSync(dictationHelper)) console.warn(`  • ${dictationHelper} is missing: packaging without voice dictation (run scripts/build-native.sh)`)
+if (!existsSync(controlHelper)) console.warn(`  • ${controlHelper} is missing: packaging without window layouts or Mac calendars (run scripts/build-native.sh)`)
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -22,11 +24,12 @@ module.exports = {
   // node-pty's native module and its spawn-helper must be real files for the local terminals.
   asarUnpack: ['node_modules/ssh2/**', 'node_modules/node-pty/**'],
   // The menu-bar icon is read at run time (src/main/tray.ts), so it ships beside the app's resources, as does the
-  // voice-dictation helper (src/main/electronHost.ts) that `pnpm dist` builds first with scripts/build-dictation.sh.
+  // native helpers (src/main/electronHost.ts) that `pnpm dist` builds first with scripts/build-native.sh.
   extraResources: [
     { from: 'resources/trayTemplate.png', to: 'trayTemplate.png' },
     { from: 'resources/trayTemplate@2x.png', to: 'trayTemplate@2x.png' },
-    ...(existsSync(dictationHelper) ? [{ from: dictationHelper, to: 'dictation/ec2ra-dictate' }] : [])
+    ...(existsSync(dictationHelper) ? [{ from: dictationHelper, to: 'dictation/ec2ra-dictate' }] : []),
+    ...(existsSync(controlHelper) ? [{ from: controlHelper, to: 'control/ec2ra-control' }] : [])
   ],
   afterPack: 'build/afterPack.cjs',
   afterSign: 'build/afterSign.cjs',
@@ -49,6 +52,9 @@ module.exports = {
       // Voice dictation: macOS shows these when it first asks; the helper's access counts as the app's.
       NSMicrophoneUsageDescription: 'Voice dictation listens to the microphone only while you hold the dictation key or a mic button is on.',
       NSSpeechRecognitionUsageDescription: 'Voice dictation turns what you say into text, on this Mac when macOS supports your language.',
+      // The Calendar's "Calendars on this Mac" (the ec2ra-control helper reads them; its access counts as the app's).
+      NSCalendarsFullAccessUsageDescription: 'Shows the events of the calendars on this Mac (Google Workspace, iCloud, Exchange) in the app’s Calendar.',
+      NSCalendarsUsageDescription: 'Shows the events of the calendars on this Mac (Google Workspace, iCloud, Exchange) in the app’s Calendar.',
       LSMinimumSystemVersion: '12.0'
     }
   },

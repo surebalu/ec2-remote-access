@@ -84,6 +84,20 @@ export interface Host {
   extensions: ExtensionsHost | null
   /** The Storage tool's scan process (main/storage/scanClient.ts); null without a Mac to scan (gateway). */
   storage: StorageHost | null
+  /** Window layouts, app hotkeys and the Mac's calendars (main/desktopKeys.ts, main/macControl.ts); null without a Mac (gateway). */
+  mac: MacHost | null
+}
+
+/** What the window layouts, app hotkeys and the Mac's calendars need from the Mac app. */
+export interface MacHost {
+  /** The ec2ra-control helper: in the app's Resources when packaged, build/native in development; null when missing. */
+  controlPath(): string | null
+  /** Moves the window in front to a layout (src/shared/windowLayouts.ts), or does what it names (Restore, Full Screen). */
+  layout(id: string): Promise<void>
+  /** Each window and app key in Settings, and whether macOS gave it to the app. */
+  hotkeys(): { id: string; combo: string; registered: boolean }[]
+  /** Opens System Settings at Privacy & Security → Accessibility or Calendars. */
+  openPrivacy(pane: 'accessibility' | 'calendars'): Promise<void>
 }
 
 /** The Storage tool's disk scan, run apart from the main process (main/storage/scanProcess.ts). */
