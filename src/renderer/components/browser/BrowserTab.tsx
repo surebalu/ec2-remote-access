@@ -5,6 +5,8 @@ import {
   consoleHome, frequentSites, hostOf, isAwsConsoleUrl, isAwsSignInPage, isFederationUrl, isWebUrl, lastGrapheme, matchesWords, normalizeInput,
   partitionFor, restorableUrl, searchHistory, signInDestination, spaceIdForProfile
 } from '@shared/browser'
+import { captureBrowser, restoreBrowser } from '@shared/workspaces'
+import { registerWorkspaceContext } from '../../workspaceContext'
 import { hostsInText, type PageHost } from '@shared/pageHosts'
 import { allInstances, isSession, routeOf, useStore, type Beside, type Tab } from '../../store'
 import { ACCENTS, metaFor } from '../../colors'
@@ -221,6 +223,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
 
   const stRef = useRef(st)
   stRef.current = st
+  useEffect(() => registerWorkspaceContext('browser', () => stRef.current ? { id: tab.id, kind: 'browser', browser: captureBrowser(stRef.current) } : null), [tab.id])
   const spacesRef = useRef(spaces)
   spacesRef.current = spaces
   const currentRef = useRef(current)
@@ -799,6 +802,13 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   useEffect(() => {
     if (!request || !st || handledRequest.current === request.nonce) return
     handledRequest.current = request.nonce
+    useStore.getState().set({ browserRequest: null })
+    if (request.workspace) {
+      const restored = restoreBrowser(st, request.workspace, spacesRef.current.map((sp) => sp.id), newId)
+      setSt(restored.state)
+      if (restored.skipped) toast('info', `${restored.skipped} workspace browser ${restored.skipped === 1 ? 'page was' : 'pages were'} skipped because their space is missing or disabled.`)
+      return
+    }
     // A tab by id (a favorite from the launcher) opens in its own space, with that space's logins.
     if (request.tab && findTab(request.tab)) {
       activate(request.tab)

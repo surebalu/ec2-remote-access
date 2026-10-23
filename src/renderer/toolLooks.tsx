@@ -12,6 +12,7 @@ export interface Look { hue: number; sat?: number; icon: () => ReactElement }
 export const LOOKS: Record<ToolKind | 'hosts' | 'overview', Look> = {
   hosts: { hue: 212, icon: () => <Icon.server /> },
   overview: { hue: 258, icon: () => <Icon.grid /> },
+  devtools: { hue: 260, icon: () => <Icon.code /> },
   health: { hue: 345, icon: () => <Icon.health /> },
   local: { hue: 150, icon: () => <Icon.console /> },
   finder: { hue: 196, icon: () => <Icon.finder /> },

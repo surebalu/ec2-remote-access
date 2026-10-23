@@ -71,6 +71,7 @@ export default function HomeDeck(): ReactElement {
       </div>)}
       <footer className="ws-footer"><span><Icon.keyboard />A shortcut to every host, session and command</span><div>
         <button className="ws-text-action" onClick={() => void window.api.invoke('notes:daily').then((path) => s.openNotes(path), (e: Error) => s.toast('error', e.message))}><Icon.note />Today's note</button>
+        <button className="ws-text-action" onClick={() => s.openTool('devtools')}><Icon.code />Dev tools</button>
         <button className="ws-text-action" onClick={() => s.set({ portForwardFor: {} })}><Icon.plug />Forward a port</button>
       </div></footer>
     </>}

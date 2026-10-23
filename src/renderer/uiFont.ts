@@ -4,11 +4,14 @@
  * Notes and terminals keep their own font settings; the whiteboard draws its text in the app font.
  */
 
-export interface UiFont { id: string; label: string; stack: string; mono: boolean }
+export interface UiFont { id: string; label: string; stack: string; mono: boolean; bundled?: boolean }
 
 const MONO_FALLBACK = "'SF Mono', ui-monospace, Menlo, monospace"
 
 export const UI_FONTS: UiFont[] = [
+  { id: 'Geist', label: 'Geist', stack: "Geist, -apple-system, system-ui, sans-serif", mono: false, bundled: true },
+  { id: 'Manrope', label: 'Manrope', stack: "Manrope, -apple-system, system-ui, sans-serif", mono: false, bundled: true },
+  { id: 'Geist Mono', label: 'Geist Mono', stack: `'Geist Mono', ${MONO_FALLBACK}`, mono: true, bundled: true },
   { id: 'Monaco', label: 'Monaco', stack: `Monaco, ${MONO_FALLBACK}`, mono: true },
   { id: 'SF Mono', label: 'SF Mono', stack: MONO_FALLBACK, mono: true },
   { id: 'Menlo', label: 'Menlo', stack: "Menlo, Monaco, ui-monospace, monospace", mono: true },

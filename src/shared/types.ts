@@ -272,6 +272,8 @@ export interface PortForwardRequest {
 
 /** Connection parameters worth keeping for a tab in a workspace. RDP passwords are never stored here. */
 export interface WorkspaceTab {
+  /** Stable reference for the workspace layout; absent on older saved workspaces. */
+  id?: string
   kind: 'ssh' | 'rdp' | 'sftp'
   instanceKey: string
   user?: string
@@ -286,8 +288,22 @@ export interface Workspace {
   id: string
   name: string
   tabs: WorkspaceTab[]
+  tools?: WorkspaceTool[]
+  layout?: PaneNode | null
+  activeTab?: string
   savedAt: number
 }
+
+export type WorkspaceTerminal = Pick<TerminalState, 'tabs' | 'activeTab' | 'cwds'>
+export type WorkspaceBrowser = Pick<BrowserState, 'tabs' | 'activeSpace' | 'activeTab'>
+/** Only navigation context is copied. Documents, shell output, cookies and tool drafts stay in their own tools. */
+export type WorkspaceTool = { id: string } & (
+  | { kind: 'local'; terminal: WorkspaceTerminal }
+  | { kind: 'browser'; browser: WorkspaceBrowser }
+  | { kind: 'notes'; path?: string }
+  | { kind: 'finder'; path?: string }
+  | { kind: 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' }
+)
 
 /** EC2 status checks, recent CPU and SSM check-in for the host details panel. */
 export interface HostHealth {
@@ -457,6 +473,8 @@ export type PaneNode = { type: 'pane'; id: string } | { type: 'split'; dir: 'row
 
 export interface TermTabState {
   id: string
+  /** Reuse a workspace's shell while it is still open instead of starting duplicate processes. */
+  workspaceSource?: string
   /** A name the user gave the tab; otherwise it shows the running command or the folder. */
   title?: string
   color?: AccentColor

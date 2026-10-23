@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import { formatCombo, type RailSection } from '@shared/keyCombos'
 import { isSession, TOOL_NAMES, useStore, type Tab, type ToolKind } from '../store'
 import { hasBrowser } from '../quickConnect'
@@ -41,11 +41,12 @@ export default function AppRail(): ReactElement {
   const isTool = (k: RailSection): k is ToolKind => k !== 'hosts' && k !== 'overview'
 
   /** `keys`: the shortcut shown under the label, read from Settings → Keyboard so it changes when the shortcut does. */
-  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; keys?: string }): ReactElement => (
+  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; keys?: string; hue?: number }): ReactElement => (
     <button
       key={o.label}
       type="button"
-      className={`rail-item no-drag ${o.on ? 'on' : ''}`}
+      className={`rail-item no-drag ${o.on ? 'on' : ''} ${o.hue !== undefined ? 'rail-tinted' : ''}`}
+      style={o.hue !== undefined ? { '--tool-hue': o.hue } as CSSProperties : undefined}
       title={o.title}
       aria-label={o.aria ?? o.label}
       aria-current={o.on ? 'page' : undefined}
@@ -73,6 +74,7 @@ export default function AppRail(): ReactElement {
     return item({
       label: TOOL_NAMES[kind],
       icon,
+      hue: LOOKS[kind].hue,
       title: withKey(title, kind),
       on: front?.kind === kind,
       keys: sectionKeyLabel(kind, shortcuts),
@@ -90,6 +92,8 @@ export default function AppRail(): ReactElement {
 
   return (
     <nav className="app-rail" aria-label="App sections">
+      {item({ label: 'Search', icon: <Icon.search />, on: false, title: 'Find hosts, tools and commands (⌘K)', keys: '⌘K', onClick: () => st().openQuickSwitcher() })}
+      <div className="rail-sections">
       <div className="rail-group" role="group" aria-label="Operate">
       <span className="rail-group-label">Operate</span>
       {item({ label: 'Hosts', icon: <Icon.server />, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), keys: sectionKeyLabel('hosts', shortcuts) || '⌘1', onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
@@ -111,7 +115,8 @@ export default function AppRail(): ReactElement {
         <span className="rail-group-label">{group.label}</span>
         {group.tools.filter((kind) => hasBrowser() || !['local', 'finder'].includes(kind)).map((kind) => tool(kind, LOOKS[kind].icon(), TOOL_DESCRIPTIONS[kind]))}
       </div>)}
-      <span className="rail-spacer" />
+      </div>
+      <div className="rail-utilities">
       {hasBrowser() && item({
         label: 'Launcher',
         icon: <Icon.launcher />,
@@ -137,6 +142,7 @@ export default function AppRail(): ReactElement {
         <span className="rail-label">{themeLabel}</span>
       </button>
       {item({ label: 'Settings', icon: <Icon.settings />, on: false, title: 'Settings (⌘,)', keys: '⌘,', onClick: () => st().set({ settingsOpen: true }) })}
+      </div>
       {themeMenu && (
         <Popover anchor={themeMenu} width={236} onClose={() => setThemeMenu(null)}>
           <MenuLabel>Appearance</MenuLabel>

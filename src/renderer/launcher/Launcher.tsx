@@ -1,3 +1,4 @@
+import { workspaceSummary } from '@shared/workspaces'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppCommand, AwsProfile, BrowserState, Instance, NoteHit, Settings } from '@shared/types'
@@ -75,14 +76,14 @@ const EMPTY: Data = { apps: [], usage: {}, settings: null, hosts: [], profiles: 
 const NO_LINKS: Quicklink[] = []
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  devtools: Icon.code, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_ABOUT: Record<RailSection, string> = {
-  hosts: 'Every account’s hosts', overview: 'All open sessions on one page', health: 'The 3DEXPERIENCE platform at a glance', local: 'Shells on this Mac', finder: 'Files on this Mac',
+  devtools: 'Local developer utilities', hosts: 'Every account’s hosts', overview: 'All open sessions on one page', health: 'The 3DEXPERIENCE platform at a glance', local: 'Shells on this Mac', finder: 'Files on this Mac',
   browser: 'AWS console spaces and web tabs', notes: 'Your Markdown notes', board: 'The scratch pad', claude: 'Chat, signed in on its own', chatgpt: 'Chat, signed in on its own'
 }
 const SECTION_WORDS: Record<RailSection, string> = {
-  hosts: 'instances servers ec2 list', overview: 'all sessions grid', health: 'status monitoring 3dexperience prometheus grafana alerts', local: 'shell zsh console warp', finder: 'files folders', browser: 'web tabs arc',
+  devtools: 'json base64 url jwt uuid timestamp hash developer utilities', hosts: 'instances servers ec2 list', overview: 'all sessions grid', health: 'status monitoring 3dexperience prometheus grafana alerts', local: 'shell zsh console warp', finder: 'files folders', browser: 'web tabs arc',
   notes: 'obsidian markdown', board: 'whiteboard draw sketch', claude: 'ai chat anthropic', chatgpt: 'ai chat openai gpt'
 }
 
@@ -327,7 +328,7 @@ export default function Launcher(): ReactElement {
     { id: 'cmd:scan', title: 'Rescan AWS Accounts', subtitle: 'Hosts', keywords: 'refresh inventory reload', icon: <Icon.refresh />, actions: [{ title: 'Rescan', key: 'enter', run: inApp('cmd:scan', { kind: 'scan' }) }] },
     { id: 'cmd:quicklink', title: 'Create Quicklink…', subtitle: 'A word that opens a page, such as “aws” for the AWS sign-in', keywords: 'quicklink bookmark link shortcut alias keyword url', icon: <Icon.plus />, actions: [{ title: 'Create Quicklink', key: 'enter', run: () => editLink(null) }] },
     ...(settings?.workspaces ?? []).map((w): Row => ({
-      id: `workspace:${w.id}`, title: `Workspace: ${w.name}`, subtitle: `${w.tabs.length} tab${w.tabs.length === 1 ? '' : 's'}`, keywords: 'workspace session layout tabs', icon: <Icon.grid />,
+      id: `workspace:${w.id}`, title: `Workspace: ${w.name}`, subtitle: workspaceSummary(w), keywords: 'workspace session layout tabs', icon: <Icon.grid />,
       actions: [{ title: 'Open the Workspace', key: 'enter', run: inApp(`workspace:${w.id}`, { kind: 'workspace', id: w.id }) }]
     })),
     ...(settings?.portForwards ?? []).map((p): Row => ({
@@ -353,7 +354,7 @@ export default function Launcher(): ReactElement {
         actions: [{ title: 'Open a Terminal Tab', key: 'enter', run: inApp(id, { kind: 'terminal', profile: p.name }) }]
       }
     })
-  ], [data, keys.hosts, keys.overview, keys.health, keys.local, keys.finder, keys.browser, keys.notes, keys.board, keys.claude, keys.chatgpt]) // eslint-disable-line react-hooks/exhaustive-deps
+  ], [data, keys.hosts, keys.overview, keys.health, keys.devtools, keys.local, keys.finder, keys.browser, keys.notes, keys.board, keys.claude, keys.chatgpt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Browser favorites and pinned tabs (each opens in its own space), then pages from history, newest of each address. */
   const webRows: Row[] = useMemo(() => {

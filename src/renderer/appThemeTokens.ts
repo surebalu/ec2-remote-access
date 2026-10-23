@@ -16,6 +16,10 @@ export interface AppTheme {
 
 /** The accent of each theme: the colour the theme itself uses for focus and links. */
 export const ACCENTS: [id: string, accent: string][] = [
+  ['midnight', '#9aaeff'],
+  ['aurora', '#79d9ba'],
+  ['ember', '#f3b58a'],
+  ['porcelain', '#5365a0'],
   ['cyber-wave', '#c26ad6'],
   ['dracula', '#bd93f9'],
   ['tokyo-night', '#7aa2f7'],

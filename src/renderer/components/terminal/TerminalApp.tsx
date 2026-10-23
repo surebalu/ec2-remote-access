@@ -1,6 +1,8 @@
 import type { DragEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccentColor, TermTabState, TerminalState } from '@shared/types'
+import { captureTerminal, restoreTerminal } from '@shared/workspaces'
+import { registerWorkspaceContext } from '../../workspaceContext'
 import { folderName, tildify } from '@shared/termIntegration'
 import { useStore, type Tab } from '../../store'
 import { isMobile } from '../../mobile'
@@ -52,7 +54,7 @@ function freshTab(opts: { profile?: string; color?: AccentColor } = {}): TermTab
   return { id: newId('t'), root: { type: 'pane', id: pane }, activePane: pane, ...opts }
 }
 
-function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
+function Terminals({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const settings = useStore((s) => s.settings)
   const profiles = useStore((s) => s.profiles)
   const request = useStore((s) => s.terminalRequest)
@@ -81,6 +83,7 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
   const handled = useRef<number | null>(null)
   const stRef = useRef(st)
   stRef.current = st
+  useEffect(() => registerWorkspaceContext('local', () => stRef.current ? { id: tab.id, kind: 'local', terminal: captureTerminal(stRef.current) } : null), [tab.id])
 
   useEffect(() => {
     window.api.invoke('local:home').then(setHome, () => undefined)
@@ -225,6 +228,12 @@ function Terminals({ active }: { tab: Tab; active: boolean }): ReactElement {
   useEffect(() => {
     if (!st || !request || handled.current === request.nonce) return
     handled.current = request.nonce
+    useStore.getState().set({ terminalRequest: null })
+    if (request.workspace) {
+      const { id, terminal } = request.workspace
+      update((current) => restoreTerminal(current, terminal, id, () => newId('w')))
+      return
+    }
     if (request.profile || request.cwd || request.newTab) openTab({ profile: request.profile, cwd: request.cwd })
   }, [request, !!st]) // eslint-disable-line react-hooks/exhaustive-deps
 
