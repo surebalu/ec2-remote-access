@@ -41,7 +41,7 @@ A shared module that imports a sibling at runtime writes the `.ts` extension (`i
 - `ssh2` is unpacked from asar (`asarUnpack` in `electron-builder.config.cjs`) and its optional native `cpu-features` build is disabled in `pnpm-workspace.yaml`. Keep it that way; `npmRebuild` is off.
 - Path aliases: `@shared/*` → `src/shared/*` (all three entries), `@/*` → `src/renderer/*` (renderer only). Both tsconfigs mirror these.
 - TypeScript 7 with `moduleResolution: Bundler`. `tsconfig.node.json` covers main + preload + shared + the vite config; `tsconfig.web.json` covers renderer + shared + `src/preload/index.d.ts`.
-- Signing/notarization/auto-update switch on purely from env vars (`CSC_LINK`, `APPLE_ID`, `APPLE_TEAM_ID`, `UPDATE_URL`); with none set, `build/afterSign.cjs` ad-hoc signs and the updater stays inert.
+- Signing/notarization/auto-update switch on purely from env vars (`CSC_LINK`, `APPLE_ID`, `APPLE_TEAM_ID`, `UPDATE_URL`); with none set, `build/afterSign.cjs` signs with the keychain's one "Apple Development" certificate (else ad-hoc; `LOCAL_SIGN_IDENTITY` overrides), so every local build has the same designated requirement and macOS keeps its Keychain and Automation grants across updates (an ad-hoc signature changed with each build and the app sat at start-up behind a Keychain prompt), and the updater stays inert.
 
 ## Architecture
 
