@@ -291,3 +291,15 @@ img.link-icon { width: 24px; height: 24px; }
   .task-edit input[type='date'], .task-edit input[type='time'], .cal-edit input[type='date'], .cal-edit input[type='time'] { display: block; width: 100%; min-width: 0; -webkit-appearance: none; appearance: none; line-height: 26px; text-align: left; }
   .task-edit input[type='date']::-webkit-date-and-time-value, .task-edit input[type='time']::-webkit-date-and-time-value, .cal-edit input::-webkit-date-and-time-value { text-align: left; }
 }
+
+/* A folder inside the one on screen, as Finder lists it: first, in the accent colour, opened by a double-click (or ↵,
+   ⌘↓, or its arrow); the path bar before the title goes back up (⌘↑ goes up one). */
+.link-icon.folder { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.link-icon.folder svg { width: 14px; height: 14px; }
+.link-folder .link-title { font-weight: 650; }
+.link-folder .link-go { opacity: .7; }
+.links-crumbs { display: flex; flex-shrink: 1; align-items: center; min-width: 0; overflow: hidden; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.links-crumbs > span { display: inline-flex; align-items: center; gap: 1px; min-width: 0; }
+.links-crumbs button { overflow: hidden; padding: 2px 5px; border-radius: 6px; color: var(--muted); font-weight: 600; text-overflow: ellipsis; }
+.links-crumbs button:hover { background: var(--panel-2); color: var(--text); }
+.links-crumbs svg { flex-shrink: 0; width: 11px; height: 11px; }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from 'react'
-import { allLinkTags, asUrl, domainOf, extOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderAndBelow, folderPath, folderTree, hasTag, tagTree, parseLinksFile, planImport, searchLinks, sizeLabel, sortLinks, viewLinks, type ImportPlan, type LinkFolder, type LinkItem, type LinkSort, type LinkView, type ParsedLink } from '@shared/links'
+import { allLinkTags, asUrl, domainOf, extOf, exportLinksCsv, folderChain, folderContents, exportLinksHtml, exportLinksJson, folderAndBelow, folderPath, folderTree, hasTag, tagTree, parseLinksFile, planImport, searchLinks, sizeLabel, sortLinks, viewLinks, type ImportPlan, type LinkFolder, type LinkItem, type LinkSort, type LinkView, type ParsedLink } from '@shared/links'
 import { relativeDay, ymd } from '@shared/naturalDate'
 import { itemsOf, puts, type RecordOp } from '@shared/records'
 import { hasBrowser } from '../../quickConnect'
@@ -123,7 +123,20 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
   }, [request?.nonce, doc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A search looks through everything; otherwise the view, sorted.
-  const list = useMemo(() => (query.trim() ? searchLinks(links.filter((l) => !l.archived), query, folderById) : sortLinks(viewLinks(view, links, folders), sort)), [query, links, folders, folderById, view, sort])
+  // A folder shows what Finder shows: its subfolders first, then only what is directly in it. A search looks through
+  // everything; any other view is its whole list.
+  const inFolder = useMemo(() => (folder && !query.trim() ? folderContents(folder.id, links, folders) : null), [folder, query, links, folders])
+  const subfolders = inFolder?.folders ?? []
+  const list = useMemo(() => (query.trim() ? searchLinks(links.filter((l) => !l.archived), query, folderById) : sortLinks(inFolder ? inFolder.items : viewLinks(view, links, folders), sort)), [query, links, folders, folderById, view, sort, inFolder])
+  /** The rows in order, folders as `folder:<id>`, for the arrow keys. */
+  const rowKeys = useMemo(() => [...subfolders.map((f) => `folder:${f.id}`), ...list.map((l) => l.id)], [subfolders, list])
+  const openFolder = (id: string): void => { setQuery(''); setView(`folder:${id}`); setSelected(null) }
+  /** ⌘↑: the folder above, or All Links from a top folder. */
+  const goUp = (): void => {
+    if (!folder) return
+    if (folder.parentId && folderById.has(folder.parentId)) { const from = folder.id; openFolder(folder.parentId); setSelected(`folder:${from}`) }
+    else { setView('all'); setSelected(null) }
+  }
   const current = selected ? links.find((l) => l.id === selected) : undefined
   const icons = useFileIcons(useMemo(() => list.filter((l) => l.kind === 'file' && l.path).map((l) => l.path!), [list]))
 
@@ -217,10 +230,16 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
   }, [active])
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => undefined)
   keyRef.current = (e: KeyboardEvent): void => {
-    if (typing(e) || e.metaKey || e.ctrlKey || e.altKey || pending || document.querySelector('.modal-backdrop')) return
-    const at = list.findIndex((l) => l.id === selected)
+    if (typing(e) || e.ctrlKey || e.altKey || pending || document.querySelector('.modal-backdrop')) return
     const k = e.key.toLowerCase()
-    if (k === '/') { e.preventDefault(); searchRef.current?.focus() } else if (k === 'arrowdown' || k === 'j') { e.preventDefault(); setSelected(list[Math.min(list.length - 1, at + 1)]?.id ?? null) } else if (k === 'arrowup' || k === 'k') { e.preventDefault(); setSelected(list[Math.max(0, at - 1)]?.id ?? list[0]?.id ?? null) } else if (k === 'enter' && current) { e.preventDefault(); open(current) } else if ((k === 'backspace' || k === 'delete') && current) { e.preventDefault(); remove([current]) } else if (k === 'escape') { setSelected(null); setQuery('') }
+    const selFolder = selected?.startsWith('folder:') ? selected.slice(7) : null
+    // Finder's keys: ⌘↑ to the folder above, ⌘↓ (or ↵) opens the selected folder or item.
+    if (e.metaKey) {
+      if (k === 'arrowup' && folder) { e.preventDefault(); goUp() } else if (k === 'arrowdown' && (selFolder || current)) { e.preventDefault(); if (selFolder) openFolder(selFolder); else if (current) open(current) }
+      return
+    }
+    const at = rowKeys.indexOf(selected ?? '')
+    if (k === '/') { e.preventDefault(); searchRef.current?.focus() } else if (k === 'arrowdown' || k === 'j') { e.preventDefault(); setSelected(rowKeys[Math.min(rowKeys.length - 1, at + 1)] ?? null) } else if (k === 'arrowup' || k === 'k') { e.preventDefault(); setSelected(rowKeys[Math.max(0, at - 1)] ?? rowKeys[0] ?? null) } else if (k === 'enter' && selFolder) { e.preventDefault(); openFolder(selFolder) } else if (k === 'enter' && current) { e.preventDefault(); open(current) } else if ((k === 'backspace' || k === 'delete') && current) { e.preventDefault(); remove([current]) } else if (k === 'escape') { setSelected(null); setQuery('') }
   }
   useEffect(() => {
     if (!active) return
@@ -294,8 +313,15 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
 
         <div className="plan-main" onDragOver={(e) => { if ([...e.dataTransfer.types].some((t) => t === 'text/uri-list' || t === 'text/plain')) e.preventDefault() }} onDrop={onDrop}>
           <header className="plan-head links-head">
+            {folder && !query.trim() && folderChain(folder.parentId, folderById).length > 0 && (
+              <nav className="links-crumbs" aria-label="Folder path">
+                {folderChain(folder.parentId, folderById).map((f) => (
+                  <span key={f.id}><button type="button" onClick={() => openFolder(f.id)} title={`Go to ${f.name} (⌘↑ goes up one)`}>{f.name}</button><Icon.chevron /></span>
+                ))}
+              </nav>
+            )}
             <h1>{title}</h1>
-            <span className="plan-sub">{list.length} {list.length === 1 ? 'item' : 'items'}</span>
+            <span className="plan-sub">{subfolders.length > 0 && `${subfolders.length} ${subfolders.length === 1 ? 'folder' : 'folders'} · `}{list.length} {list.length === 1 ? 'item' : 'items'}</span>
             <span className="flex-1" />
             <label className="links-search">
               <Icon.search />
@@ -342,7 +368,24 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
                   <p className="muted">Or paste a link with <kbd>⌘N</kbd>, or drop one here.</p>
                 </div>
               )}
-              {doc && links.length > 0 && !list.length && <div className="plan-empty">{query ? `Nothing matches “${query}”.` : 'Nothing here.'}</div>}
+              {doc && links.length > 0 && !list.length && !subfolders.length && <div className="plan-empty">{query ? `Nothing matches “${query}”.` : 'Nothing here.'}</div>}
+              {subfolders.map((f) => {
+                const inside = folderContents(f.id, links, folders)
+                const all = counts[`folder:${f.id}`] ?? 0
+                return (
+                  <div key={f.id} className={`link-row link-folder ${selected === `folder:${f.id}` ? 'selected' : ''}`} data-folder={f.id} title="Double-click to open"
+                    onClick={() => setSelected(`folder:${f.id}`)} onDoubleClick={() => openFolder(f.id)}
+                    onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'folder', anchor: e.currentTarget, folder: f }) }}>
+                    <span className="link-icon folder" aria-hidden="true"><Icon.folder /></span>
+                    <div className="link-body">
+                      <div className="link-title">{f.name}</div>
+                      <div className="link-meta"><span className="link-domain">{[inside.folders.length ? `${inside.folders.length} ${inside.folders.length === 1 ? 'folder' : 'folders'}` : '', `${inside.items.length} ${inside.items.length === 1 ? 'item' : 'items'}`, all > inside.items.length ? `${all} with its folders` : ''].filter(Boolean).join(' · ')}</span></div>
+                    </div>
+                    <span className="link-date" />
+                    <button type="button" className="link-go" aria-label={`Open ${f.name}`} title="Open the folder" onClick={(e) => { e.stopPropagation(); openFolder(f.id) }}><Icon.chevron /></button>
+                  </div>
+                )
+              })}
               {list.map((l) => (
                 <div key={l.id} className={`link-row ${selected === l.id ? 'selected' : ''}`} onClick={() => setSelected(l.id)} onDoubleClick={() => open(l)} data-link={l.id}>
                   <ItemIcon link={l} icons={icons} />
@@ -360,7 +403,8 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
                   </div>
                   <span className="link-date">{relativeDay(ymd(new Date(l.addedAt)), today)}</span>
                   <button type="button" className={`link-star ${l.starred ? 'on' : ''}`} aria-label={l.starred ? 'Unstar' : 'Star'} aria-pressed={!!l.starred} onClick={(e) => { e.stopPropagation(); save(l, { starred: l.starred ? undefined : true }) }}><Icon.star /></button>
-                  {(l.url || l.path) && <button type="button" className="link-go" aria-label={`Open ${l.title}`} title={hasBrowser() ? 'Open in the Browser (⌘-click: your default browser)' : 'Open'} onClick={(e) => { e.stopPropagation(); open(l, e.metaKey) }}><Icon.external /></button>}
+                  {/* A note has nothing to open, but keeps the slot so every row's date and star line up. */}
+                  {l.url || l.path ? <button type="button" className="link-go" aria-label={`Open ${l.title}`} title={hasBrowser() ? 'Open in the Browser (⌘-click: your default browser)' : 'Open'} onClick={(e) => { e.stopPropagation(); open(l, e.metaKey) }}><Icon.external /></button> : <span className="link-go" aria-hidden="true" />}
                 </div>
               ))}
             </div>
