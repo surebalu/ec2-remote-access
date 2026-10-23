@@ -32,6 +32,9 @@ import { cancelServiceJob, serviceHistory, serviceJob, serviceJobs, serviceLogs,
 import { findBinary } from './util'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
+import { applyRecords, loadRecords } from './records'
+import { readAnybox } from './anybox'
+import { calendarFeed, linkPreview } from './webFetch'
 import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } from './plmHealth'
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
@@ -91,6 +94,11 @@ export const handlers: Handlers = {
   'boards:load': async (id) => loadBoard(id),
   'boards:save': (board) => saveBoard(board),
   'boards:delete': (id) => deleteBoard(id),
+  'records:load': async (kind) => loadRecords(kind),
+  'records:apply': (kind, ops) => applyRecords(kind, ops),
+  'links:anybox': () => readAnybox(),
+  'links:preview': (url) => linkPreview(url),
+  'calendar:feed': (url) => calendarFeed(url),
   'shell:open': async (url) => {
     if (/^https?:\/\//.test(url)) await host().openExternal(url)
   },

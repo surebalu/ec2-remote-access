@@ -302,7 +302,7 @@ export type WorkspaceTool = { id: string } & (
   | { kind: 'browser'; browser: WorkspaceBrowser }
   | { kind: 'notes'; path?: string }
   | { kind: 'finder'; path?: string }
-  | { kind: 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' }
+  | { kind: 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' }
 )
 
 /** EC2 status checks, recent CPU and SSM check-in for the host details panel. */

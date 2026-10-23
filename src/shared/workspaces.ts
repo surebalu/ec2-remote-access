@@ -7,7 +7,7 @@ export function workspaceSummary(w: Workspace): string {
   for (const t of w.tools ?? []) {
     if (t.kind === 'local') parts.push(`${t.terminal.tabs.length} terminal ${t.terminal.tabs.length === 1 ? 'tab' : 'tabs'}`)
     else if (t.kind === 'browser') parts.push(`${t.browser.tabs.length} browser ${t.browser.tabs.length === 1 ? 'page' : 'pages'}`)
-    else parts.push(({ notes: 'Notes', finder: 'Finder', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools' })[t.kind])
+    else parts.push(({ notes: 'Notes', finder: 'Finder', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links' })[t.kind])
   }
   return parts.join(' · ') || 'Empty workspace'
 }

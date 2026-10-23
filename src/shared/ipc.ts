@@ -1,4 +1,6 @@
 import type { ExtensionInfo } from './extensions'
+import type { AnyboxLibrary } from './links'
+import type { RecordDoc, RecordKind, RecordOp } from './records'
 import type { DbAudit, DbKillRequest, DbTarget, LockReport } from './dbLocks'
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
@@ -132,6 +134,15 @@ export interface IpcApi {
   'boards:load': (id: string) => Promise<Board | null>
   'boards:save': (board: Board) => Promise<void>
   'boards:delete': (id: string) => Promise<void>
+  /** Tasks, Calendar and Links (src/shared/records.ts): a tool's whole document, and changes to it (the new revision). */
+  'records:load': (kind: RecordKind) => Promise<RecordDoc>
+  'records:apply': (kind: RecordKind, ops: RecordOp[]) => Promise<number>
+  /** Anybox's library on this Mac, for Links to import. */
+  'links:anybox': () => Promise<AnyboxLibrary>
+  /** A page's title and description, for a link added by its address. */
+  'links:preview': (url: string) => Promise<{ title?: string; description?: string }>
+  /** An iCal subscription's .ics text (webcal:// works too). */
+  'calendar:feed': (url: string) => Promise<string>
   /** Saves a PNG (data: URL) into the notes folder (EC2 Remote/Boards) and returns its path there, for ![[embeds]]. */
   'notes:saveImage': (name: string, dataUrl: string) => Promise<string>
   /** Opens a note in the Obsidian app. */
@@ -290,6 +301,8 @@ export interface IpcEvents {
   'sftp:transfer': SftpTransfer
   'sftp:event': SftpEvent
   'tunnels:changed': Tunnel[]
+  /** A Tasks, Calendar or Links document changed (from any device): reload it if this revision is newer. */
+  'records:changed': { kind: RecordKind; rev: number }
   'profiles:status': ProfileStatus
   'instances:updated': Instance[]
   'phone:changed': PhoneAccessStatus

@@ -173,10 +173,13 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
 }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  devtools: Icon.code, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_HINTS: Record<RailSection, string> = {
   devtools: 'Local JSON, encoding, tokens, timestamps and hashes.',
+  tasks: 'Today, upcoming and someday to-dos, with projects and tags.',
+  calendar: 'Month, week and day, with your tasks and subscribed calendars.',
+  links: 'Bookmarks and notes in folders and tags, imported from Anybox.',
   hosts: 'Every account’s hosts. ⌘1 always shows them too (Hosts is the first tab).',
   overview: 'Every open session on one page.',
   health: 'The 3DEXPERIENCE platform at a glance.',
