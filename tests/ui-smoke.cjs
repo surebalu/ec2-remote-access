@@ -707,6 +707,14 @@ app.whenReady().then(async () => {
     await click('Week')
     await until(`[...document.querySelectorAll('.cal-block')].some((b) => b.textContent.includes('Lunch with Sam') && b.textContent.includes('12:30 PM – 1:30 PM'))`)
     await screenshot('calendar-week.png')
+    // A phone or a narrow pane spans three days for "week": seven columns would be too thin to read. The heading
+    // follows the days actually shown, so it has to name the first and the last of them.
+    win.setSize(560, 900)
+    await until(`document.querySelector('.plan.calendar .plan-main').clientWidth < 600 && document.querySelectorAll('.plan.calendar .cal-time-day').length === 3`)
+    await until(`(() => { const d = [...document.querySelectorAll('.plan.calendar .cal-time-day b')].map((b) => b.textContent); const h = document.querySelector('.plan.calendar .plan-head h1').textContent; return h.includes(d[0]) && h.includes(d[2]) })()`)
+    await screenshot('calendar-week-narrow.png')
+    win.setSize(1400, 900)
+    await until(`document.querySelectorAll('.plan.calendar .cal-time-day').length === 7`)
     await js(`[...document.querySelectorAll('.cal-block')].find((b) => b.textContent.includes('Lunch')).click()`)
     await until(`document.querySelector('.cal-edit-title')?.value === 'Lunch with Sam'`)
     await js(`(() => { const el = document.querySelector('.cal-edit input[aria-label="Location"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'Cafe'); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)

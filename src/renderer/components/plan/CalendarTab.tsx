@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type RefObject } from 'react'
-import { CALENDAR_COLORS, layoutDay, monthDays, occurrences, parseEventInput, weekDays, type CalEvent, type CalendarList, type Occurrence } from '@shared/calendar'
+import { CALENDAR_COLORS, layoutDay, monthDays, occurrences, parseEventInput, weekSpan, type CalEvent, type CalendarList, type Occurrence } from '@shared/calendar'
 import { parseIcs, toIcs } from '@shared/ics'
 import { addDays, addMonths, dayName, daysBetween, fromMinutes, fromYmd, monthName, relativeDay, repeatLabel, timeLabel, toMinutes, ymd, type Repeat } from '@shared/naturalDate'
 import { itemsOf, putOp, puts, type RecordOp } from '@shared/records'
@@ -17,10 +17,17 @@ import './plan.css'
  * read on the fly (calendar:feed; Google Calendar's secret address, iCloud's public link), and the dated tasks from
  * Tasks. Quick add reads "Lunch with Sam fri 12:30"; .ics files import into a calendar of their own and export back.
  * Keys while it is in front and nothing is typed: T today, ← → move, D W M A for the views, N new event (⌘N anywhere).
+ * On a phone or a narrow pane "week" spans three days instead of seven, and ← → step by three to match (NARROW).
  */
 
 type View = 'day' | 'week' | 'month' | 'agenda'
 const HOUR = 44
+/**
+ * Under this many pixels the main column shows three days for "week" instead of seven (weekSpan). It is the column
+ * that is measured, not the whole section: a 214 px sidebar beside a 650 px pane leaves less room than a stacked
+ * 620 px one. 600 keeps each of the seven columns over 70 px wide once the time gutter and margins are taken off.
+ */
+const NARROW = 600
 const REPEATS: { id: string; label: string; repeat?: Repeat }[] = [
   { id: '', label: 'Does not repeat' },
   { id: 'daily', label: 'Every day', repeat: { freq: 'daily', interval: 1 } },
@@ -68,6 +75,17 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
   const [feedTick, setFeedTick] = useState(0)
   const [subscribing, setSubscribing] = useState(false)
   const addRef = useRef<HTMLInputElement>(null)
+  // A phone (or a narrow pane) shows three days for "week": seven columns would be too thin to read.
+  const mainRef = useRef<HTMLDivElement>(null)
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) return
+    // A tab in the back is display:none and measures 0: keep the layout it had rather than flipping on every switch.
+    const ro = new ResizeObserver(([e]) => { const w = e.contentRect.width; if (w > 0) setNarrow(w < NARROW) })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const calendars = useMemo(() => (doc ? itemsOf<CalendarList>(doc, 'calendar').sort((a, b) => a.order - b.order) : []), [doc])
   const calById = useMemo(() => new Map(calendars.map((c) => [c.id, c])), [calendars])
@@ -100,10 +118,10 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
 
   const range = useMemo((): [string, string] => {
     if (view === 'month') { const d = monthDays(cursor); return [d[0], d[41]] }
-    if (view === 'week') { const d = weekDays(cursor); return [d[0], d[6]] }
+    if (view === 'week') { const d = weekSpan(cursor, narrow); return [d[0], d[d.length - 1]] }
     if (view === 'day') return [cursor, cursor]
     return [cursor, addDays(cursor, 59)]
-  }, [view, cursor])
+  }, [view, cursor, narrow])
 
   const items = useMemo((): Item[] => {
     void feedTick
@@ -167,7 +185,8 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
   }
   const toggleTask = (t: Task): void => void applyRecords('tasks', puts(t.doneAt ? [{ ...t, doneAt: undefined }] : completeTask(t, Date.now(), today, newId)))
 
-  const step = (dir: 1 | -1): void => setCursor((c) => (view === 'month' ? addMonths(c, dir) : view === 'week' ? addDays(c, 7 * dir) : view === 'day' ? addDays(c, dir) : addDays(c, 30 * dir)))
+  // Week steps by the length of the span it shows, so three days at a time on a phone and seven on a desk.
+  const step = (dir: 1 | -1): void => setCursor((c) => (view === 'month' ? addMonths(c, dir) : view === 'week' ? addDays(c, weekSpan(c, narrow).length * dir) : view === 'day' ? addDays(c, dir) : addDays(c, 30 * dir)))
 
   // Keys.
   useEffect(() => {
@@ -226,52 +245,54 @@ export default function CalendarTab({ active }: { tab: Tab; active: boolean }): 
   }
 
   const title = view === 'month' || view === 'agenda' ? monthTitle(cursor) : view === 'week'
-    ? (() => { const d = weekDays(cursor); const a = fromYmd(d[0]); const b = fromYmd(d[6]); return a.getMonth() === b.getMonth() ? `${monthName(a.getMonth())} ${a.getDate()}–${b.getDate()}, ${b.getFullYear()}` : `${monthName(a.getMonth(), true)} ${a.getDate()} – ${monthName(b.getMonth(), true)} ${b.getDate()}, ${b.getFullYear()}` })()
+    ? (() => { const d = weekSpan(cursor, narrow); const a = fromYmd(d[0]); const b = fromYmd(d[d.length - 1]); return a.getMonth() === b.getMonth() ? `${monthName(a.getMonth())} ${a.getDate()}–${b.getDate()}, ${b.getFullYear()}` : `${monthName(a.getMonth(), true)} ${a.getDate()} – ${monthName(b.getMonth(), true)} ${b.getDate()}, ${b.getFullYear()}` })()
     : `${dayName(cursor)}, ${monthName(fromYmd(cursor).getMonth())} ${fromYmd(cursor).getDate()}`
 
   return (
     <section className="plan calendar" aria-label="Calendar">
-      <aside className="plan-side" aria-label="Calendars">
-        <MiniMonth cursor={cursor} today={today} busy={byDay} onPick={setCursor} />
-        <h4>Calendars<button type="button" className="plan-add" aria-label="New calendar" title="New calendar" onClick={() => {
-          const name = window.prompt('Name of the new calendar')?.trim()
-          if (name) void applyRecords('calendar', puts([{ id: newId(), type: 'calendar', name, color: CALENDAR_COLORS[calendars.length % CALENDAR_COLORS.length], order: calendars.length + 1, updatedAt: Date.now() } as CalendarList]))
-        }}><Icon.plus /></button></h4>
-        {calendars.map((c) => (
-          <CalendarRow key={c.id} cal={c} feed={feeds.get(c.id)} onChange={(next) => void applyRecords('calendar', puts([next]))} onExport={() => exportIcs(c)}
-            onRefresh={() => window.dispatchEvent(new Event('ec2ra:calendar-refresh'))}
-            onDelete={() => {
-              const own = events.filter((e) => e.calendarId === c.id)
-              if (!window.confirm(`Delete the calendar “${c.name}”${own.length ? ` and its ${own.length} event${own.length === 1 ? '' : 's'}` : ''}?`)) return
-              void applyRecords('calendar', [...own.map((e) => ({ op: 'delete' as const, id: e.id })), { op: 'delete', id: c.id }])
-              setUndo({ label: `Deleted “${c.name}”`, key: Date.now(), ops: puts([c, ...own]) })
-            }} />
-        ))}
-        {!calendars.length && <p className="plan-side-hint">Add an event and a “Personal” calendar is made for it.</p>}
-        <label className="cal-toggle"><input type="checkbox" checked={showTasks === 'on'} onChange={(e) => setShowTasks(e.target.checked ? 'on' : 'off')} />Show tasks</label>
-        <h4>Import and subscribe</h4>
-        <button type="button" className="plan-nav" onClick={() => setSubscribing(true)}><Icon.globe />Subscribe to a calendar…</button>
-        <button type="button" className="plan-nav" onClick={() => void importIcs()}><Icon.download />Import .ics file…</button>
-        <button type="button" className="plan-nav" onClick={() => exportIcs()}><Icon.share />Export all (.ics)</button>
-      </aside>
+      <div className="plan-frame">
+        <aside className="plan-side" aria-label="Calendars">
+          <MiniMonth cursor={cursor} today={today} busy={byDay} onPick={setCursor} />
+          <h4>Calendars<button type="button" className="plan-add" aria-label="New calendar" title="New calendar" onClick={() => {
+            const name = window.prompt('Name of the new calendar')?.trim()
+            if (name) void applyRecords('calendar', puts([{ id: newId(), type: 'calendar', name, color: CALENDAR_COLORS[calendars.length % CALENDAR_COLORS.length], order: calendars.length + 1, updatedAt: Date.now() } as CalendarList]))
+          }}><Icon.plus /></button></h4>
+          {calendars.map((c) => (
+            <CalendarRow key={c.id} cal={c} feed={feeds.get(c.id)} onChange={(next) => void applyRecords('calendar', puts([next]))} onExport={() => exportIcs(c)}
+              onRefresh={() => window.dispatchEvent(new Event('ec2ra:calendar-refresh'))}
+              onDelete={() => {
+                const own = events.filter((e) => e.calendarId === c.id)
+                if (!window.confirm(`Delete the calendar “${c.name}”${own.length ? ` and its ${own.length} event${own.length === 1 ? '' : 's'}` : ''}?`)) return
+                void applyRecords('calendar', [...own.map((e) => ({ op: 'delete' as const, id: e.id })), { op: 'delete', id: c.id }])
+                setUndo({ label: `Deleted “${c.name}”`, key: Date.now(), ops: puts([c, ...own]) })
+              }} />
+          ))}
+          {!calendars.length && <p className="plan-side-hint">Add an event and a “Personal” calendar is made for it.</p>}
+          <label className="cal-toggle"><input type="checkbox" checked={showTasks === 'on'} onChange={(e) => setShowTasks(e.target.checked ? 'on' : 'off')} />Show tasks</label>
+          <h4>Import and subscribe</h4>
+          <button type="button" className="plan-nav" onClick={() => setSubscribing(true)}><Icon.globe />Subscribe to a calendar…</button>
+          <button type="button" className="plan-nav" onClick={() => void importIcs()}><Icon.download />Import .ics file…</button>
+          <button type="button" className="plan-nav" onClick={() => exportIcs()}><Icon.share />Export all (.ics)</button>
+        </aside>
 
-      <div className="plan-main">
-        <header className="plan-head cal-head">
-          <h1>{title}</h1>
-          <span className="flex-1" />
-          <button type="button" className="btn btn-sm" onClick={() => setCursor(today)} title="Today (T)">Today</button>
-          <button type="button" className="btn btn-sm btn-icon" aria-label="Previous" title="Previous (←)" onClick={() => step(-1)}><Icon.back /></button>
-          <button type="button" className="btn btn-sm btn-icon" aria-label="Next" title="Next (→)" onClick={() => step(1)}><Icon.forward /></button>
-          <span className="plan-segment" role="radiogroup" aria-label="View">
-            {(['day', 'week', 'month', 'agenda'] as View[]).map((v) => <button key={v} type="button" role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={`${v[0].toUpperCase()}${v.slice(1)} (${v[0].toUpperCase()})`}>{v[0].toUpperCase() + v.slice(1)}</button>)}
-          </span>
-        </header>
-        <QuickAdd inputRef={addRef} onAdd={quickAdd} />
-        {error && <div className="plan-error cal-error"><Icon.alert />{error}</div>}
-        {view === 'month' && <MonthView cursor={cursor} today={today} byDay={byDay} onDay={(d) => { setCursor(d); setView('day') }} onNew={(d) => newEvent(d)} onOpen={openItem} onToggle={toggleTask} />}
-        {(view === 'week' || view === 'day') && <TimeView days={view === 'week' ? weekDays(cursor) : [cursor]} today={today} byDay={byDay} onNew={newEvent} onOpen={openItem} onToggle={toggleTask} onDay={(d) => { setCursor(d); setView('day') }} />}
-        {view === 'agenda' && <AgendaView from={cursor} today={today} byDay={byDay} onOpen={openItem} onToggle={toggleTask} />}
-        <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('calendar', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
+        <div className="plan-main" ref={mainRef}>
+          <header className="plan-head cal-head">
+            <h1>{title}</h1>
+            <span className="flex-1" />
+            <button type="button" className="btn btn-sm" onClick={() => setCursor(today)} title="Today (T)">Today</button>
+            <button type="button" className="btn btn-sm btn-icon" aria-label="Previous" title="Previous (←)" onClick={() => step(-1)}><Icon.back /></button>
+            <button type="button" className="btn btn-sm btn-icon" aria-label="Next" title="Next (→)" onClick={() => step(1)}><Icon.forward /></button>
+            <span className="plan-segment" role="radiogroup" aria-label="View">
+              {(['day', 'week', 'month', 'agenda'] as View[]).map((v) => <button key={v} type="button" role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={`${v[0].toUpperCase()}${v.slice(1)} (${v[0].toUpperCase()})`}>{v[0].toUpperCase() + v.slice(1)}</button>)}
+            </span>
+          </header>
+          <QuickAdd inputRef={addRef} onAdd={quickAdd} />
+          {error && <div className="plan-error cal-error"><Icon.alert />{error}</div>}
+          {view === 'month' && <MonthView cursor={cursor} today={today} byDay={byDay} onDay={(d) => { setCursor(d); setView('day') }} onNew={(d) => newEvent(d)} onOpen={openItem} onToggle={toggleTask} />}
+          {(view === 'week' || view === 'day') && <TimeView days={view === 'week' ? weekSpan(cursor, narrow) : [cursor]} today={today} byDay={byDay} onNew={newEvent} onOpen={openItem} onToggle={toggleTask} onDay={(d) => { setCursor(d); setView('day') }} />}
+          {view === 'agenda' && <AgendaView from={cursor} today={today} byDay={byDay} onOpen={openItem} onToggle={toggleTask} />}
+          <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('calendar', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
+        </div>
       </div>
 
       {editing && <EventEditor event={editing.event} isNew={editing.isNew} calendars={calendars} readOnly={!!calById.get(editing.event.calendarId)?.url}

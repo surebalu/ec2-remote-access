@@ -579,7 +579,7 @@ html[data-keyboard] .m-keybar { padding-bottom: 6px; }
 
 /* Bottom sheets and dialogs */
 /* Pinned to the visual viewport like .m-app, so a sheet opened while the keyboard is up sits above it, not under it. */
-.m-sheet-backdrop { position: fixed; left: 0; right: 0; top: var(--vv-top, 0); height: var(--vv-h, 100%); z-index: 60; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .42); backdrop-filter: none; }
+.m-sheet-backdrop { position: fixed; left: 0; right: 0; top: var(--vv-top, 0); height: var(--vv-h, 100%); z-index: 60; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .42); backdrop-filter: none; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 html[data-keyboard] .m-sheet { padding-bottom: 10px; }
 .m-paste-input, .m-copy-text { display: block; width: 100%; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: var(--mono-font); line-height: 1.4; resize: none; outline: none; }
 .m-paste-input { height: 132px; }
@@ -613,7 +613,8 @@ html[data-mobile] textarea.m-copy-text { font-size: 12px !important; }
 .m-sheet-icon { display: inline-flex; width: 22px; justify-content: center; color: var(--accent); flex-shrink: 0; }
 .m-sheet-icon svg { width: 19px; height: 19px; }
 .m-sheet-cancel { width: 100%; height: 50px; margin-top: 8px; border-radius: 12px; background: var(--panel-2); color: var(--accent); font-size: 16px; font-weight: 600; }
-html[data-mobile] .modal-backdrop:not(.m-sheet-backdrop) { align-items: flex-end; }
+/* Side insets keep sheets clear of a cover screen's status column (iPhone Duo) and landscape notches. */
+html[data-mobile] .modal-backdrop:not(.m-sheet-backdrop) { align-items: flex-end; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 html[data-mobile] .modal-backdrop:not(.m-sheet-backdrop) > .modal { max-width: 100% !important; max-height: calc(var(--vv-h, 100vh) - env(safe-area-inset-top) - 12px) !important; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
 /* Dialog forms lay out as "label | control" grids; on a phone the label goes above its control. */
 html[data-mobile] .modal [class*="px_minmax(0,1fr)]"] { grid-template-columns: minmax(0, 1fr) !important; row-gap: 6px; }

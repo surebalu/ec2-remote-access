@@ -255,130 +255,132 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
 
   return (
     <section className="plan links" aria-label="Links">
-      <aside className="plan-side" aria-label="Link lists">
-        {VIEWS.map((v) => <NavItem key={v.id} icon={v.icon()} label={v.label} count={counts[v.id]} on={!query && view === v.id} onClick={() => { setQuery(''); setView(v.id) }} />)}
-        <h4>Folders
-          <span className="plan-head-actions">
-            {parents.size > 0 && <>
-              <button type="button" className="plan-add" aria-label="Expand all folders" title="Expand all" onClick={() => setOpenFolders([...parents])}><Icon.expandAll /></button>
-              <button type="button" className="plan-add" aria-label="Collapse all folders" title="Collapse all" onClick={() => setOpenFolders([])}><Icon.collapseAll /></button>
-            </>}
-            <button type="button" className="plan-add" aria-label="New folder" title="New folder" onClick={() => setNewFolder({})}><Icon.plus /></button>
-          </span>
-        </h4>
-        {shownFolders.map(({ folder: f, depth, open }) => (
-          <NavItem key={f.id} icon={<Icon.folder />} label={f.name} depth={depth} count={counts[`folder:${f.id}`]} on={!query && view === `folder:${f.id}`}
-            tree={{ open, hasChildren: parents.has(f.id), onToggle: () => toggleFolder(f.id) }}
-            onClick={() => { setQuery(''); setView(`folder:${f.id}`) }} onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'folder', anchor: e.currentTarget, folder: f }) }} />
-        ))}
-        {newFolder && (
-          <input className="input plan-side-input" autoFocus placeholder={newFolder.parentId ? `Inside ${folderById.get(newFolder.parentId)?.name ?? 'folder'}` : 'Folder name'} aria-label="New folder name"
-            onBlur={() => setNewFolder(null)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setNewFolder(null)
-              if (e.key !== 'Enter') return
-              const name = e.currentTarget.value.trim()
-              const parentId = newFolder.parentId
-              setNewFolder(null)
-              if (!name) return
-              const f: LinkFolder = { id: newId(), type: 'folder', name, order: folders.reduce((m, x) => Math.max(m, x.order), 0) + 1, updatedAt: Date.now(), ...(parentId ? { parentId } : {}) }
-              void applyRecords('links', puts([f]))
-              setView(`folder:${f.id}`)
-            }} />
-        )}
-        {!folders.length && !newFolder && <p className="plan-side-hint">Folders and tags come over when you import from Anybox.</p>}
-        {tags.length > 0 && (
-          <h4>Tags
-            {tagNodes.some((n) => n.hasChildren) && (
-              <span className="plan-head-actions">
-                <button type="button" className="plan-add" aria-label="Expand all tags" title="Expand all" onClick={() => setOpenTags(tagNodes.filter((n) => n.hasChildren).map((n) => n.path))}><Icon.expandAll /></button>
-                <button type="button" className="plan-add" aria-label="Collapse all tags" title="Collapse all" onClick={() => setOpenTags([])}><Icon.collapseAll /></button>
-              </span>
-            )}
+      <div className="plan-frame">
+        <aside className="plan-side" aria-label="Link lists">
+          {VIEWS.map((v) => <NavItem key={v.id} icon={v.icon()} label={v.label} count={counts[v.id]} on={!query && view === v.id} onClick={() => { setQuery(''); setView(v.id) }} />)}
+          <h4>Folders
+            <span className="plan-head-actions">
+              {parents.size > 0 && <>
+                <button type="button" className="plan-add" aria-label="Expand all folders" title="Expand all" onClick={() => setOpenFolders([...parents])}><Icon.expandAll /></button>
+                <button type="button" className="plan-add" aria-label="Collapse all folders" title="Collapse all" onClick={() => setOpenFolders([])}><Icon.collapseAll /></button>
+              </>}
+              <button type="button" className="plan-add" aria-label="New folder" title="New folder" onClick={() => setNewFolder({})}><Icon.plus /></button>
+            </span>
           </h4>
-        )}
-        {shownTags.map((n) => (
-          <NavItem key={n.path} icon={<span className="plan-hash">#</span>} label={n.name} title={n.path} depth={n.depth} count={links.filter((l) => !l.archived && hasTag(l, n.path)).length}
-            on={!query && view === `tag:${n.path}`} tree={{ open: n.open, hasChildren: n.hasChildren, onToggle: () => toggleTag(n.path) }}
-            onClick={() => { setQuery(''); setView(`tag:${n.path}`) }} />
-        ))}
-      </aside>
-
-      <div className="plan-main" onDragOver={(e) => { if ([...e.dataTransfer.types].some((t) => t === 'text/uri-list' || t === 'text/plain')) e.preventDefault() }} onDrop={onDrop}>
-        <header className="plan-head links-head">
-          <h1>{title}</h1>
-          <span className="plan-sub">{list.length} {list.length === 1 ? 'item' : 'items'}</span>
-          <span className="flex-1" />
-          <label className="links-search">
-            <Icon.search />
-            <input ref={searchRef} value={query} placeholder="Search links, notes, tags…" aria-label="Search links" onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => {
-              if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur() }
-              if (e.key === 'Enter' && list[0]) { e.preventDefault(); open(list[0], e.metaKey) }
-              if (e.key === 'ArrowDown') { e.preventDefault(); e.currentTarget.blur(); setSelected(list[0]?.id ?? null) }
-            }} />
-          </label>
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => { setAdding(true); setTimeout(() => addRef.current?.focus(), 0) }}><Icon.plus />Add</button>
-          <button type="button" className="btn btn-sm" onClick={(e) => setMenu({ kind: 'import', anchor: e.currentTarget })}><Icon.download />Import</button>
-          <button type="button" className="btn btn-sm" onClick={(e) => setMenu({ kind: 'export', anchor: e.currentTarget })} disabled={!links.length}><Icon.share />Export</button>
-        </header>
-        <div className="links-bar">
-          <span className="plan-segment" role="radiogroup" aria-label="Layout">
-            <button type="button" role="radio" aria-checked={layout === 'list'} className={layout === 'list' ? 'on' : ''} onClick={() => setLayout('list')} aria-label="List"><Icon.list /></button>
-            <button type="button" role="radio" aria-checked={layout === 'cards'} className={layout === 'cards' ? 'on' : ''} onClick={() => setLayout('cards')} aria-label="Cards"><Icon.grid /></button>
-          </span>
-          {!query && (
-            <select className="input links-sort" value={sort} aria-label="Sort" onChange={(e) => setSort(e.target.value as LinkSort)}>
-              <option value="added">Newest first</option><option value="opened">Recently opened</option><option value="title">Title</option><option value="domain">Website</option>
-            </select>
+          {shownFolders.map(({ folder: f, depth, open }) => (
+            <NavItem key={f.id} icon={<Icon.folder />} label={f.name} depth={depth} count={counts[`folder:${f.id}`]} on={!query && view === `folder:${f.id}`}
+              tree={{ open, hasChildren: parents.has(f.id), onToggle: () => toggleFolder(f.id) }}
+              onClick={() => { setQuery(''); setView(`folder:${f.id}`) }} onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'folder', anchor: e.currentTarget, folder: f }) }} />
+          ))}
+          {newFolder && (
+            <input className="input plan-side-input" autoFocus placeholder={newFolder.parentId ? `Inside ${folderById.get(newFolder.parentId)?.name ?? 'folder'}` : 'Folder name'} aria-label="New folder name"
+              onBlur={() => setNewFolder(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setNewFolder(null)
+                if (e.key !== 'Enter') return
+                const name = e.currentTarget.value.trim()
+                const parentId = newFolder.parentId
+                setNewFolder(null)
+                if (!name) return
+                const f: LinkFolder = { id: newId(), type: 'folder', name, order: folders.reduce((m, x) => Math.max(m, x.order), 0) + 1, updatedAt: Date.now(), ...(parentId ? { parentId } : {}) }
+                void applyRecords('links', puts([f]))
+                setView(`folder:${f.id}`)
+              }} />
           )}
-        </div>
-        {adding && (
-          <form className="tasks-add links-add" onSubmit={(e) => { e.preventDefault(); const v = addRef.current?.value ?? ''; if (addRef.current) addRef.current.value = ''; setAdding(false); void addText(v) }}>
-            <Icon.plus className="tasks-add-icon" />
-            <input ref={addRef} className="tasks-add-input" placeholder="Paste a link, or type a note's title" aria-label="New link or note" onBlur={(e) => { if (!e.currentTarget.value) setAdding(false) }}
-              onKeyDown={(e) => { if (e.key === 'Escape') setAdding(false) }} />
-          </form>
-        )}
-        <div className="links-body">
-          <div className={`plan-scroll links-list ${layout}`} onClick={(e) => { if (e.target === e.currentTarget) setSelected(null) }}>
-            {error && <div className="plan-error"><Icon.alert />{error}</div>}
-            {!doc && !error && <div className="plan-empty">Loading…</div>}
-            {doc && !links.length && (
-              <div className="plan-empty links-welcome">
-                <Icon.bookmark className="plan-empty-icon" />
-                <p>Your links will live here.</p>
-                <div className="links-welcome-actions">
-                  <button type="button" className="btn btn-primary" onClick={() => void importAnybox()}><Icon.download />Import from Anybox</button>
-                  <button type="button" className="btn" onClick={() => void importFile()}>Import a file…</button>
-                </div>
-                <p className="muted">Or paste a link with <kbd>⌘N</kbd>, or drop one here.</p>
-              </div>
+          {!folders.length && !newFolder && <p className="plan-side-hint">Folders and tags come over when you import from Anybox.</p>}
+          {tags.length > 0 && (
+            <h4>Tags
+              {tagNodes.some((n) => n.hasChildren) && (
+                <span className="plan-head-actions">
+                  <button type="button" className="plan-add" aria-label="Expand all tags" title="Expand all" onClick={() => setOpenTags(tagNodes.filter((n) => n.hasChildren).map((n) => n.path))}><Icon.expandAll /></button>
+                  <button type="button" className="plan-add" aria-label="Collapse all tags" title="Collapse all" onClick={() => setOpenTags([])}><Icon.collapseAll /></button>
+                </span>
+              )}
+            </h4>
+          )}
+          {shownTags.map((n) => (
+            <NavItem key={n.path} icon={<span className="plan-hash">#</span>} label={n.name} title={n.path} depth={n.depth} count={links.filter((l) => !l.archived && hasTag(l, n.path)).length}
+              on={!query && view === `tag:${n.path}`} tree={{ open: n.open, hasChildren: n.hasChildren, onToggle: () => toggleTag(n.path) }}
+              onClick={() => { setQuery(''); setView(`tag:${n.path}`) }} />
+          ))}
+        </aside>
+
+        <div className="plan-main" onDragOver={(e) => { if ([...e.dataTransfer.types].some((t) => t === 'text/uri-list' || t === 'text/plain')) e.preventDefault() }} onDrop={onDrop}>
+          <header className="plan-head links-head">
+            <h1>{title}</h1>
+            <span className="plan-sub">{list.length} {list.length === 1 ? 'item' : 'items'}</span>
+            <span className="flex-1" />
+            <label className="links-search">
+              <Icon.search />
+              <input ref={searchRef} value={query} placeholder="Search links, notes, tags…" aria-label="Search links" onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => {
+                if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur() }
+                if (e.key === 'Enter' && list[0]) { e.preventDefault(); open(list[0], e.metaKey) }
+                if (e.key === 'ArrowDown') { e.preventDefault(); e.currentTarget.blur(); setSelected(list[0]?.id ?? null) }
+              }} />
+            </label>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => { setAdding(true); setTimeout(() => addRef.current?.focus(), 0) }}><Icon.plus />Add</button>
+            <button type="button" className="btn btn-sm" onClick={(e) => setMenu({ kind: 'import', anchor: e.currentTarget })}><Icon.download />Import</button>
+            <button type="button" className="btn btn-sm" onClick={(e) => setMenu({ kind: 'export', anchor: e.currentTarget })} disabled={!links.length}><Icon.share />Export</button>
+          </header>
+          <div className="links-bar">
+            <span className="plan-segment" role="radiogroup" aria-label="Layout">
+              <button type="button" role="radio" aria-checked={layout === 'list'} className={layout === 'list' ? 'on' : ''} onClick={() => setLayout('list')} aria-label="List"><Icon.list /></button>
+              <button type="button" role="radio" aria-checked={layout === 'cards'} className={layout === 'cards' ? 'on' : ''} onClick={() => setLayout('cards')} aria-label="Cards"><Icon.grid /></button>
+            </span>
+            {!query && (
+              <select className="input links-sort" value={sort} aria-label="Sort" onChange={(e) => setSort(e.target.value as LinkSort)}>
+                <option value="added">Newest first</option><option value="opened">Recently opened</option><option value="title">Title</option><option value="domain">Website</option>
+              </select>
             )}
-            {doc && links.length > 0 && !list.length && <div className="plan-empty">{query ? `Nothing matches “${query}”.` : 'Nothing here.'}</div>}
-            {list.map((l) => (
-              <div key={l.id} className={`link-row ${selected === l.id ? 'selected' : ''}`} onClick={() => setSelected(l.id)} onDoubleClick={() => open(l)} data-link={l.id}>
-                <ItemIcon link={l} icons={icons} />
-                <div className="link-body">
-                  <div className="link-title">{l.title}</div>
-                  <div className="link-meta">
-                    {l.url && <span className="link-domain">{domainOf(l.url) || l.url}</span>}
-                    {l.kind === 'note' && <span className="link-domain">Note</span>}
-                    {l.kind === 'file' && <span className="link-domain">{[extOf(l).toUpperCase() || 'File', sizeLabel(l.size)].filter(Boolean).join(' · ')}</span>}
-                    {layout === 'cards' && (l.description || l.text) && <p className="link-desc">{l.description ?? l.text}</p>}
-                    {l.folderId && !folder && folderById.has(l.folderId) && <span className="plan-chip"><Icon.folder />{folderPath(l.folderId, folderById).join(' / ')}</span>}
-                    {l.tags?.map((t) => <span key={t} className="plan-chip tag">#{t}</span>)}
-                    {l.note && <span className="plan-chip" title={l.note}><Icon.edit /></span>}
-                  </div>
-                </div>
-                <span className="link-date">{relativeDay(ymd(new Date(l.addedAt)), today)}</span>
-                <button type="button" className={`link-star ${l.starred ? 'on' : ''}`} aria-label={l.starred ? 'Unstar' : 'Star'} aria-pressed={!!l.starred} onClick={(e) => { e.stopPropagation(); save(l, { starred: l.starred ? undefined : true }) }}><Icon.star /></button>
-                {(l.url || l.path) && <button type="button" className="link-go" aria-label={`Open ${l.title}`} title={hasBrowser() ? 'Open in the Browser (⌘-click: your default browser)' : 'Open'} onClick={(e) => { e.stopPropagation(); open(l, e.metaKey) }}><Icon.external /></button>}
-              </div>
-            ))}
           </div>
-          {current && <LinkDetail key={current.id} link={current} icons={icons} folders={folders} tags={tags} today={today} onSave={(p) => save(current, p)} onOpen={(ext) => open(current, ext)} onDelete={() => remove([current])} onClose={() => setSelected(null)} />}
+          {adding && (
+            <form className="tasks-add links-add" onSubmit={(e) => { e.preventDefault(); const v = addRef.current?.value ?? ''; if (addRef.current) addRef.current.value = ''; setAdding(false); void addText(v) }}>
+              <Icon.plus className="tasks-add-icon" />
+              <input ref={addRef} className="tasks-add-input" placeholder="Paste a link, or type a note's title" aria-label="New link or note" onBlur={(e) => { if (!e.currentTarget.value) setAdding(false) }}
+                onKeyDown={(e) => { if (e.key === 'Escape') setAdding(false) }} />
+            </form>
+          )}
+          <div className="links-body">
+            <div className={`plan-scroll links-list ${layout}`} onClick={(e) => { if (e.target === e.currentTarget) setSelected(null) }}>
+              {error && <div className="plan-error"><Icon.alert />{error}</div>}
+              {!doc && !error && <div className="plan-empty">Loading…</div>}
+              {doc && !links.length && (
+                <div className="plan-empty links-welcome">
+                  <Icon.bookmark className="plan-empty-icon" />
+                  <p>Your links will live here.</p>
+                  <div className="links-welcome-actions">
+                    <button type="button" className="btn btn-primary" onClick={() => void importAnybox()}><Icon.download />Import from Anybox</button>
+                    <button type="button" className="btn" onClick={() => void importFile()}>Import a file…</button>
+                  </div>
+                  <p className="muted">Or paste a link with <kbd>⌘N</kbd>, or drop one here.</p>
+                </div>
+              )}
+              {doc && links.length > 0 && !list.length && <div className="plan-empty">{query ? `Nothing matches “${query}”.` : 'Nothing here.'}</div>}
+              {list.map((l) => (
+                <div key={l.id} className={`link-row ${selected === l.id ? 'selected' : ''}`} onClick={() => setSelected(l.id)} onDoubleClick={() => open(l)} data-link={l.id}>
+                  <ItemIcon link={l} icons={icons} />
+                  <div className="link-body">
+                    <div className="link-title">{l.title}</div>
+                    <div className="link-meta">
+                      {l.url && <span className="link-domain">{domainOf(l.url) || l.url}</span>}
+                      {l.kind === 'note' && <span className="link-domain">Note</span>}
+                      {l.kind === 'file' && <span className="link-domain">{[extOf(l).toUpperCase() || 'File', sizeLabel(l.size)].filter(Boolean).join(' · ')}</span>}
+                      {layout === 'cards' && (l.description || l.text) && <p className="link-desc">{l.description ?? l.text}</p>}
+                      {l.folderId && !folder && folderById.has(l.folderId) && <span className="plan-chip"><Icon.folder />{folderPath(l.folderId, folderById).join(' / ')}</span>}
+                      {l.tags?.map((t) => <span key={t} className="plan-chip tag">#{t}</span>)}
+                      {l.note && <span className="plan-chip" title={l.note}><Icon.edit /></span>}
+                    </div>
+                  </div>
+                  <span className="link-date">{relativeDay(ymd(new Date(l.addedAt)), today)}</span>
+                  <button type="button" className={`link-star ${l.starred ? 'on' : ''}`} aria-label={l.starred ? 'Unstar' : 'Star'} aria-pressed={!!l.starred} onClick={(e) => { e.stopPropagation(); save(l, { starred: l.starred ? undefined : true }) }}><Icon.star /></button>
+                  {(l.url || l.path) && <button type="button" className="link-go" aria-label={`Open ${l.title}`} title={hasBrowser() ? 'Open in the Browser (⌘-click: your default browser)' : 'Open'} onClick={(e) => { e.stopPropagation(); open(l, e.metaKey) }}><Icon.external /></button>}
+                </div>
+              ))}
+            </div>
+            {current && <LinkDetail key={current.id} link={current} icons={icons} folders={folders} tags={tags} today={today} onSave={(p) => save(current, p)} onOpen={(ext) => open(current, ext)} onDelete={() => remove([current])} onClose={() => setSelected(null)} />}
+          </div>
+          <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('links', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
         </div>
-        <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('links', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
       </div>
 
       {menu?.kind === 'import' && (

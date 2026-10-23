@@ -174,80 +174,82 @@ export default function TasksTab({ active }: { tab: Tab; active: boolean }): Rea
 
   return (
     <section className="plan tasks" aria-label="Tasks">
-      <aside className="plan-side" aria-label="Task lists">
-        {VIEWS.map((v) => (
-          <NavItem key={v.id} icon={v.icon()} label={v.label} on={view === v.id} onClick={() => setView(v.id)}
-            count={v.id === 'today' ? counts.today : v.id === 'inbox' ? counts.inbox : v.id === 'logbook' ? 0 : v.id === 'upcoming' ? counts.upcoming : v.id === 'someday' ? counts.someday : 0}
-            alert={v.id === 'today' && counts.overdue > 0} title={v.id === 'today' && counts.overdue ? `${counts.overdue} overdue` : undefined} />
-        ))}
-        <h4>Projects<button type="button" className="plan-add" aria-label="New project" title="New project" onClick={() => setAddingProject(true)}><Icon.plus /></button></h4>
-        {projects.map((p) => (
-          <NavItem key={p.id} color={p.color} label={p.name} count={counts.projects[p.id]} on={view === `project:${p.id}`} onClick={() => setView(`project:${p.id}`)} />
-        ))}
-        {addingProject && (
-          <input className="input plan-side-input" autoFocus placeholder="Project name" aria-label="New project name"
-            onBlur={() => setAddingProject(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setAddingProject(false)
-              if (e.key !== 'Enter') return
-              const name = e.currentTarget.value.trim()
-              setAddingProject(false)
-              if (!name) return
-              const id = newId()
-              void applyRecords('tasks', puts([{ id, type: 'project', name, color: PROJECT_COLORS[projects.length % PROJECT_COLORS.length], order: nextOrder(projects), updatedAt: Date.now() } as Project]))
-              setView(`project:${id}`)
-            }} />
-        )}
-        {!projects.length && !addingProject && <p className="plan-side-hint">Type <b>#Name</b> in a task to start a project.</p>}
-        {tags.length > 0 && <h4>Tags</h4>}
-        {tags.map((t) => <NavItem key={t} icon={<span className="plan-hash">#</span>} label={t} count={counts.tags[t]} on={view === `tag:${t}`} onClick={() => setView(`tag:${t}`)} />)}
-      </aside>
-
-      <div className="plan-main">
-        <header className="plan-head">
-          {project ? <ProjectTitle project={project} onChange={(p) => void applyRecords('tasks', puts([p]))} /> : <h1>{title}</h1>}
-          {view === 'today' && <span className="plan-sub">{longDate(today)}</span>}
-          <span className="flex-1" />
-          {project && (
-            <>
-              <button type="button" className="btn btn-sm" title="Complete the project: it leaves the sidebar" onClick={() => {
-                const open = tasks.filter((t) => t.projectId === project.id && !t.doneAt)
-                if (open.length && !window.confirm(`Complete “${project.name}” and its ${open.length} open task${open.length === 1 ? '' : 's'}?`)) return
-                const now = Date.now()
-                save(open.map((t) => ({ ...t, doneAt: now })))
-                void applyRecords('tasks', puts([{ ...project, doneAt: now }]))
-                setView('today')
-              }}><Icon.check />Complete</button>
-              <button type="button" className="btn btn-sm btn-ghost" title="Delete the project and its tasks" aria-label="Delete project" onClick={() => {
-                const all = tasks.filter((t) => t.projectId === project.id)
-                if (!window.confirm(`Delete “${project.name}”${all.length ? ` and its ${all.length} task${all.length === 1 ? '' : 's'}` : ''}?`)) return
-                void applyRecords('tasks', [...all.map((t) => ({ op: 'delete' as const, id: t.id })), { op: 'delete', id: project.id }])
-                setUndo({ label: `Deleted “${project.name}”`, key: Date.now(), ops: puts([project, ...all]) })
-                setView('today')
-              }}><Icon.x /></button>
-            </>
-          )}
-          {view === 'logbook' && flat.length > 0 && (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => { if (window.confirm(`Delete all ${flat.length} completed tasks for good?`)) remove(flat) }}>Clear Logbook</button>
-          )}
-        </header>
-        {view !== 'logbook' && <QuickAdd inputRef={addRef} view={view} projects={projects} onAdd={add} />}
-        <div className="plan-scroll" onClick={(e) => { if (e.target === e.currentTarget) { setSelected(null); setEditing(null) } }}>
-          {error && <div className="plan-error"><Icon.alert />{error}</div>}
-          {!doc && !error && <div className="plan-empty">Loading…</div>}
-          {doc && groups.map((g, gi) => (
-            <Fragment key={`${g.title ?? ''}${gi}`}>
-              {g.title && <h3 className={`tasks-group ${g.alert ? 'alert' : ''}`}>{g.title}{g.sub && <span>{g.sub}</span>}</h3>}
-              {g.tasks.map((t) => (t.id === editing && editingTask
-                ? <TaskEditor key={t.id} task={editingTask} projects={projects} tags={tags} today={today} onSave={(p) => update(editingTask, p)} onClose={() => setEditing(null)} onDelete={() => remove([editingTask])} onToggle={() => toggle(editingTask)} />
-                : <TaskRow key={t.id} task={t} done={!!tasks.find((x) => x.id === t.id)?.doneAt} today={today} inTodayView={view === 'today'} selected={selected === t.id} project={view.startsWith('project:') ? undefined : projectById.get(t.projectId ?? '')}
-                  onSelect={() => setSelected(t.id)} onOpen={() => { setSelected(t.id); setEditing(t.id) }} onToggle={() => toggle(tasks.find((x) => x.id === t.id) ?? t)} />))}
-              {view === 'upcoming' && !g.tasks.length && <div className="tasks-none" />}
-            </Fragment>
+      <div className="plan-frame">
+        <aside className="plan-side" aria-label="Task lists">
+          {VIEWS.map((v) => (
+            <NavItem key={v.id} icon={v.icon()} label={v.label} on={view === v.id} onClick={() => setView(v.id)}
+              count={v.id === 'today' ? counts.today : v.id === 'inbox' ? counts.inbox : v.id === 'logbook' ? 0 : v.id === 'upcoming' ? counts.upcoming : v.id === 'someday' ? counts.someday : 0}
+              alert={v.id === 'today' && counts.overdue > 0} title={v.id === 'today' && counts.overdue ? `${counts.overdue} overdue` : undefined} />
           ))}
-          {doc && !flat.length && view !== 'upcoming' && <Empty view={view} />}
+          <h4>Projects<button type="button" className="plan-add" aria-label="New project" title="New project" onClick={() => setAddingProject(true)}><Icon.plus /></button></h4>
+          {projects.map((p) => (
+            <NavItem key={p.id} color={p.color} label={p.name} count={counts.projects[p.id]} on={view === `project:${p.id}`} onClick={() => setView(`project:${p.id}`)} />
+          ))}
+          {addingProject && (
+            <input className="input plan-side-input" autoFocus placeholder="Project name" aria-label="New project name"
+              onBlur={() => setAddingProject(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setAddingProject(false)
+                if (e.key !== 'Enter') return
+                const name = e.currentTarget.value.trim()
+                setAddingProject(false)
+                if (!name) return
+                const id = newId()
+                void applyRecords('tasks', puts([{ id, type: 'project', name, color: PROJECT_COLORS[projects.length % PROJECT_COLORS.length], order: nextOrder(projects), updatedAt: Date.now() } as Project]))
+                setView(`project:${id}`)
+              }} />
+          )}
+          {!projects.length && !addingProject && <p className="plan-side-hint">Type <b>#Name</b> in a task to start a project.</p>}
+          {tags.length > 0 && <h4>Tags</h4>}
+          {tags.map((t) => <NavItem key={t} icon={<span className="plan-hash">#</span>} label={t} count={counts.tags[t]} on={view === `tag:${t}`} onClick={() => setView(`tag:${t}`)} />)}
+        </aside>
+
+        <div className="plan-main">
+          <header className="plan-head">
+            {project ? <ProjectTitle project={project} onChange={(p) => void applyRecords('tasks', puts([p]))} /> : <h1>{title}</h1>}
+            {view === 'today' && <span className="plan-sub">{longDate(today)}</span>}
+            <span className="flex-1" />
+            {project && (
+              <>
+                <button type="button" className="btn btn-sm" title="Complete the project: it leaves the sidebar" onClick={() => {
+                  const open = tasks.filter((t) => t.projectId === project.id && !t.doneAt)
+                  if (open.length && !window.confirm(`Complete “${project.name}” and its ${open.length} open task${open.length === 1 ? '' : 's'}?`)) return
+                  const now = Date.now()
+                  save(open.map((t) => ({ ...t, doneAt: now })))
+                  void applyRecords('tasks', puts([{ ...project, doneAt: now }]))
+                  setView('today')
+                }}><Icon.check />Complete</button>
+                <button type="button" className="btn btn-sm btn-ghost" title="Delete the project and its tasks" aria-label="Delete project" onClick={() => {
+                  const all = tasks.filter((t) => t.projectId === project.id)
+                  if (!window.confirm(`Delete “${project.name}”${all.length ? ` and its ${all.length} task${all.length === 1 ? '' : 's'}` : ''}?`)) return
+                  void applyRecords('tasks', [...all.map((t) => ({ op: 'delete' as const, id: t.id })), { op: 'delete', id: project.id }])
+                  setUndo({ label: `Deleted “${project.name}”`, key: Date.now(), ops: puts([project, ...all]) })
+                  setView('today')
+                }}><Icon.x /></button>
+              </>
+            )}
+            {view === 'logbook' && flat.length > 0 && (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => { if (window.confirm(`Delete all ${flat.length} completed tasks for good?`)) remove(flat) }}>Clear Logbook</button>
+            )}
+          </header>
+          {view !== 'logbook' && <QuickAdd inputRef={addRef} view={view} projects={projects} onAdd={add} />}
+          <div className="plan-scroll" onClick={(e) => { if (e.target === e.currentTarget) { setSelected(null); setEditing(null) } }}>
+            {error && <div className="plan-error"><Icon.alert />{error}</div>}
+            {!doc && !error && <div className="plan-empty">Loading…</div>}
+            {doc && groups.map((g, gi) => (
+              <Fragment key={`${g.title ?? ''}${gi}`}>
+                {g.title && <h3 className={`tasks-group ${g.alert ? 'alert' : ''}`}>{g.title}{g.sub && <span>{g.sub}</span>}</h3>}
+                {g.tasks.map((t) => (t.id === editing && editingTask
+                  ? <TaskEditor key={t.id} task={editingTask} projects={projects} tags={tags} today={today} onSave={(p) => update(editingTask, p)} onClose={() => setEditing(null)} onDelete={() => remove([editingTask])} onToggle={() => toggle(editingTask)} />
+                  : <TaskRow key={t.id} task={t} done={!!tasks.find((x) => x.id === t.id)?.doneAt} today={today} inTodayView={view === 'today'} selected={selected === t.id} project={view.startsWith('project:') ? undefined : projectById.get(t.projectId ?? '')}
+                    onSelect={() => setSelected(t.id)} onOpen={() => { setSelected(t.id); setEditing(t.id) }} onToggle={() => toggle(tasks.find((x) => x.id === t.id) ?? t)} />))}
+                {view === 'upcoming' && !g.tasks.length && <div className="tasks-none" />}
+              </Fragment>
+            ))}
+            {doc && !flat.length && view !== 'upcoming' && <Empty view={view} />}
+          </div>
+          <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('tasks', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
         </div>
-        <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('tasks', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
       </div>
     </section>
   )
