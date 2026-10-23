@@ -4,6 +4,7 @@
  * code runs inside the desktop app and inside `src/gateway` (a Node server reached from a phone's browser).
  */
 import type { ExtensionInfo } from '@shared/extensions'
+import type { FrontPage, LinksPanelMode } from '@shared/linksPanel'
 import type { AppCommand, Theme, VoiceEvent, VoicePermission } from '@shared/types'
 
 export interface OpenDialogOptions {
@@ -75,6 +76,8 @@ export interface Host {
   voice: VoiceHost | null
   /** The launcher's window and its key in every app (main/launcherWindow.ts); null without a desktop (gateway). */
   launcher: LauncherHost | null
+  /** The Links panels over any app and their keys (main/linksPanel.ts); null without a desktop (gateway). */
+  linksPanel: LinksPanelHost | null
   /** Chrome extensions in the Browser (main/extensions.ts); null where there is no Browser (gateway). */
   extensions: ExtensionsHost | null
 }
@@ -104,6 +107,19 @@ export interface LauncherHost {
   quickLook(path: string): void
   /** Asks before something that cannot be undone, with the app brought forward so the question is not hidden. */
   confirm(message: string, detail: string, button: string): Promise<boolean>
+}
+
+/** What the Links panels need from the Mac app. */
+export interface LinksPanelHost {
+  show(mode: LinksPanelMode): void
+  hide(): void
+  page(): Promise<FrontPage>
+  resize(height: number): void
+  command(c: AppCommand): void
+  automation(): void
+  status(): Record<LinksPanelMode, { key: string; registered: boolean }>
+  /** What this app's Browser shows while it is in front, for the save key pressed in this app. */
+  setOwnPage(page: { url: string; title: string } | null): void
 }
 
 /** What dictation (voice.ts) needs from the Mac app. */

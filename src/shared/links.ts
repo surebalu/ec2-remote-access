@@ -86,6 +86,12 @@ export function domainOf(url: string | undefined): string {
 }
 
 /** A typed address as a link: "example.com/x" becomes https://example.com/x; null when it is not one. */
+/** A file item's extension, lower case ('' when it has none). */
+export const extOf = (l: Pick<LinkItem, 'path' | 'title'>): string => ((l.path ?? l.title).match(/\.([a-z0-9]{1,6})$/i)?.[1] ?? '').toLowerCase()
+
+/** A file's size as Finder writes it, '' when unknown. */
+export const sizeLabel = (n?: number): string => (n === undefined ? '' : n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(1)} GB`)
+
 export function asUrl(text: string): string | null {
   const t = text.trim()
   if (!t || /\s/.test(t)) return null

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from 'react'
-import { allLinkTags, asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderAndBelow, folderPath, folderTree, hasTag, tagTree, parseLinksFile, planImport, searchLinks, sortLinks, viewLinks, type ImportPlan, type LinkFolder, type LinkItem, type LinkSort, type LinkView, type ParsedLink } from '@shared/links'
+import { allLinkTags, asUrl, domainOf, extOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderAndBelow, folderPath, folderTree, hasTag, tagTree, parseLinksFile, planImport, searchLinks, sizeLabel, sortLinks, viewLinks, type ImportPlan, type LinkFolder, type LinkItem, type LinkSort, type LinkView, type ParsedLink } from '@shared/links'
 import { relativeDay, ymd } from '@shared/naturalDate'
 import { itemsOf, puts, type RecordOp } from '@shared/records'
 import { hasBrowser } from '../../quickConnect'
@@ -9,7 +9,7 @@ import { useStore, type Tab } from '../../store'
 import { Icon } from '../icons'
 import Modal from '../Modal'
 import Popover, { MenuItem } from '../Popover'
-import { downloadText, NavItem, newId, pickTextFile, typing, UndoBar, useLocal, useLocalSet, useToday } from './parts'
+import { downloadText, NavItem, newId, pickTextFile, typeColor, typing, UndoBar, useFileIcons, useLocal, useLocalSet, useToday } from './parts'
 import './plan.css'
 
 /**
@@ -30,32 +30,6 @@ const VIEWS: { id: LinkView; label: string; icon: () => ReactElement }[] = [
   { id: 'archived', label: 'Archived', icon: () => <Icon.layers /> }
 ]
 
-const extOf = (l: LinkItem): string => ((l.path ?? l.title).match(/\.([a-z0-9]{1,6})$/i)?.[1] ?? '').toLowerCase()
-const sizeLabel = (n?: number): string => (n === undefined ? '' : n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(1)} GB`)
-/** A colour per kind of file, for the badge shown where Finder's icon is not available (phones). */
-const TYPE_COLORS: [RegExp, string][] = [
-  [/^pdf$/, '#e5484d'], [/^(docx?|pages|rtf|odt)$/, '#2b7cd3'], [/^(xlsx?|numbers|csv|tsv|ods)$/, '#1f9d55'], [/^(pptx?|key|odp)$/, '#e8702a'],
-  [/^(png|jpe?g|gif|heic|webp|svg|tiff?|bmp)$/, '#8e4ec6'], [/^(zip|gz|tgz|tar|7z|rar|dmg)$/, '#a16207'], [/^(md|txt|log|rtfd)$/, '#64748b'],
-  [/^(js|ts|tsx|jsx|py|sh|json|ya?ml|xml|html?|css|java|go|rb|sql|c|cpp|h|swift|kt|rs|ps1|bat)$/, '#0e7490']
-]
-const typeColor = (ext: string): string => TYPE_COLORS.find(([re]) => re.test(ext))?.[1] ?? '#6b7280'
-
-/** Finder's icon for each file's type (Mac app only), fetched once per path for the page. */
-const fileIcons = new Map<string, string>()
-function useFileIcons(paths: string[]): Map<string, string> {
-  const [, setTick] = useState(0)
-  const want = paths.filter((p) => !fileIcons.has(p)).slice(0, 400)
-  const key = want.join('\u0000')
-  useEffect(() => {
-    if (!want.length || !hasBrowser()) return
-    for (const p of want) fileIcons.set(p, '')
-    void window.api.invoke('launcher:icons', want).then((icons) => {
-      for (const [p, url] of Object.entries(icons)) fileIcons.set(p, url)
-      setTick((n) => n + 1)
-    }, () => undefined)
-  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
-  return fileIcons
-}
 
 /** A link's site icon, a note's icon, or a file's type icon (Finder's, else a coloured badge with its extension). */
 function ItemIcon({ link, icons }: { link: LinkItem; icons: Map<string, string> }): ReactElement {
@@ -134,6 +108,19 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
     }).map((n) => ({ ...n, open: isOpen(n.path) }))
   }, [tagNodes, openTags, view])
   useEffect(() => { if (view.startsWith('folder:') && doc && !folder) setView('all') }, [view, doc, folder]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The Links search panel's ⌘↵ (store.showInLinks): a tag's or folder's list, or an item selected in its folder.
+  const request = useStore((s) => s.linksRequest)
+  useEffect(() => {
+    if (!request || !doc) return
+    useStore.setState({ linksRequest: null })
+    setQuery('')
+    const item = request.id ? links.find((l) => l.id === request.id) : undefined
+    if (item) {
+      setView(item.archived ? 'archived' : item.folderId && folderById.has(item.folderId) ? `folder:${item.folderId}` : 'all')
+      setSelected(item.id)
+      requestAnimationFrame(() => document.querySelector(`.links [data-link="${item.id}"]`)?.scrollIntoView({ block: 'center' }))
+    } else if (request.view) setView(request.view as LinkView)
+  }, [request?.nonce, doc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A search looks through everything; otherwise the view, sorted.
   const list = useMemo(() => (query.trim() ? searchLinks(links.filter((l) => !l.archived), query, folderById) : sortLinks(viewLinks(view, links, folders), sort)), [query, links, folders, folderById, view, sort])

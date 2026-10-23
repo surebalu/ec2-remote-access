@@ -41,6 +41,12 @@ function listen(): void {
   })
 }
 
+/**
+ * Reads the document again. For a window main does not broadcast to (the Links panel, which stays loaded while
+ * hidden), each time it appears.
+ */
+export const reloadRecords = (kind: RecordKind): Promise<void> => load(kind)
+
 /** Applies changes here at once and saves them; on failure the saved document is reloaded and the error shown. */
 export async function applyRecords(kind: RecordKind, ops: RecordOp[]): Promise<void> {
   if (!ops.length) return

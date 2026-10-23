@@ -195,25 +195,41 @@ const SECTION_HINTS: Record<RailSection, string> = {
 const heldMods = (e: KeyboardEvent): string => `${e.ctrlKey ? '⌃' : ''}${e.altKey ? '⌥' : ''}${e.shiftKey ? '⇧' : ''}${e.metaKey ? '⌘' : ''}`
 
 /** What Settings → Keyboard records a key for: a rail section, or the launcher (a key in every app). */
-type KeyTarget = ShortcutTarget | 'launcher'
+type GlobalTarget = 'launcher' | 'linkSave' | 'linkFind'
+type KeyTarget = ShortcutTarget | GlobalTarget
+/** The keys that work from any app: the setting each is kept in, what it does there, and its default. */
+const GLOBAL_KEYS: Record<GlobalTarget, { field: 'launcherKey' | 'linkSaveKey' | 'linkFindKey'; does: string; fallback: string }> = {
+  launcher: { field: 'launcherKey', does: 'opens the launcher', fallback: '' },
+  linkSave: { field: 'linkSaveKey', does: 'saves the page in front to Links', fallback: 'ctrl+s' },
+  linkFind: { field: 'linkFindKey', does: 'searches Links', fallback: 'ctrl+f' }
+}
+const isGlobal = (t: KeyTarget | null): t is GlobalTarget => !!t && Object.hasOwn(GLOBAL_KEYS, t)
 
 /**
  * Settings → Keyboard: the launcher's key, which works in every app, and a shortcut for each section of the app
  * rail, recorded by pressing them. Changes apply at once (and go into the draft, so Save keeps them). Only section
  * shortcuts that differ from the defaults are stored.
  */
-function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; onChange: (shortcuts: Record<string, string>) => void; onLauncher: (key: string) => Promise<void> }): ReactElement {
+function KeyboardSettings({ draft, onChange, onGlobal }: { draft: Settings; onChange: (shortcuts: Record<string, string>) => void; onGlobal: (field: 'launcherKey' | 'linkSaveKey' | 'linkFindKey', key: string) => Promise<void> }): ReactElement {
   const [recording, setRecording] = useState<KeyTarget | null>(null)
   const [held, setHeld] = useState('')
   const [notice, setNotice] = useState<{ section: KeyTarget; text: string; error?: boolean } | null>(null)
   const [status, setStatus] = useState<{ key: string; registered: boolean } | null>(null)
+  const [linkStatus, setLinkStatus] = useState<Record<'save' | 'find', { key: string; registered: boolean }> | null>(null)
   const keys = sectionKeys(draft.shortcuts)
   const sections = RAIL_SECTIONS.filter((x) => IN_ELECTRON || (x !== 'local' && x !== 'finder'))
   const launcherKey = draft.launcherKey ?? ''
+  const globalKey = (t: GlobalTarget): string => draft[GLOBAL_KEYS[t].field] ?? GLOBAL_KEYS[t].fallback
+  const globals = (except?: GlobalTarget): { combo: string; does: string }[] =>
+    (Object.keys(GLOBAL_KEYS) as GlobalTarget[]).filter((t) => t !== except).map((t) => ({ combo: globalKey(t), does: GLOBAL_KEYS[t].does }))
 
-  const refreshStatus = (): void => { if (IN_ELECTRON) void window.api.invoke('launcher:status').then(setStatus, () => undefined) }
+  const refreshStatus = (): void => {
+    if (!IN_ELECTRON) return
+    void window.api.invoke('launcher:status').then(setStatus, () => undefined)
+    void window.api.invoke('linksPanel:status').then(setLinkStatus, () => undefined)
+  }
   useEffect(refreshStatus, [])
-  const setLauncher = (key: string): void => { void onLauncher(key).then(refreshStatus) }
+  const setGlobal = (t: GlobalTarget, key: string): void => { void onGlobal(GLOBAL_KEYS[t].field, key).then(refreshStatus) }
 
   const assign = (section: ShortcutTarget, combo: string, from?: ShortcutTarget): void => {
     const next = { ...(draft.shortcuts ?? {}) }
@@ -246,7 +262,7 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
       const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
       if (plain && e.key === 'Escape') return stop()
       if (plain && (e.key === 'Backspace' || e.key === 'Delete')) {
-        if (recording === 'launcher') setLauncher('')
+        if (isGlobal(recording)) setGlobal(recording, '')
         else assign(recording, '')
         setNotice(null)
         return stop()
@@ -256,13 +272,15 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
       // Holding Right Option a moment before the letter starts dictation; this was a shortcut instead.
       voice.cancel()
       if (e.repeat) return
-      const check = recording === 'launcher' ? checkGlobalCombo(combo, draft.shortcuts) : checkCombo(combo, recording, draft.shortcuts, launcherKey)
+      const check = isGlobal(recording)
+        ? checkGlobalCombo(combo, draft.shortcuts, { others: globals(recording), controlLetters: recording !== 'launcher' })
+        : checkCombo(combo, recording, draft.shortcuts, globals())
       if (!check.ok) {
         setHeld('')
         setNotice({ section: recording, text: check.reason, error: true })
         return
       }
-      if (recording === 'launcher') setLauncher(combo)
+      if (isGlobal(recording)) setGlobal(recording, combo)
       else assign(recording, combo, check.from)
       const notes = [...(check.from ? [`Moved from ${TARGET_NAMES[check.from]}, which has no shortcut now.`] : []), ...check.notes]
       setNotice(notes.length ? { section: recording, text: notes.join(' ') } : null)
@@ -285,7 +303,7 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
       window.removeEventListener('keyup', up, true)
       window.removeEventListener('mousedown', away, true)
     }
-  }, [recording, draft.shortcuts, launcherKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recording, draft.shortcuts, launcherKey, draft.linkSaveKey, draft.linkFindKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** The field that records a key, with Remove and (where there is a default) Restore. */
   const field = (target: KeyTarget, name: string, value: string, fallback: string): ReactElement => {
@@ -302,9 +320,9 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
           {rec ? (held ? <kbd className="kbd">{held}</kbd> : <span>Press keys…</span>) : value ? <kbd className="kbd">{formatCombo(value)}</kbd> : <span>None</span>}
         </button>
         <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Remove the shortcut for ${name}`} title="Remove" disabled={!value || rec}
-          onClick={() => { setNotice(null); if (target === 'launcher') setLauncher(''); else assign(target, '') }}><Icon.x /></button>
+          onClick={() => { setNotice(null); if (isGlobal(target)) setGlobal(target, ''); else assign(target, '') }}><Icon.x /></button>
         <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Restore the shortcut for ${name}`} title={fallback ? `Back to ${formatCombo(fallback)}` : 'No shortcut by default'} disabled={!fallback || value === fallback || rec}
-          onClick={() => { setNotice(null); if (target !== 'launcher') assign(target, fallback) }}><Icon.refresh /></button>
+          onClick={() => { setNotice(null); if (isGlobal(target)) setGlobal(target, fallback); else assign(target, fallback) }}><Icon.refresh /></button>
       </div>
     )
   }
@@ -317,6 +335,16 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
     : status && status.key === launcherKey && !status.registered
       ? <span className="set-key-error">macOS did not give the app {formatCombo(launcherKey)}: another app (Raycast, Alfred?) holds it. Free it there, or pick another key.</span>
       : `Press ${formatCombo(launcherKey)} in any app to search apps, files, hosts and more; press it again or Esc to put it away.`
+  /** What a Links panel key does, or why it does not work (Anybox, say, still holds it). */
+  const linkHint = (t: 'linkSave' | 'linkFind'): ReactNode => {
+    const key = globalKey(t)
+    const st = linkStatus?.[t === 'linkSave' ? 'save' : 'find']
+    if (!key) return t === 'linkSave' ? 'Saves the page in front, in any browser, to Links with tags, a folder and a comment. Give it a key to use it.' : 'Searches Links, its tags and folders from any app. Give it a key to use it.'
+    if (st && st.key === key && !st.registered) return <span className="set-key-error">macOS did not give the app {formatCombo(key)}: another app holds it (Anybox: turn its shortcut off in its settings). Free it there, or pick another key.</span>
+    return t === 'linkSave'
+      ? `Press ${formatCombo(key)} in any browser (Safari, Chrome, Arc, Dia, Brave, Edge, or this app's) to save its page to Links. macOS asks once per browser to let the app read its address.`
+      : `Press ${formatCombo(key)} in any app to search Links: ↵ opens, a tag or folder narrows the search, ⌘↵ shows it in Links.`
+  }
 
   const customised = Object.keys(draft.shortcuts ?? {}).length > 0
   return (
@@ -325,6 +353,12 @@ function KeyboardSettings({ draft, onChange, onLauncher }: { draft: Settings; on
         <Group title="Anywhere on your Mac">
           <Row label={<span className="flex items-center gap-2"><Icon.launcher className="set-key-icon" />Launcher</span>} hint={hintFor('launcher', launcherHint)}>
             {field('launcher', 'the launcher', launcherKey, '')}
+          </Row>
+          <Row label={<span className="flex items-center gap-2"><Icon.bookmark className="set-key-icon" />Save to Links</span>} hint={hintFor('linkSave', linkHint('linkSave'))}>
+            {field('linkSave', 'saving to Links', globalKey('linkSave'), GLOBAL_KEYS.linkSave.fallback)}
+          </Row>
+          <Row label={<span className="flex items-center gap-2"><Icon.search className="set-key-icon" />Search Links</span>} hint={hintFor('linkFind', linkHint('linkFind'))}>
+            {field('linkFind', 'searching Links', globalKey('linkFind'), GLOBAL_KEYS.linkFind.fallback)}
           </Row>
         </Group>
       )}
@@ -656,7 +690,7 @@ export default function SettingsDialog(): ReactElement | null {
     <KeyboardSettings
       draft={draft}
       onChange={(shortcuts) => { setDraft((d) => (d ? { ...d, shortcuts } : d)); void s.saveSettings({ shortcuts }) }}
-      onLauncher={async (launcherKey) => { setDraft((d) => (d ? { ...d, launcherKey } : d)); await s.saveSettings({ launcherKey }) }}
+      onGlobal={async (field, key) => { setDraft((d) => (d ? { ...d, [field]: key } : d)); await s.saveSettings({ [field]: key }) }}
     />
   )
 

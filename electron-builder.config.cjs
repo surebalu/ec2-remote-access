@@ -45,7 +45,7 @@ module.exports = {
     notarize,
     ...(signed ? {} : { identity: null }),
     extendInfo: {
-      NSAppleEventsUsageDescription: 'Used to launch Windows App and your terminal.',
+      NSAppleEventsUsageDescription: 'Used to launch Windows App and your terminal, and to read the address of the page your browser shows when you save it to Links.',
       // Voice dictation: macOS shows these when it first asks; the helper's access counts as the app's.
       NSMicrophoneUsageDescription: 'Voice dictation listens to the microphone only while you hold the dictation key or a mic button is on.',
       NSSpeechRecognitionUsageDescription: 'Voice dictation turns what you say into text, on this Mac when macOS supports your language.',

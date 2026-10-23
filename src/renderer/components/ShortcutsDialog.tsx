@@ -23,10 +23,14 @@ export default function ShortcutsDialog(): ReactElement {
   const dictationKey = useStore((s) => s.settings?.dictationKey)
   const saved = useStore((s) => s.settings?.shortcuts)
   const launcherKey = useStore((s) => s.settings?.launcherKey ?? '')
+  const linkSaveKey = useStore((s) => s.settings?.linkSaveKey ?? '')
+  const linkFindKey = useStore((s) => s.settings?.linkFindKey ?? '')
   const keys = sectionKeys(saved)
   // The rail's sections with the keys set for them in Settings → Keyboard (Hosts is also ⌘1, below).
   const sections = [
     ...(launcherKey && hasBrowser() ? [{ keys: formatCombo(launcherKey), label: 'Launcher, from any app (apps, files, hosts, sums)' }] : []),
+    ...(linkSaveKey && hasBrowser() ? [{ keys: formatCombo(linkSaveKey), label: 'Save the page in front to Links, from any browser' }] : []),
+    ...(linkFindKey && hasBrowser() ? [{ keys: formatCombo(linkFindKey), label: 'Search Links, from any app' }] : []),
     ...(keys.radial ? [{ keys: formatCombo(keys.radial), label: 'Radial menu: every section in a ring (hold the modifiers and tap again to step round)' }] : []),
     ...RAIL_SECTIONS.filter((x) => keys[x] && (hasBrowser() || (x !== 'local' && x !== 'finder'))).map((x) => ({ keys: formatCombo(keys[x]), label: SECTION_NAMES[x] }))
   ]

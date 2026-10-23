@@ -23,6 +23,7 @@ import { initExtensions } from './extensions'
 import { restoreSessionCookies, saveSessionCookies } from './sessionCookies'
 import { mainWindow, setMainWindow } from './windows'
 import { closeLauncher, updateLauncherKey } from './launcherWindow'
+import { closeLinksPanel, updateLinksPanelKeys } from './linksPanel'
 
 setHost(electronHost)
 
@@ -73,7 +74,7 @@ function createWindow(): void {
   })
   setMainWindow(win)
   // The launcher's hidden window would otherwise keep the app running with no window to show.
-  win.on('closed', closeLauncher)
+  win.on('closed', () => { closeLauncher(); closeLinksPanel() })
   initWebviews(win)
   if (process.env.ELECTRON_RENDERER_URL) {
     win.webContents.on('console-message', (ev) => {
@@ -99,17 +100,20 @@ app.whenReady().then(async () => {
   registerIpc(() => {
     updateTray()
     updateLauncherKey()
+    updateLinksPanelKeys()
   })
   setMenu()
   createWindow()
   updateTray()
   updateLauncherKey()
+  updateLinksPanelKeys()
   if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()
   app.on('activate', () => {
     if (!mainWindow()) {
       createWindow()
       updateLauncherKey()
+      updateLinksPanelKeys()
     }
   })
 })
