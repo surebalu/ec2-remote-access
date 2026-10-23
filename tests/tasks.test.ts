@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { allTags, completeTask, parseTaskInput, taskCounts, upcomingGroups, viewTasks, type Task } from '../src/shared/tasks.ts'
-import { applyOps, checkOp, emptyDoc, itemsOf, newRecordId } from '../src/shared/records.ts'
+import { applyOps, checkOp, emptyDoc, itemsOf, mergeDocs, newRecordId, pruneDeleted, KEEP_DELETED_MS } from '../src/shared/records.ts'
 
 // Thursday, October 22, 2026.
 const NOW = new Date(2026, 9, 22, 10, 15)
@@ -69,13 +69,27 @@ test('completing a repeating task logs it and plans the next one after today', (
 test('records: checked operations, applied as a new revision', () => {
   const doc = applyOps(emptyDoc(), [checkOp({ op: 'put', item: task({ id: 'a' }) }), checkOp({ op: 'put', item: task({ id: 'b' }) })])
   assert.equal(doc.rev, 1)
-  const next = applyOps(doc, [checkOp({ op: 'delete', id: 'a' })])
-  assert.deepEqual([next.rev, Object.keys(next.items)], [2, ['b']])
+  const next = applyOps(doc, [checkOp({ op: 'delete', id: 'a' })], 1000)
+  assert.deepEqual([next.rev, next.items.a.type, itemsOf<Task>(next, 'task').map((t) => t.id)], [2, 'deleted', ['b']], 'a deletion leaves a marker')
   assert.equal(Object.keys(doc.items).length, 2, 'the old document is untouched')
   assert.equal(itemsOf<Task>(next, 'task').length, 1)
+  assert.throws(() => checkOp({ op: 'put', item: { id: 'a', type: 'deleted' } }), /record type/, 'markers are made here only')
   assert.throws(() => checkOp({ op: 'put', item: { id: '../x', type: 'task' } }), /record id/)
   assert.throws(() => checkOp({ op: 'put', item: { id: 'a', type: 'Task!' } }), /record type/)
   assert.throws(() => checkOp({ op: 'put', item: { id: 'a', type: 'task', notes: 'x'.repeat(300_000) } }), /too large/)
   assert.throws(() => checkOp({ op: 'drop' }), /record change/)
   assert.match(newRecordId(1_700_000_000_000), /^[a-z0-9]{14}$/)
+})
+
+test('two copies merge item by item: the later change wins, deletions included', () => {
+  const t = (id: string, title: string, updatedAt: number): Task => task({ id, title, updatedAt })
+  const mac = { rev: 5, items: { a: t('a', 'mac edit', 30), b: t('b', 'same', 10), c: t('c', 'only on mac', 12), d: { id: 'd', type: 'deleted', updatedAt: 40 } } }
+  const nas = { rev: 7, items: { a: t('a', 'old', 20), b: t('b', 'same', 10), d: t('d', 'edited before the delete', 35), e: t('e', 'added on the pi', 50), c: { id: 'c', type: 'deleted', updatedAt: 60 } } }
+  const { doc, changed } = mergeDocs(mac, nas)
+  assert.equal(changed, true)
+  assert.equal(doc.rev, 8)
+  assert.deepEqual(itemsOf<Task>(doc, 'task').map((x) => `${x.id}:${x.title}`).sort(), ['a:mac edit', 'b:same', 'e:added on the pi'])
+  assert.deepEqual([doc.items.c.type, doc.items.d.type], ['deleted', 'deleted'], 'the later deletion wins, and so does a deletion after an edit')
+  assert.equal(mergeDocs(doc, nas).changed, false, 'merging again changes nothing')
+  assert.equal(Object.keys(pruneDeleted(doc, 60 + KEEP_DELETED_MS + 1).items).length, 3, 'old markers go')
 })

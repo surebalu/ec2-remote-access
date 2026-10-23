@@ -12,6 +12,7 @@ import { closeAllVoice } from './voice'
 import { closeOnePassword } from './onepassword'
 import { closePlmHealth } from './plmHealth'
 import { closeDbLocks } from './dbLocks'
+import { flushDataFolder, updateDataFolder } from './dataFolder'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
@@ -107,6 +108,7 @@ app.whenReady().then(async () => {
   updateTray()
   updateLauncherKey()
   updateLinksPanelKeys()
+  updateDataFolder()
   if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()
   app.on('activate', () => {
@@ -126,7 +128,7 @@ app.on('before-quit', (e) => {
   closeAllLocal()
   closeAllVoice()
   closeOnePassword()
-  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks()])
+  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder()])
     .then(() => stopProxy())
     .catch(() => undefined)
     .finally(() => app.quit())

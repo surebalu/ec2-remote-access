@@ -76,7 +76,7 @@ const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) =
  * is said there. Shells on this machine (term:*) are refused too unless `allowTerminals` says otherwise.
  */
 export function desktopOnly(channel: string): boolean {
-  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'browser:paneTargets', 'browser:frontPage', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal', 'app:emojiPanel', 'app:pointer', 'local:open', 'local:quickLook'].includes(channel) || channel.startsWith('finder:') || channel.startsWith('launcher:') || channel.startsWith('linksPanel:') || channel.startsWith('ext:')
+  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'browser:paneTargets', 'browser:frontPage', 'data:pickFolder', 'data:setFolder', 'data:copyLinkFiles', 'data:reveal', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal', 'app:emojiPanel', 'app:pointer', 'local:open', 'local:quickLook'].includes(channel) || channel.startsWith('finder:') || channel.startsWith('launcher:') || channel.startsWith('linksPanel:') || channel.startsWith('ext:')
 }
 
 export function createGatewayServer(opts: GatewayOptions): Gateway {
@@ -197,7 +197,8 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
       // A paired page's terminal layout is its own; it must not replace the computer's saved one.
       if (channel === 'term:loadState') return reply(null)
       if (channel === 'term:saveState') return reply(null)
-      if (channel === 'settings:set' && msg.args?.[0] && typeof msg.args[0] === 'object') delete (msg.args[0] as Record<string, unknown>).phoneTerminals
+      // Only the Mac's own window sets these: which shells a phone may open, and where the Mac keeps a copy of its data.
+      if (channel === 'settings:set' && msg.args?.[0] && typeof msg.args[0] === 'object') { delete (msg.args[0] as Record<string, unknown>).phoneTerminals; delete (msg.args[0] as Record<string, unknown>).dataDir }
       const fn = (opts.handlers as Record<string, AnyHandler | undefined>)[channel]
       if (!fn) { ws.send(JSON.stringify({ t: 'error', id, message: `Unknown channel ${channel}` })); return }
       const args = Array.isArray(msg.args) ? msg.args : []

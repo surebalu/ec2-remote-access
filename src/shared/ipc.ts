@@ -13,7 +13,7 @@ import type {
   RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
-  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
+  PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, DataStatus, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
 import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
 
@@ -138,6 +138,16 @@ export interface IpcApi {
   /** Tasks, Calendar and Links (src/shared/records.ts): a tool's whole document, and changes to it (the new revision). */
   'records:load': (kind: RecordKind) => Promise<RecordDoc>
   'records:apply': (kind: RecordKind, ops: RecordOp[]) => Promise<number>
+  /** Settings → Data (main/dataFolder.ts): where things are kept, and the data folder's state. */
+  'data:status': () => Promise<DataStatus>
+  'data:pickFolder': () => Promise<string | null>
+  /** Makes `dir` the data folder after checking it can be written ('' stops using one), then syncs. */
+  'data:setFolder': (dir: string) => Promise<DataStatus>
+  'data:sync': () => Promise<DataStatus>
+  /** Copies the Links files into the data folder and points the links at the copies (in the background). */
+  'data:copyLinkFiles': () => Promise<DataStatus>
+  /** Shows one of the places in Finder ('folder' is the data folder). */
+  'data:reveal': (id: string) => Promise<void>
   /** Anybox's library on this Mac, for Links to import. */
   'links:anybox': () => Promise<AnyboxLibrary>
   /** A page's title and description, for a link added by its address. */
@@ -323,6 +333,7 @@ export interface IpcEvents {
   'tunnels:changed': Tunnel[]
   /** A Tasks, Calendar or Links document changed (from any device): reload it if this revision is newer. */
   'records:changed': { kind: RecordKind; rev: number }
+  'data:status': DataStatus
   'profiles:status': ProfileStatus
   'instances:updated': Instance[]
   'phone:changed': PhoneAccessStatus
