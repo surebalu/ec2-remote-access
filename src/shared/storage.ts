@@ -38,6 +38,11 @@ export interface ScanSummary {
   byKind: Partial<Record<FileKind, number>>
   /** The disk's use split into the Overview's parts (a scan of the Mac or the home folder). */
   parts?: { id: DiskPart; bytes: number }[]
+  /** Bytes in files under 1 MB, counted with their folders, and how many such files. */
+  smallBytes?: number
+  smallFiles?: number
+  /** Every kind's files, packages included, so the parts add up to the scan. */
+  kindCounts?: Partial<Record<FileKind, number>>
 }
 
 export interface ScanState {
@@ -97,8 +102,47 @@ const KIND_EXTS: [FileKind, string][] = [
 const BY_EXT = new Map<string, FileKind>(KIND_EXTS.flatMap(([k, list]) => list.split(' ').map((e) => [e, k] as [string, FileKind])))
 
 export const KIND_NAMES: Record<FileKind, string> = {
-  video: 'Videos', audio: 'Music and audio', image: 'Pictures', document: 'Documents', archive: 'Archives',
-  diskimage: 'Disk images', developer: 'Developer files', app: 'Apps', other: 'Other files'
+  video: 'Videos', audio: 'Music & Audio', image: 'Images', document: 'Documents', archive: 'Archives',
+  diskimage: 'Disk Images', developer: 'Code & Data', app: 'Apps', other: 'Other Files'
+}
+
+/** What a package (a folder Finder shows as one item) counts as: Photos' library is pictures, a VM is a disk image. */
+export function packageKind(name: string): FileKind {
+  const ext = extOf(name)
+  if (ext === 'app') return 'app'
+  if (/^(photoslibrary|photolibrary|aplibrary|lrdata)$/.test(ext)) return 'image'
+  if (/^(imovielibrary|fcpbundle|tvlibrary)$/.test(ext)) return 'video'
+  if (/^(musiclibrary|band|logicx)$/.test(ext)) return 'audio'
+  if (/^(sparsebundle|vmwarevm|pvm|utm)$/.test(ext)) return 'diskimage'
+  if (/^(pages|numbers|key|rtfd)$/.test(ext)) return 'document'
+  if (/^(xcarchive|framework|bundle|plugin|kext|appex|docset|mlpackage|xcodeproj|xcworkspace|playground)$/.test(ext)) return 'developer'
+  return 'other'
+}
+
+/** A folder or file in a nested map: the Space Map's cards, three levels deep, with what did not fit summed up. */
+export interface NestNode {
+  id: number
+  name: string
+  path: string
+  size: number
+  /** Entries directly inside (named ones plus small files counted together). */
+  items: number
+  dir: boolean
+  package?: boolean
+  kind?: FileKind
+  more?: boolean
+  closed?: MapNode['closed']
+  children?: NestNode[]
+  /** What is not drawn: how many entries and their bytes ("+90 more, 22.4 GB"). */
+  rest?: { count: number; size: number }
+}
+
+/** One kind of file across a scan, with its largest files and packages. */
+export interface KindGroup {
+  kind: FileKind | 'small'
+  size: number
+  count: number
+  top: NestNode[]
 }
 
 /** A file's extension, lower-cased, without the dot ('' for none, and for names that are only a dot name). */
@@ -326,6 +370,37 @@ export function compareVersions(a: string, b: string): number {
     if (x !== y) return x - y
   }
   return 0
+}
+
+/** This Mac in words, for the Overview's footer. */
+export interface MacInfo { os: string; model: string; chip: string; memory: number; disk: string }
+
+/** Something the disk picker can scan: the startup disk, the home folder, another drive. */
+export interface DiskTarget { kind: ScanRootKind; label: string; path?: string; total?: number; free?: number }
+
+export interface FolderChange { path: string; before: number; after: number; delta: number; kind: 'grew' | 'shrank' | 'new' | 'gone' }
+export interface ScanChanges { scans: { at: number; bytes: number }[]; base?: number; changes: FolderChange[] }
+
+/**
+ * What changed between two scans' folder sizes by `min` bytes or more. A folder whose change one folder inside it
+ * already explains (four fifths or more, the same way) is left out, so the list names where things happened, not every
+ * folder above them.
+ */
+export function diffSnapshots(before: [string, number][], after: [string, number][], min: number): FolderChange[] {
+  const a = new Map(before)
+  const b = new Map(after)
+  const all: FolderChange[] = []
+  for (const [p, size] of b) {
+    const old = a.get(p)
+    if (old === undefined) { if (size >= min) all.push({ path: p, before: 0, after: size, delta: size, kind: 'new' }); continue }
+    const d = size - old
+    if (Math.abs(d) >= min) all.push({ path: p, before: old, after: size, delta: d, kind: d > 0 ? 'grew' : 'shrank' })
+  }
+  for (const [p, old] of a) if (!b.has(p) && old >= min) all.push({ path: p, before: old, after: 0, delta: -old, kind: 'gone' })
+  const explained = (c: FolderChange): boolean => all.some((x) => x !== c && x.path.startsWith(`${c.path === '/' ? '' : c.path}/`) && Math.sign(x.delta) === Math.sign(c.delta) && Math.abs(x.delta) >= Math.abs(c.delta) * 0.8)
+  // A new or vanished folder inside another new or vanished one is part of it.
+  const inside = (c: FolderChange): boolean => (c.kind === 'new' || c.kind === 'gone') && all.some((x) => x !== c && x.kind === c.kind && c.path.startsWith(`${x.path}/`))
+  return all.filter((c) => !explained(c) && !inside(c)).sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta)).slice(0, 200)
 }
 
 /** Settings → Privacy & Security → Full Disk Access. */

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appleAssetGroup, blobDigest, cacheOwner, hfRepo, isBundleId, parseOllamaManifest, parsePackageInfo, reportSize, zipAppPlist, type CleanReport } from '../src/shared/cleanup.ts'
+import { appleAssetGroup, blobDigest, cacheOwner, hfRepo, isBundleId, supportCacheLabel, parseOllamaManifest, parsePackageInfo, reportSize, zipAppPlist, type CleanReport } from '../src/shared/cleanup.ts'
 
 test('a cache belongs to an open app by its bundle id, a part of it, its name or its vendor', () => {
   const running = [{ id: 'com.google.Chrome', name: 'Google Chrome' }, { id: 'com.microsoft.VSCode', name: 'Code' }, { id: 'com.tinyspeck.slackmacgap', name: 'Slack' }]
@@ -10,6 +10,15 @@ test('a cache belongs to an open app by its bundle id, a part of it, its name or
   assert.equal(cacheOwner('Slack', running)?.name, 'Slack', 'by name')
   assert.equal(cacheOwner('com.spotify.client', running), null)
   assert.equal(cacheOwner('Homebrew', running), null)
+})
+
+test('caches apps keep in Application Support read in words', () => {
+  assert.deepEqual(supportCacheLabel('Google/Chrome Canary/Profile 7/Service Worker/CacheStorage'), { app: 'Google Chrome Canary', label: 'Google Chrome Canary sites\' offline copies (Profile 7)' })
+  assert.equal(supportCacheLabel('Slack/Cache').label, 'Slack web cache')
+  assert.equal(supportCacheLabel('Slack/Service Worker/CacheStorage').label, 'Slack sites\' offline copies')
+  assert.equal(supportCacheLabel('EC2 Remote Access/Partitions/web-general/Cache').label, 'EC2 Remote Access web cache (web-general)')
+  assert.equal(supportCacheLabel('Code/CachedExtensionVSIXs').label, 'Code extension downloads')
+  assert.equal(supportCacheLabel('Dia/User Data/Default/Service Worker/CacheStorage').label, 'Dia sites\' offline copies (Default)')
 })
 
 test('bundle ids look like reverse DNS', () => {

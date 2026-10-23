@@ -1,12 +1,11 @@
 import { useEffect, type ReactElement } from 'react'
-import { ago, bytes } from '@shared/storage'
+import { bytes } from '@shared/storage'
 import type { Tab } from '../../store'
 import { Icon } from '../icons'
 import Modal from '../Modal'
-import { NavItem } from '../plan/parts'
 import '../plan/plan.css'
 import './storage.css'
-import { cancelScan, initStorage, putBack, setRoom, startScan, useStorage, type RoomId } from './state'
+import { cancelScan, initStorage, putBack, setRoom, useStorage, type RoomId } from './state'
 import { tilde } from './parts'
 import Overview from './Overview'
 import SpaceMap from './SpaceMap'
@@ -16,12 +15,17 @@ import HiddenFiles from './HiddenFiles'
 import RecentlyRemoved from './RecentlyRemoved'
 import Duplicates from './Duplicates'
 import { AiModels, Installers, JunkFiles, SystemData } from './CleanupRooms'
+import { Leftovers, StartupItems, Uninstaller, UnusedApps } from './AppRooms'
+import { Monitor, Optimize } from './MacRooms'
+import Report from './Report'
 
 /**
  * Storage: a Mac cleaner in the spirit of Strata, as rooms in a sidebar of its own. The Disk rooms look into a scan
  * of the Mac, the home folder or any folder (main/storage: a separate process walks the disk and keeps the tree); the
- * Clean up rooms measure the places caches, models, backups and installers are kept (main/storage/cleanup.ts).
- * Nothing is ever deleted: what goes, goes to the Trash, and Recently Removed puts it back. Mac app only.
+ * Clean up rooms measure the places caches, models, backups and installers are kept (main/storage/cleanup.ts), the
+ * Tools read the installed apps, their Library files and startup items (macApps.ts), and the Insights read the
+ * processor, memory, disk, network and battery (monitor.ts) and report on the scan. Nothing is ever deleted: what goes,
+ * goes to the Trash, and Recently Removed puts it back. Mac app only.
  */
 
 interface Room { id: RoomId; label: string; icon: () => ReactElement; render: (active: boolean) => ReactElement }
@@ -32,23 +36,41 @@ const GROUPS: { label?: string; rooms: Room[] }[] = [
       { id: 'overview', label: 'Overview', icon: () => <Icon.storage />, render: () => <Overview /> },
       { id: 'map', label: 'Space Map', icon: () => <Icon.treemap />, render: (a) => <SpaceMap active={a} /> },
       { id: 'search', label: 'Search', icon: () => <Icon.search />, render: (a) => <SearchRoom active={a} /> },
-      { id: 'large', label: 'Large Files', icon: () => <Icon.note />, render: () => <LargeFiles /> },
-      { id: 'hidden', label: 'Hidden Files', icon: () => <Icon.eyeOff />, render: () => <HiddenFiles /> }
+      { id: 'large', label: 'Large Files', icon: () => <Icon.note />, render: () => <LargeFiles /> }
     ]
   },
   {
     label: 'Clean up',
     rooms: [
       { id: 'junk', label: 'Junk Files', icon: () => <Icon.sparkles />, render: () => <JunkFiles /> },
-      { id: 'ai', label: 'AI Models', icon: () => <Icon.brain />, render: () => <AiModels /> },
+      { id: 'ai', label: 'AI Data Sweeper', icon: () => <Icon.brain />, render: () => <AiModels /> },
       { id: 'system', label: 'System Data', icon: () => <Icon.disk />, render: () => <SystemData /> },
+      { id: 'leftovers', label: 'Leftovers', icon: () => <Icon.box />, render: () => <Leftovers /> },
       { id: 'duplicates', label: 'Duplicates', icon: () => <Icon.copy />, render: () => <Duplicates /> },
-      { id: 'installers', label: 'Installers', icon: () => <Icon.archive />, render: () => <Installers /> }
+      { id: 'hidden', label: 'Hidden Files', icon: () => <Icon.eyeOff />, render: () => <HiddenFiles /> },
+      { id: 'unused', label: 'Unused Apps', icon: () => <Icon.moon />, render: () => <UnusedApps /> }
     ]
   },
-  { rooms: [{ id: 'removed', label: 'Recently Removed', icon: () => <Icon.history />, render: () => <RecentlyRemoved /> }] }
+  {
+    label: 'Tools',
+    rooms: [
+      { id: 'uninstaller', label: 'Uninstaller', icon: () => <Icon.trash />, render: () => <Uninstaller /> },
+      { id: 'startup', label: 'Startup Items', icon: () => <Icon.power />, render: () => <StartupItems /> },
+      { id: 'installers', label: 'Installers', icon: () => <Icon.archive />, render: () => <Installers /> },
+      { id: 'removed', label: 'Recently Removed', icon: () => <Icon.history />, render: () => <RecentlyRemoved /> }
+    ]
+  },
+  {
+    label: 'Insights',
+    rooms: [
+      { id: 'monitor', label: 'Monitor', icon: () => <Icon.activity />, render: (a) => <Monitor active={a} /> },
+      { id: 'report', label: 'Report', icon: () => <Icon.list />, render: () => <Report /> }
+    ]
+  }
 ]
-const ROOMS = GROUPS.flatMap((g) => g.rooms)
+/** Optimize opens from the Overview's ring rather than the sidebar, as in Strata. */
+const HIDDEN: Room[] = [{ id: 'optimize', label: 'Optimize', icon: () => <Icon.wand />, render: () => <Optimize /> }]
+const ROOMS = [...GROUPS.flatMap((g) => g.rooms), ...HIDDEN]
 
 export default function StorageTab({ active }: { tab: Tab; active: boolean }): ReactElement {
   useEffect(() => initStorage(), [])
@@ -67,17 +89,26 @@ export default function StorageTab({ active }: { tab: Tab; active: boolean }): R
   return (
     <section className="plan storage" aria-label="Storage">
       <div className="plan-frame">
-        <aside className="plan-side st-side" aria-label="Storage rooms">
-          {GROUPS.map((g, i) => (
-            <div key={i} className="st-side-group">
-              {g.label && <h4>{g.label}</h4>}
-              {g.rooms.map((r) => <NavItem key={r.id} icon={r.icon()} label={r.label} on={room === r.id} onClick={() => setRoom(r.id)} />)}
-            </div>
-          ))}
-          <span className="flex-1" />
+        <aside className="st-side" aria-label="Storage rooms">
+          <div className="st-brand">
+            <span className="st-brand-icon"><Icon.storage /></span>
+            <div><b>Storage</b><span>Visualize your storage</span></div>
+          </div>
+          <nav className="st-nav">
+            {GROUPS.map((g, i) => (
+              <div key={i} className="st-nav-group">
+                {g.label && <h4>{g.label}</h4>}
+                {g.rooms.map((r) => (
+                  <button key={r.id} type="button" className="st-nav-item" aria-current={room === r.id ? 'page' : undefined} onClick={() => setRoom(r.id)}>
+                    {r.icon()}<span>{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
           <DiskWidget />
         </aside>
-        <div className="plan-main st-main">
+        <div className="st-main">
           {current.render(active)}
           {undo && (
             <div className="plan-undo" role="status">
@@ -95,11 +126,11 @@ export default function StorageTab({ active }: { tab: Tab; active: boolean }): R
               {admin.map((a) => (
                 <li key={a.path}>
                   <span title={a.path}>{tilde(a.path)}</span>
-                  <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('local:reveal', a.path)}><Icon.finder />Show in Finder</button>
+                  <button type="button" className="st-button" onClick={() => void window.api.invoke('local:reveal', a.path)}><Icon.finder />Show in Finder</button>
                 </li>
               ))}
             </ul>
-            <div className="cal-edit-foot"><span className="flex-1" /><button type="button" className="btn btn-sm btn-primary" onClick={() => useStorage.setState({ adminItems: null })}>Done</button></div>
+            <div className="cal-edit-foot"><span className="flex-1" /><button type="button" className="st-primary" onClick={() => useStorage.setState({ adminItems: null })}>Done</button></div>
           </div>
         </Modal>
       )}
@@ -107,7 +138,7 @@ export default function StorageTab({ active }: { tab: Tab; active: boolean }): R
   )
 }
 
-/** The foot of the sidebar: the startup disk's free space, and the scan (its progress, or when it last ran). */
+/** The foot of the sidebar: the startup disk's use, and the scan while it runs. */
 function DiskWidget(): ReactElement {
   const disk = useStorage((s) => s.disk)
   const scan = useStorage((s) => s.scan)
@@ -116,26 +147,19 @@ function DiskWidget(): ReactElement {
   const level = disk && disk.free / disk.total < 0.05 ? 'crit' : disk && disk.free / disk.total < 0.1 ? 'warn' : 'ok'
   return (
     <div className="st-disk">
-      <div className="st-disk-name"><Icon.disk />{disk?.name ?? 'Macintosh HD'}</div>
-      <div className={`st-disk-bar ${level}`}><span style={{ width: `${pct}%` }} /></div>
-      <div className="st-disk-free">{disk ? <><b>{bytes(disk.free)}</b> free of {bytes(disk.total)}</> : 'Reading the disk…'}</div>
-      <div className="st-disk-scan">
-        {scan.status === 'scanning' ? (
-          <>
-            <span className="st-spinner sm" aria-hidden="true" />
-            <span className="flex-1 st-disk-scan-text" title={scan.progress?.path}>Scanning · {bytes(scan.progress?.bytes ?? 0)}</span>
-            <button type="button" className="plan-add" aria-label="Stop the scan" title="Stop the scan" onClick={() => void cancelScan()}><Icon.x /></button>
-          </>
-        ) : (
-          <>
-            <span className="flex-1 st-disk-scan-text" title={scan.summary ? `Scanned ${scan.summary.root === '/' ? 'the whole Mac' : tilde(scan.summary.root)}` : undefined}>
-              {scan.summary ? `${scan.summary.root === '/' ? 'Mac' : tilde(scan.summary.root)} · ${ago(scan.summary.at)}` : 'Not scanned yet'}
-            </span>
-            <button type="button" className="plan-add" aria-label="Scan again" title={scan.summary ? 'Scan again' : 'Scan the whole Mac'}
-              onClick={() => void startScan(scan.summary?.kind ?? 'mac', scan.summary?.kind === 'path' ? scan.summary.root : undefined)}><Icon.refresh /></button>
-          </>
-        )}
+      <div className="st-disk-head">
+        <Icon.disk />
+        <div><b>{disk?.name ?? 'Macintosh HD'}</b><span>{disk ? `${bytes(used)} used` : 'Reading the disk…'}</span></div>
       </div>
+      <div className={`st-disk-bar ${level}`}><span style={{ width: `${pct}%` }} /></div>
+      <div className="st-disk-free">{disk ? `${bytes(disk.free)} free · ${bytes(disk.total)} total` : ''}</div>
+      {scan.status === 'scanning' && (
+        <div className="st-disk-scan">
+          <span className="st-spinner sm" aria-hidden="true" />
+          <span className="flex-1" title={scan.progress?.path}>Scanning · {bytes(scan.progress?.bytes ?? 0)}</span>
+          <button type="button" className="st-iconbtn" aria-label="Stop the scan" title="Stop the scan" onClick={() => void cancelScan()}><Icon.x /></button>
+        </div>
+      )}
     </div>
   )
 }

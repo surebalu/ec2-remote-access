@@ -22,13 +22,46 @@ export interface CleanItem {
   mtime?: number
   /** Last opened (Spotlight), for old downloads. */
   used?: number
+  /** A title in words ("Slack web cache") when the folder's own name is not one; `name` is then shown beneath. */
+  label?: string
+  /** The line under the title, when the room says more than where it is ("Strata 1.0.34 inside · 1.0.35 installed"). */
+  sub?: string
+  badges?: Badge[]
+  /** An app whose icon stands for the item. */
+  app?: string
+  /** For the AI room's filter. */
+  category?: 'model' | 'cache' | 'other'
 }
+
+export interface Badge { text: string; tone: 'ok' | 'warn' | 'info' | 'crit' | 'muted' }
 
 export interface CleanGroup {
   id: string
   title: string
   text: string
   items: CleanItem[]
+  /** A second line under the title ("betafish.com · 5 items"). */
+  sub?: string
+  /** Which coloured icon the group shows (storage/parts.tsx GROUP_LOOKS), or an app's icon. */
+  look?: string
+  app?: string
+  badge?: string
+}
+
+/** One card of the System Data room: what macOS counts there, where it is managed, and what of it can go. */
+export interface SystemCard {
+  id: string
+  title: string
+  /** Where Storage settings counts it ("System Data", "iOS Files", "Messages"). */
+  tag: string
+  look: string
+  text: string
+  size?: number
+  /** Lines that lead to another room or list versions ("iOS 27.2 · 8.2 GB · used 2 weeks ago"). */
+  rows?: { label: string; sub?: string; size?: number; room?: string }[]
+  /** What can go from here, ticked or not. */
+  items?: CleanItem[]
+  actions?: { label: string; url?: string; room?: string }[]
 }
 
 export interface CleanReport {
@@ -71,6 +104,30 @@ export function cacheOwner(folder: string, running: { id: string; name: string }
     if (vendor && vendor.length > 2 && f === vendor) return r
   }
   return null
+}
+
+/** Cache folders Chromium and Electron apps keep in Application Support, and what each is, in words. */
+export const SUPPORT_CACHES: Record<string, string> = {
+  Cache: 'web cache', 'Code Cache': 'script cache', GPUCache: 'graphics cache', DawnGraphiteCache: 'graphics cache', DawnWebGPUCache: 'graphics cache',
+  GrShaderCache: 'graphics cache', ShaderCache: 'graphics cache', CacheStorage: 'sites\' offline copies', CachedData: 'compiled code cache', CachedExtensionVSIXs: 'extension downloads'
+}
+
+/** Folders that hold one vendor's apps (Google/Chrome Canary): the app is named with both. */
+const VENDOR_FOLDERS = new Set(['Google', 'Microsoft', 'BraveSoftware', 'JetBrains', 'Mozilla', 'Adobe', 'Vivaldi', 'Microsoft Edge'])
+/** Folders inside an app's that say nothing about which part of it a cache belongs to. */
+const QUIET_FOLDERS = new Set(['Service Worker', 'User', 'User Data', 'Network', 'Partitions'])
+
+/**
+ * A cache folder in Application Support in words: Google/Chrome Canary/Profile 7/Service Worker/CacheStorage →
+ * "Google Chrome Canary sites' offline copies (Profile 7)"; Slack/Cache → "Slack web cache".
+ */
+export function supportCacheLabel(rel: string): { app: string; label: string } {
+  const parts = rel.split('/').filter(Boolean)
+  const what = SUPPORT_CACHES[parts[parts.length - 1]] ?? 'cache'
+  const vendor = parts.length > 2 && VENDOR_FOLDERS.has(parts[0])
+  const app = vendor ? `${parts[0]} ${parts[1]}`.replace('BraveSoftware Brave-Browser', 'Brave Browser') : parts[0]
+  const middle = parts.slice(vendor ? 2 : 1, -1).filter((p) => !QUIET_FOLDERS.has(p))
+  return { app, label: `${app} ${what}${middle.length ? ` (${middle.join(' ')})` : ''}` }
 }
 
 /** A reverse-DNS name: com.vendor.app (three parts at least, letters first). */
