@@ -191,6 +191,22 @@ const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !r
 const boardsSaved = {}
 // Tasks, Calendar and Links documents (main/records.ts), Anybox's library on "this Mac", a page preview and an iCal link.
 const recordDocs = {}
+// The Services dialog's rows at any width: every button inside its card, the buttons' right edges, the units and
+// the states each in one line down the list, and a group's Restart all ending where the rows' buttons end.
+const SVC_ALIGNED = `(() => {
+  const rows = [...document.querySelectorAll('.svc-row[data-unit]')]
+  const at = (r, s) => r.querySelector(s).getBoundingClientRect()
+  const same = (xs) => Math.max(...xs) - Math.min(...xs) <= 1
+  const rights = rows.map((r) => at(r, '.svc-acts').right)
+  const head = document.querySelector('.svc-group-head .btn')
+  return {
+    inside: rows.every((r, i) => rights[i] <= r.getBoundingClientRect().right - 8 && at(r, '[aria-label^="More for"]').right <= r.getBoundingClientRect().right - 8),
+    buttons: same(rights), units: same(rows.map((r) => at(r, '.svc-unit').left)), states: same(rows.map((r) => at(r, '.svc-pill').left)) || same(rows.map((r) => at(r, '.svc-pill').right)),
+    groupButton: !head || Math.abs(head.getBoundingClientRect().right - rights[0]) <= 1.5,
+    sideways: (() => { const b = document.querySelector('.svc-body'); return b.scrollWidth <= b.clientWidth + 1 })()
+  }
+})()`
+const ALL_ALIGNED = { inside: true, buttons: true, units: true, states: true, groupButton: true, sideways: true }
 // Tools in windows of their own (main/toolWindows.ts): which are out.
 let toolsOut = []
 // Settings → Data: the data folder's state as main/dataFolder.ts reports it.
@@ -1184,6 +1200,7 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('body > .panel.modal.fixed')`)
     await js(`[...document.querySelectorAll('body > .panel.modal.fixed button')].find((b) => b.textContent === 'Services…').click()`)
     await until(`!!document.querySelector('.svc-row[data-unit="3dspace.service"]') && !!document.querySelector('.svc-row[data-unit="tif.service"]')`)
+    assert.deepEqual(await js(SVC_ALIGNED), ALL_ALIGNED, 'services rows line up on the desktop')
     assert.ok(calls.some((c) => c.channel === 'services:status' && c.args[0].includes(running.key)), 'the server is asked for its units')
     assert.equal(await js(`!!document.querySelector('.svc-prod')`), true, 'a production account is marked')
     assert.match(await js(`document.querySelector('.svc-row[data-unit="tif.service"]').textContent`), /Failed.*Start/)
@@ -2132,6 +2149,7 @@ app.whenReady().then(async () => {
     assert.deepEqual([svcRow.dotLine, svcRow.pillLine, svcRow.unitBelow, svcRow.actsBelow, svcRow.actsRight], [true, true, true, true, true], 'dot, name and state on one line; unit; uptime and buttons')
     assert.equal(await pjs(`(() => { const head = document.querySelector('.svc-head').getBoundingClientRect(); const close = document.querySelector('.svc-head [aria-label="Close dialog"]').getBoundingClientRect(); const title = document.querySelector('.svc-head h2').getBoundingClientRect(); return close.right <= head.right && Math.abs(close.top - title.top) < 12 })()`), true, 'Close sits on the title line')
     assert.equal(await pjs(`(() => { const b = document.querySelector('.svc-body'); return b.scrollWidth <= b.clientWidth + 1 })()`), true, 'services fit the phone width')
+    assert.deepEqual(await pjs(SVC_ALIGNED), ALL_ALIGNED, 'services rows line up on a phone')
     assert.equal(await noSideScroll(), true)
     await pshot('phone-services.png')
     await pjs(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
@@ -2142,6 +2160,13 @@ app.whenReady().then(async () => {
     await new Promise((r) => setTimeout(r, 300))
     assert.equal(await pjs(`(() => { const h = document.querySelector('.hl'); return h.scrollWidth <= h.clientWidth + 1 })()`), true, 'no sideways scrolling inside health on a tablet')
     await pshot('ipad-health.png')
+    await pjs(`[...document.querySelectorAll('.hl button')].find((b) => b.textContent.trim() === 'Control services').click()`)
+    await puntil(`document.querySelectorAll('.svc-row[data-unit]').length > 1`)
+    assert.ok(await pjs(`document.querySelector('.svc').getBoundingClientRect().width < 760`), 'a sheet narrower than the screen')
+    assert.deepEqual(await pjs(SVC_ALIGNED), ALL_ALIGNED, 'services rows line up in a sheet on a wide screen (unfolded Duo, iPad)')
+    await pshot('ipad-services.png')
+    await pjs(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
+    await puntil(`!document.querySelector('.svc')`)
     await pjs(`document.querySelector('.hl-srv[data-ip="10.9.0.11"] .hl-srv-link').click()`)
     await puntil(`!!document.querySelector('.m-hostpage .host-page') && document.querySelectorAll('.m-hostpage .hp-chart').length === 4`)
     await pshot('ipad-host-page.png')

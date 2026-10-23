@@ -2408,7 +2408,7 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
 /* ---------- Service control (services/ServicesDialog.tsx): systemd units per service, through SSM ---------- */
 .btn-danger { border-color: var(--err); background: var(--err); color: #fff; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
-.svc { display: flex; max-height: min(760px, calc(100vh - 48px)); min-height: 320px; flex-direction: column; }
+.svc { display: flex; max-height: min(760px, calc(100vh - 48px)); min-height: 320px; flex-direction: column; container: svc / inline-size; }
 .svc-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px 14px; border-bottom: 1px solid var(--border); }
 .svc-head h2 { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
 .svc-head p { margin-top: 2px; font-size: 11.5px; }
@@ -2418,10 +2418,11 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
 .svc-skel { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
 .svc-skel > div { height: 52px; border-radius: 12px; }
 .svc-group { margin-top: 14px; }
-.svc-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.svc-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding-right: 13px; }
 .svc-group-head h3 { font-size: 12.5px; font-weight: 700; }
 .svc-group-head .muted { font-size: 11px; }
-.svc-row { display: grid; grid-template-columns: auto minmax(150px, 1.3fr) minmax(120px, 1fr) auto minmax(120px, 1fr) auto; align-items: center; gap: 12px; padding: 9px 12px;
+/* Wide: one line per unit; the text columns shrink and truncate, the state and buttons keep their widths. */
+.svc-row { display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) 92px minmax(0, 1fr) 122px; align-items: center; gap: 12px; padding: 9px 12px;
   border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
 .svc-row + .svc-row { margin-top: 6px; }
 .svc-row.lvl-crit { border-color: color-mix(in srgb, var(--err) 40%, var(--border)); background: linear-gradient(90deg, var(--err-soft), transparent 60%), var(--panel); }
@@ -2433,6 +2434,7 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
 .svc-who span { font-size: 10.5px; }
 .svc-unit { overflow: hidden; color: var(--text-2); font: 500 11px var(--mono-font); text-overflow: ellipsis; white-space: nowrap; }
 .svc-pill { padding: 2px 9px; border-radius: 999px; background: var(--lvl-soft); color: var(--lvl); font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.svc-row > .svc-pill { justify-self: start; }
 .svc-meta { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .svc-acts { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .svc-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11px; font-weight: 600; }
@@ -2473,26 +2475,19 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
 
 .svc-def { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr) auto; align-items: center; gap: 8px; }
 .svc-def-error { grid-column: 1 / -1; }
-@media (max-width: 760px) {
-  /* Named areas, not auto-placement: placed in order, the state pill fell into the dot's column and widened it, which
-     pushed every name to the right. Dot, name and state on the first line; the unit; uptime with the buttons. */
-  .svc-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'dot who pill' '. unit unit' '. meta acts'; column-gap: 10px; row-gap: 4px; padding: 10px 12px; }
+/* Services rows follow the dialog's own width, not the screen's: on an unfolded iPhone Duo or an iPad the screen is
+   wide but the dialog is a 640 px sheet, and the one-line row did not fit it (Restart hung outside the card). Named
+   areas, not auto-placement (placed in order, the state pill fell into the dot's column), and fixed widths for the
+   state and the buttons, so every row's columns line up. */
+@container svc (max-width: 760px) {
+  /* Two lines: the name and host, the unit over its uptime, then the state and the buttons, each a column of its own. */
+  .svc-row { grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1fr) 92px 122px; grid-template-areas: 'dot who unit pill acts' 'dot who meta pill acts'; column-gap: 12px; row-gap: 2px; }
   .svc-row > .svc-dot { grid-area: dot; }
   .svc-row > .svc-who { grid-area: who; }
-  .svc-row > .svc-pill { grid-area: pill; justify-self: end; }
-  .svc-row > .svc-unit { grid-area: unit; }
-  .svc-row > .svc-meta { grid-area: meta; align-self: center; }
+  .svc-row > .svc-unit { grid-area: unit; align-self: end; }
+  .svc-row > .svc-meta { grid-area: meta; align-self: start; }
+  .svc-row > .svc-pill { grid-area: pill; }
   .svc-row > .svc-acts { grid-area: acts; }
-  /* The icon, the title and Close on the first line; History and Read again under the title. */
-  .svc-head { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; padding: 12px 14px 10px; }
-  .svc-head > .min-w-0 { flex-basis: calc(100% - 92px); }
-  .svc-head > .btn { order: 2; }
-  .svc-head > .btn:first-of-type { margin-left: 42px; }
-  .svc-head > [aria-label='Close dialog'] { order: 1; margin-left: 0; }
-  .svc-head h2 { flex-wrap: wrap; row-gap: 3px; }
-  .svc-head h2 .muted { white-space: nowrap; }
-  .svc-body { padding: 4px 12px 14px; }
-  .svc-group-head { flex-wrap: wrap; }
   /* A step and a history line the same way: auto-placed, the time fell into the dot's column. */
   .svc-step { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'dot label time' '. unit unit' '. msg msg'; row-gap: 2px; }
   .svc-step > .svc-step-dot { grid-area: dot; }
@@ -2505,6 +2500,22 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
   .svc-hist > .svc-hist-what { grid-area: what; }
   .svc-hist > .svc-pill { grid-area: pill; justify-self: end; }
   .svc-hist > .svc-hist-by { grid-area: by; }
+}
+@container svc (max-width: 520px) {
+  /* A phone: dot, name and state on the first line; the unit; uptime with the buttons. */
+  .svc-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'dot who pill' '. unit unit' '. meta acts'; column-gap: 10px; row-gap: 4px; padding: 10px 12px; }
+  .svc-row > .svc-unit, .svc-row > .svc-meta { align-self: center; }
+  .svc-row > .svc-pill { justify-self: end; }
+  /* The icon, the title and Close on the first line; History and Read again under the title. */
+  .svc-head { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; padding: 12px 14px 10px; }
+  .svc-head > .min-w-0 { flex-basis: calc(100% - 92px); }
+  .svc-head > .btn { order: 2; }
+  .svc-head > .btn:first-of-type { margin-left: 42px; }
+  .svc-head > [aria-label='Close dialog'] { order: 1; margin-left: 0; }
+  .svc-head h2 { flex-wrap: wrap; row-gap: 3px; }
+  .svc-head h2 .muted { white-space: nowrap; }
+  .svc-body { padding: 4px 12px 14px; }
+  .svc-group-head { flex-wrap: wrap; }
 }
 /* The memory honeycomb above the per-machine charts (MemoryGrid.tsx). */
 .hl-mem-combs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); align-items: start; gap: 12px; margin-bottom: 12px; }
