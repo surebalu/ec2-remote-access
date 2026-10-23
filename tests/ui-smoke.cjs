@@ -642,7 +642,7 @@ app.whenReady().then(async () => {
     const workspaceTab = (name) => js(`document.getElementById('workspace-tab-' + ${JSON.stringify(name)}).click()`)
     assert.equal(calls.filter((c) => c.channel === 'health:snapshot').length, 0, 'overview does not start platform polling')
     assert.equal(await js(`document.querySelector('.ws-account').textContent`), '2 accounts verified')
-    assert.equal(await js(`document.querySelectorAll('.app-rail .rail-group').length`), 4)
+    assert.equal(await js(`document.querySelectorAll('.app-rail .rail-group, .app-rail .rail-group-label').length`), 0, 'one list, no group labels')
     assert.equal(await js(`document.querySelectorAll('.app-rail .rail-key').length`), 0, 'no shortcut hints under the rail items')
     assert.ok(await js(`(() => { const rail = document.querySelector('.app-rail'); return rail.scrollHeight <= rail.clientHeight })()`), 'grouped navigation fits')
     assert.equal(await js(`document.querySelector('.ws-attention').textContent.includes('1 inventory scan needs a retry')`), true)
