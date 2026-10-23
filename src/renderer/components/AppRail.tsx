@@ -41,12 +41,12 @@ export default function AppRail(): ReactElement {
   const isTool = (k: RailSection): k is ToolKind => k !== 'hosts' && k !== 'overview'
 
   /** Shortcuts are in each item's tooltip (`withKey`), not drawn under it. */
-  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; hue?: number }): ReactElement => (
+  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; hue?: number; sat?: number }): ReactElement => (
     <button
       key={o.label}
       type="button"
       className={`rail-item no-drag ${o.on ? 'on' : ''} ${o.hue !== undefined ? 'rail-tinted' : ''}`}
-      style={o.hue !== undefined ? { '--tool-hue': o.hue } as CSSProperties : undefined}
+      style={o.hue !== undefined ? { '--tool-hue': o.hue, ...(o.sat !== undefined ? { '--tool-sat': `${o.sat}%` } : {}) } as CSSProperties : undefined}
       title={o.title}
       aria-label={o.aria ?? o.label}
       aria-current={o.on ? 'page' : undefined}
@@ -89,13 +89,14 @@ export default function AppRail(): ReactElement {
 
   return (
     <nav className="app-rail" aria-label="App sections">
-      {item({ label: 'Search', icon: <Icon.search />, on: false, title: 'Find hosts, tools and commands (⌘K)', onClick: () => st().openQuickSwitcher() })}
+      {item({ label: 'Search', icon: <Icon.search />, hue: 220, sat: 14, on: false, title: 'Find hosts, tools and commands (⌘K)', onClick: () => st().openQuickSwitcher() })}
       {/* One list, in TOOL_GROUPS order, with no group labels or dividers (the user found them cluttered). */}
       <div className="rail-sections">
-      {item({ label: 'Hosts', icon: <Icon.server />, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
+      {item({ label: 'Hosts', icon: <Icon.server />, hue: LOOKS.hosts.hue, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
       {item({
         label: 'Overview',
         icon: <Icon.grid />,
+        hue: LOOKS.overview.hue,
         on: gridView && !gridHost,
         badge: sessions,
         disabled: sessions === 0,
