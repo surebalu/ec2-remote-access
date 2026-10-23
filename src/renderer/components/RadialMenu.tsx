@@ -88,6 +88,7 @@ export default function RadialMenu(): ReactElement | null {
       tool('health', 'Health'),
       hasBrowser() && tool('local', 'Terminal'),
       hasBrowser() && tool('finder', 'Finder'),
+      hasBrowser() && tool('storage', 'Storage'),
       tool('browser', 'Browser'),
       tool('devtools', 'Dev tools'),
       tool('tasks', 'Tasks'),

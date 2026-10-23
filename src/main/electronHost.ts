@@ -8,6 +8,7 @@ import { cancelDownload, fillPage } from './webviews'
 import { mainWindow } from './windows'
 import { fileIcons, hideLauncher, launcherCommand, launcherConfirm, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
 import { attachTool, detachTool, detachedTools, relayToTool, toolWindowList } from './toolWindows'
+import { electronStorage } from './storage/scanClient'
 import { hideLinksPanel, linksPanelCommand, linksPanelPage, linksPanelStatus, openAutomationSettings, pauseLinksPanelKeys, resizeLinksPanel, setOwnPage, showLinksPanel } from './linksPanel'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
@@ -141,5 +142,6 @@ export const electronHost: Host = {
   launcher: electronLauncher,
   linksPanel: electronLinksPanel,
   toolWindows: electronToolWindows,
-  extensions: { list: listExtensions, installFromStore, addFolder: addExtensionFolder, setEnabled: setExtensionEnabled, remove: removeExtension, action: clickExtension }
+  extensions: { list: listExtensions, installFromStore, addFolder: addExtensionFolder, setEnabled: setExtensionEnabled, remove: removeExtension, action: clickExtension },
+  storage: process.platform === 'darwin' ? electronStorage : null
 }

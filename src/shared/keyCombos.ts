@@ -6,13 +6,13 @@
  * covers it.
  */
 
-export type RailSection = 'hosts' | 'overview' | 'health' | 'local' | 'finder' | 'browser' | 'notes' | 'board' | 'claude' | 'chatgpt' | 'devtools' | 'tasks' | 'calendar' | 'links'
+export type RailSection = 'hosts' | 'overview' | 'health' | 'local' | 'finder' | 'storage' | 'browser' | 'notes' | 'board' | 'claude' | 'chatgpt' | 'devtools' | 'tasks' | 'calendar' | 'links'
 
 /** Top to bottom, as the rail shows them. */
-export const RAIL_SECTIONS: RailSection[] = ['hosts', 'overview', 'health', 'local', 'finder', 'browser', 'devtools', 'tasks', 'calendar', 'links', 'notes', 'board', 'claude', 'chatgpt']
+export const RAIL_SECTIONS: RailSection[] = ['hosts', 'overview', 'health', 'local', 'finder', 'storage', 'browser', 'devtools', 'tasks', 'calendar', 'links', 'notes', 'board', 'claude', 'chatgpt']
 
 export const SECTION_NAMES: Record<RailSection, string> = {
-  hosts: 'Hosts', overview: 'Overview', health: 'Health', local: 'Terminal', finder: 'Finder', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT', devtools: 'Dev tools',
+  hosts: 'Hosts', overview: 'Overview', health: 'Health', local: 'Terminal', finder: 'Finder', storage: 'Storage', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT', devtools: 'Dev tools',
   tasks: 'Tasks', calendar: 'Calendar', links: 'Links'
 }
 

@@ -13,6 +13,7 @@ import TasksTab from './plan/TasksTab'
 import CalendarTab from './plan/CalendarTab'
 import LinksTab from './plan/LinksTab'
 import FinderTab from './finder/FinderTab'
+import StorageTab from './storage/StorageTab'
 import WebAppTab from './webapp/WebAppTab'
 
 /**
@@ -21,5 +22,5 @@ import WebAppTab from './webapp/WebAppTab'
  * screen; `focused`: it has the keyboard (an SSH terminal takes keys only then); `tiled`: in a grid or a split.
  */
 export default function TabBody({ tab: t, active, focused, tiled = false }: { tab: Tab; active: boolean; focused: boolean; tiled?: boolean }): ReactElement {
-  return t.kind === 'rdp' ? <RdpTab tab={t} active={active} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={active} /> : t.kind === 'notes' ? <NotesTab tab={t} active={active} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={active} /> : t.kind === 'local' ? <TerminalApp tab={t} active={active} /> : t.kind === 'board' ? <BoardTab tab={t} active={active} /> : t.kind === 'devtools' ? <DevToolsTab /> : t.kind === 'tasks' ? <TasksTab tab={t} active={active} /> : t.kind === 'calendar' ? <CalendarTab tab={t} active={active} /> : t.kind === 'links' ? <LinksTab tab={t} active={active} /> : t.kind === 'health' ? <HealthTab tab={t} active={active} /> : t.kind === 'finder' ? <FinderTab tab={t} active={active} /> : t.kind === 'claude' || t.kind === 'chatgpt' ? <WebAppTab tab={t} active={active} /> : <TerminalTab tab={t} active={focused} />
+  return t.kind === 'rdp' ? <RdpTab tab={t} active={active} tiled={tiled} /> : t.kind === 'sftp' ? <SftpTab tab={t} active={active} /> : t.kind === 'notes' ? <NotesTab tab={t} active={active} /> : t.kind === 'browser' ? <BrowserTab tab={t} active={active} /> : t.kind === 'local' ? <TerminalApp tab={t} active={active} /> : t.kind === 'board' ? <BoardTab tab={t} active={active} /> : t.kind === 'devtools' ? <DevToolsTab /> : t.kind === 'tasks' ? <TasksTab tab={t} active={active} /> : t.kind === 'calendar' ? <CalendarTab tab={t} active={active} /> : t.kind === 'links' ? <LinksTab tab={t} active={active} /> : t.kind === 'health' ? <HealthTab tab={t} active={active} /> : t.kind === 'finder' ? <FinderTab tab={t} active={active} /> : t.kind === 'storage' ? <StorageTab tab={t} active={active} /> : t.kind === 'claude' || t.kind === 'chatgpt' ? <WebAppTab tab={t} active={active} /> : <TerminalTab tab={t} active={focused} />
 }

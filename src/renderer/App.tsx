@@ -48,8 +48,8 @@ export default function App(): ReactElement {
   const browserInFront = useStore((s) => {
     if (s.gridView) return false
     const kindOf = (id: string): Tab['kind'] | undefined => s.tabs.find((t) => t.id === id)?.kind
-    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(id) ?? ''))
-    return ['browser', 'local', 'board', 'notes', 'finder', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(s.activeTab) ?? '')
+    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder', 'storage', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(id) ?? ''))
+    return ['browser', 'local', 'board', 'notes', 'finder', 'storage', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(s.activeTab) ?? '')
   })
   // The terminals beside a web page (the Browser, Claude, ChatGPT) in a split, for the page's context menu "Paste
   // into …", which main builds.

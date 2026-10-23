@@ -11,7 +11,8 @@ const external = [...deps, new RegExp(`^(${deps.map((d) => d.replace('/', '\\/')
 export default defineConfig({
   main: {
     resolve: { alias: { '@shared': resolve('src/shared') } },
-    build: { rollupOptions: { external, output: { format: 'es' } } }
+    // storageScan: the Storage tool's scan process (main/storage/scanProcess.ts), forked as a utility process.
+    build: { rollupOptions: { input: { index: resolve('src/main/index.ts'), storageScan: resolve('src/main/storage/scanProcess.ts') }, external, output: { format: 'es' } } }
   },
   preload: {
     resolve: { alias: { '@shared': resolve('src/shared') } },

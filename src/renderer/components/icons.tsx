@@ -506,5 +506,41 @@ export const Icon = {
     <svg {...base} className={p.className}>
       <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4h4M12 8v4.2l2.8 1.8" />
     </svg>
+  ),
+  storage: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M12 3a9 9 0 1 0 9 9h-9z" fill="currentColor" fillOpacity=".12" /><path d="M12 3a9 9 0 1 0 9 9h-9z" /><path d="M15 2.6A9 9 0 0 1 21.4 9H15z" /></svg>
+  ),
+  treemap: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><rect x="3" y="3" width="18" height="18" rx="2.5" /><path d="M12 3v18M12 11h9M3 14h9M16.5 11v10" /></svg>
+  ),
+  trash: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4 7h16M9.5 7V4.8c0-.4.4-.8.8-.8h3.4c.4 0 .8.4.8.8V7M6 7l1 12.2c.1 1 .9 1.8 1.9 1.8h6.2c1 0 1.8-.8 1.9-1.8L18 7M10 11v6M14 11v6" /></svg>
+  ),
+  sparkles: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M10 3.5 11.6 8 16 9.5l-4.4 1.6L10 15.5l-1.6-4.4L4 9.5 8.4 8zM18 13.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8zM17.5 3l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" /></svg>
+  ),
+  brain: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M9.5 4.5A2.5 2.5 0 0 0 7 7v.2A3 3 0 0 0 5 10a3 3 0 0 0 1 2.2A3 3 0 0 0 7.5 17 2.5 2.5 0 0 0 12 18.5V6a1.5 1.5 0 0 0-2.5-1.5zM14.5 4.5A2.5 2.5 0 0 1 17 7v.2A3 3 0 0 1 19 10a3 3 0 0 1-1 2.2 3 3 0 0 1-1.5 4.8A2.5 2.5 0 0 1 12 18.5" /><path d="M12 10h-2M12 14h2.5" /></svg>
+  ),
+  eyeOff: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 8.5 4.5 9.5 7a13 13 0 0 1-2.6 3.8M6.6 6.6C4.5 8 3.1 10.1 2.5 12c1 2.5 4.5 7 9.5 7a9.6 9.6 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2" /></svg>
+  ),
+  archive: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><rect x="3" y="4" width="18" height="4.5" rx="1.2" /><path d="M5 8.5v9.8c0 .9.7 1.7 1.7 1.7h10.6c.9 0 1.7-.8 1.7-1.7V8.5M10 12.5h4" /></svg>
+  ),
+  power: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M12 3v8M7.4 6.2a7.5 7.5 0 1 0 9.2 0" /></svg>
+  ),
+  box: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5zM3.5 7.5 12 12l8.5-4.5M12 12v9M7.8 5.3l8.5 4.5" /></svg>
+  ),
+  wand: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="m4 20 11-11M13 7l4 4M15.5 3.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5zM20 9l.4 1 1 .4-1 .4-.4 1-.4-1-1-.4 1-.4z" /></svg>
+  ),
+  gauge: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4.2 17.5a9 9 0 1 1 15.6 0" /><path d="m12 13.5 4-5" /><circle cx="12" cy="14" r="1.6" /><path d="M6 12h1.5M12 5.5V7M18 12h-1.5" /></svg>
+  ),
+  apps: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><rect x="13.5" y="13.5" width="7" height="7" rx="2" /></svg>
   )
 }

@@ -47,6 +47,7 @@ export function createGatewayHost(dataDir: string, broadcast: (channel: string, 
     linksPanel: null,
     toolWindows: null,
     extensions: null,
+    storage: null,
     encrypt(plain) {
       const iv = randomBytes(12)
       const cipher = createCipheriv('aes-256-gcm', key(), iv)
