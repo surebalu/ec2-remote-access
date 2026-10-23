@@ -40,8 +40,8 @@ export default function AppRail(): ReactElement {
   const open = (kind: ToolKind): void => st().openTool(kind)
   const isTool = (k: RailSection): k is ToolKind => k !== 'hosts' && k !== 'overview'
 
-  /** `keys`: the shortcut shown under the label, read from Settings → Keyboard so it changes when the shortcut does. */
-  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; keys?: string; hue?: number }): ReactElement => (
+  /** Shortcuts are in each item's tooltip (`withKey`), not drawn under it. */
+  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; hue?: number }): ReactElement => (
     <button
       key={o.label}
       type="button"
@@ -64,8 +64,6 @@ export default function AppRail(): ReactElement {
         {o.dot && !o.on && <span className="rail-open" aria-hidden="true" />}
       </span>
       <span className="rail-label">{o.label}</span>
-      {/* Drawn from the attribute so the button's text stays its name (what tests and text lookups match on). */}
-      {o.keys && <kbd className="rail-key" data-keys={o.keys} aria-hidden="true" />}
     </button>
   )
 
@@ -77,7 +75,6 @@ export default function AppRail(): ReactElement {
       hue: LOOKS[kind].hue,
       title: withKey(title, kind),
       on: front?.kind === kind,
-      keys: sectionKeyLabel(kind, shortcuts),
       dot: !!tab,
       onClick: () => open(kind),
       onContextMenu: (el) => setMenu({ kind, anchor: el }),
@@ -92,16 +89,15 @@ export default function AppRail(): ReactElement {
 
   return (
     <nav className="app-rail" aria-label="App sections">
-      {item({ label: 'Search', icon: <Icon.search />, on: false, title: 'Find hosts, tools and commands (⌘K)', keys: '⌘K', onClick: () => st().openQuickSwitcher() })}
+      {item({ label: 'Search', icon: <Icon.search />, on: false, title: 'Find hosts, tools and commands (⌘K)', onClick: () => st().openQuickSwitcher() })}
       <div className="rail-sections">
       <div className="rail-group" role="group" aria-label="Operate">
       <span className="rail-group-label">Operate</span>
-      {item({ label: 'Hosts', icon: <Icon.server />, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), keys: sectionKeyLabel('hosts', shortcuts) || '⌘1', onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
+      {item({ label: 'Hosts', icon: <Icon.server />, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
       {item({
         label: 'Overview',
         icon: <Icon.grid />,
         on: gridView && !gridHost,
-        keys: sectionKeyLabel('overview', shortcuts),
         badge: sessions,
         disabled: sessions === 0,
         title: withKey(sessions ? 'All sessions on one page' : 'All sessions on one page: none open yet', 'overview'),
@@ -122,10 +118,9 @@ export default function AppRail(): ReactElement {
         icon: <Icon.launcher />,
         on: false,
         title: `Launcher: search apps, files, hosts and notes${launcherKey ? ` (${formatCombo(launcherKey)}, from any app)` : ' (give it a key in Settings → Keyboard)'}`,
-        keys: formatCombo(launcherKey),
         onClick: () => void window.api.invoke('launcher:show')
       })}
-      {item({ label: 'Shortcuts', icon: <Icon.keyboard />, on: false, title: 'Keyboard shortcuts (⌘/)', keys: '⌘/', onClick: () => st().set({ shortcutsOpen: true }) })}
+      {item({ label: 'Shortcuts', icon: <Icon.keyboard />, on: false, title: 'Keyboard shortcuts (⌘/)', onClick: () => st().set({ shortcutsOpen: true }) })}
       <button
         type="button"
         className="rail-item no-drag"
@@ -141,7 +136,7 @@ export default function AppRail(): ReactElement {
         </span>
         <span className="rail-label">{themeLabel}</span>
       </button>
-      {item({ label: 'Settings', icon: <Icon.settings />, on: false, title: 'Settings (⌘,)', keys: '⌘,', onClick: () => st().set({ settingsOpen: true }) })}
+      {item({ label: 'Settings', icon: <Icon.settings />, on: false, title: 'Settings (⌘,)', onClick: () => st().set({ settingsOpen: true }) })}
       </div>
       {themeMenu && (
         <Popover anchor={themeMenu} width={236} onClose={() => setThemeMenu(null)}>
