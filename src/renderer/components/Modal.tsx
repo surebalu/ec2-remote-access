@@ -3,7 +3,7 @@ import { useEffect, useId, useRef } from 'react'
 import { Icon } from './icons'
 
 /** `bare` drops the padding and the title row for dialogs with their own layout (Settings); the title stays for screen readers. */
-export default function Modal({ title, onClose, children, width = 'max-w-lg', bare = false }: { title: string; onClose: () => void; children: ReactNode; width?: string; bare?: boolean }): ReactElement {
+export default function Modal({ title, onClose, children, width = 'max-w-lg', bare = false, className = '' }: { title: string; onClose: () => void; children: ReactNode; width?: string; bare?: boolean; className?: string }): ReactElement {
   const ref = useRef<HTMLDivElement>(null)
   const previousFocus = useRef(document.activeElement as HTMLElement | null)
   const titleId = useId()
@@ -32,7 +32,7 @@ export default function Modal({ title, onClose, children, width = 'max-w-lg', ba
   }, [])
   return (
     <div className="modal-backdrop fixed inset-0 z-40 flex items-center justify-center" onMouseDown={onClose}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`panel modal max-h-[calc(100vh-32px)] w-full ${width} border ${bare ? 'modal-bare overflow-hidden' : 'overflow-y-auto p-5'}`} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`panel modal max-h-[calc(100vh-32px)] w-full ${width} border ${bare ? 'modal-bare overflow-hidden' : 'overflow-y-auto p-5'} ${className}`} onMouseDown={(e) => e.stopPropagation()}>
         {bare ? (
           <h2 id={titleId} className="sr-only">{title}</h2>
         ) : (
