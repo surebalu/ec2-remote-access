@@ -360,14 +360,15 @@ html[data-sidebar="collapsed"] .titlebar .brand-name { display: none; }
 .scan-notice { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
 .host-details { width: 330px; flex-shrink: 0; border-color: var(--border); }
 .detail-value:hover { color: var(--accent); }
-.switcher-result { display: flex; width: 100%; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; }
-/* The Browser's spaces under its tab, and each space's sites under it (to switch straight to one). */
-.switcher-result.nested-1 { width: calc(100% - 20px); margin-left: 20px; }
-.switcher-result.nested-2 { width: calc(100% - 40px); margin-left: 40px; }
-.switcher-result.space { margin-top: 4px; }
-.switcher-result.space .font-medium { font-weight: 650; }
-.switcher-result.on { background: var(--accent-soft); border-color: var(--accent); }
-.switcher-result svg { flex-shrink: 0; color: var(--accent); }
+.switcher-result { width: 100%; text-align: left; }
+/* The Browser's spaces under its tab, and each space's sites under them (to switch straight to one). */
+.switcher-result.nested-1 { width: calc(100% - 22px); margin-left: 22px; }
+.switcher-result.nested-2 { width: calc(100% - 44px); margin-left: 44px; }
+.switcher-result.space .launcher-title { font-weight: 650; }
+/* The quick switcher is the launcher's card (styles below) in a dialog: the dialog itself draws nothing. */
+.modal.switcher-modal { overflow: visible; border: 0; background: transparent; box-shadow: none; }
+.launcher.switcher { height: min(480px, calc(100vh - 32px)); }
+.launcher.switcher .launcher-logo svg { width: 13px; height: 13px; }
 button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 1250px) {
   .host-details { position: absolute; z-index: 10; right: 0; top: 0; bottom: 0; box-shadow: var(--shadow-lg); }
@@ -1726,9 +1727,6 @@ html[data-mobile] .trib-chip.square { width: 30px; }
 .font-choice-detail { color: var(--text-2); font-size: 9px; }
 .theme-gallery-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; color: var(--text-2); font-size: 11px; }
 .theme-gallery-bar .seg { width: 180px; }
-.switcher-modes { display: flex; gap: 6px; margin-bottom: 14px; }
-.switcher-modes button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-2); font-size: 11px; }
-.switcher-modes button[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 @media (max-width: 1180px) { html[data-ui-font-mono] .search-pill { width: auto; } }
 .text-size-btn { font: 600 11.5px/1 var(--ui-font); letter-spacing: -.02em; }

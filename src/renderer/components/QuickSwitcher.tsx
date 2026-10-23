@@ -29,6 +29,12 @@ interface Result {
   image?: ReactElement
   /** How far it is indented under the rows before it: 1 for a Browser space under the Browser's tab, 2 for its sites. */
   nested?: 1 | 2
+  /** What it is, on the right of the row as the launcher labels them (Session, Host, Site, Command…). */
+  type?: string
+  /** A command's shortcut (⌘B) or a short note beside the type. */
+  keys?: string
+  /** More actions than ↩ and ⇧↩ (host details), in the Actions menu (⌘K): open beside, close a tab. */
+  more?: { title: string; key: string; run: () => void }[]
   hint: string
   action: () => void
 }
@@ -263,7 +269,7 @@ export default function QuickSwitcher(): ReactElement {
 
   const cmdResults: Result[] = commands()
     .filter((c) => !q || fuzzy(`${c.title} ${c.keywords ?? ''}`, q))
-    .map((c) => ({ id: `cmd:${c.id}`, title: c.title, subtitle: commandMode ? '' : 'Command', icon: c.icon, hint: c.hint ?? '', action: c.run }))
+    .map((c): Result => ({ id: `cmd:${c.id}`, title: c.title, subtitle: '', icon: c.icon, hint: 'Run Command', keys: c.hint, type: 'Command', action: c.run }))
   let results: Result[]
   if (beside) {
     results = besideResults(beside, query, visible.filter((i) => matchesHost(i, query)).sort((a, b) =>
@@ -277,7 +283,12 @@ export default function QuickSwitcher(): ReactElement {
     // Every word in the site's title, address or space; the Browser's own tab stays first, its sites right under it.
     const siteHits = sites.filter((t) => !q || fuzzy(`${t.title} ${t.url} ${t.spaceName} site web`, q))
     const tabResults: Result[] = tabs.flatMap((t) => {
-      const r: Result = { id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `Open ${t.kind.toUpperCase()} session · ${t.status}` : t.kind === 'browser' && sites.length ? `Open tab · ${sites.length} site${sites.length === 1 ? '' : 's'} in ${new Set(sites.map((x) => x.space)).size} space${new Set(sites.map((x) => x.space)).size === 1 ? '' : 's'}` : 'Open tab', key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch' }
+      const nSpaces = new Set(sites.map((x) => x.space)).size
+      const r: Result = {
+        id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `${t.kind.toUpperCase()} · ${t.status}` : t.kind === 'browser' && sites.length ? `${sites.length} site${sites.length === 1 ? '' : 's'} in ${nSpaces} space${nSpaces === 1 ? '' : 's'}` : '',
+        key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch to Tab', type: isSession(t) ? 'Session' : 'Tab',
+        more: [{ title: 'Close Tab', key: 'cmd+backspace', run: () => void s.closeTab(t.id) }]
+      }
       return t.kind === 'browser' ? [r, ...siteGroups(siteHits, spaces, q)] : [r]
     })
     // Sites whose Browser tab is not open here (a detached Browser, or the Browser closed since): still listed.
@@ -288,9 +299,11 @@ export default function QuickSwitcher(): ReactElement {
       ...orphanSites,
       ...hosts.map((i) => {
         const available = ['ssm', 'direct'].includes(routeOf(i, s.settings).route)
+        const anchor = s.tabs.find((t) => t.id === s.activeTab && !t.transient)
         return { id: i.key, title: i.name, subtitle: `${i.profile} · ${i.region} · ${i.instanceId}${i.staleReason ? ' · cached' : ''}`, key: i.key,
-          icon: i.platform === 'windows' ? Icon.monitor : Icon.terminal, hint: available ? 'Connect' : 'Details',
-          action: () => available ? openDefaultFor(i.key) : s.revealHost(i.key) }
+          icon: i.platform === 'windows' ? Icon.monitor : Icon.terminal, hint: available ? 'Connect' : 'Show Details', type: i.state !== 'running' && !i.manual ? `${i.state[0].toUpperCase()}${i.state.slice(1)}` : 'Host',
+          action: () => available ? openDefaultFor(i.key) : s.revealHost(i.key),
+          more: available && anchor ? [{ title: `${i.platform === 'windows' ? 'Remote Desktop' : 'SSH'} Beside ${anchor.title}`, key: 'cmd+enter', run: () => openDefaultFor(i.key, { tab: anchor.id }) }] : [] } as Result
       }),
       // Matching commands trail the hosts so a host name never loses the top slot to a command.
       ...(q.length >= 2 ? cmdResults.slice(0, 5) : [])
@@ -298,7 +311,9 @@ export default function QuickSwitcher(): ReactElement {
   }
   results = results.slice(0, 60)
   const index = Math.min(selected, Math.max(0, results.length - 1))
-  useEffect(() => { setSelected(0) }, [query])
+  const current = results[index]
+  const [panel, setPanel] = useState<number | null>(null)
+  useEffect(() => { setSelected(0); setPanel(null) }, [query])
   useEffect(() => { listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }) }, [index, query])
   const activate = (n: number, details = false): void => {
     const item = results[n]
@@ -307,30 +322,108 @@ export default function QuickSwitcher(): ReactElement {
     if (details && item.key) s.revealHost(item.key)
     else item.action()
   }
-  return <Modal title={beside ? `Open beside ${beside.title}` : commandMode ? 'Commands' : 'Quick switcher'} onClose={close} width="max-w-2xl">
-    {!beside && <div className="switcher-modes" role="group" aria-label="Search mode">
-      <button aria-pressed={!commandMode} onClick={() => { setQuery(q); inputRef.current?.focus() }}><Icon.search />Hosts & sessions</button>
-      <button aria-pressed={commandMode} onClick={() => { setQuery(`>${q}`); inputRef.current?.focus() }}><Icon.launcher />Commands & tools</button>
-    </div>}
-    <div className="relative">
-      <span className="pointer-events-none absolute left-3 top-3 muted"><Icon.search /></span>
-      <input ref={inputRef} autoFocus className="input !h-10 !pl-9 !text-sm" aria-label="Find a host or open session" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={results.length ? `${listId}-${index}` : undefined}
-        placeholder={beside ? 'A host (name, IP, instance ID), an open tab, or a tool' : 'Find a host, IP, account, region, tag or session. Type > for commands.'} value={query} onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSelected((index + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % (results.length || 1)) }
-          if (e.key === 'Enter') { e.preventDefault(); activate(index, e.shiftKey) }
-          if (e.key === 'Backspace' && query === '>') { e.preventDefault(); setQuery('') }
-        }} />
+  /** ↩, then ⇧↩ (a host's details) and the item's own (⌘↩ beside, ⌘⌫ close), as the launcher's Actions menu lists them. */
+  const actions: { title: string; key: string; run: () => void }[] = current ? [
+    { title: current.hint || 'Open', key: 'enter', run: () => activate(index) },
+    ...(current.key && !beside && !current.id.startsWith('tab:') ? [{ title: 'Show Host Details', key: 'shift+enter', run: () => activate(index, true) }] : []),
+    ...(current.more ?? []).map((a) => ({ ...a, run: () => { close(); a.run() } }))
+  ] : []
+  const hasBrowserTab = results.some((r) => r.id.startsWith('tab:') && results[results.indexOf(r) + 1]?.id.startsWith('space:'))
+  const groupOf = (r: Result): string => r.id.startsWith('cmd:') ? 'Commands' : r.id.startsWith('tool:') ? 'Tools'
+    : /^(start|stop|fwd|ssh|files):/.test(r.id) ? 'Actions' : r.id.startsWith('tab:') ? 'Open Tabs'
+      : /^(space|site):/.test(r.id) ? (hasBrowserTab ? 'Open Tabs' : 'Browser') : beside ? 'Hosts' : 'Hosts'
+  const typeOf = (r: Result): string => r.type ?? (r.id.startsWith('tool:') ? 'Tool' : r.id.startsWith('space:') ? 'Space' : r.id.startsWith('site:') ? 'Site' : r.id.startsWith('tab:') ? 'Tab' : /^(start|stop|fwd|ssh|files):/.test(r.id) ? 'Action' : 'Host')
+  const toggleMode = (): void => { setQuery(commandMode ? q : `>${q}`); inputRef.current?.focus() }
+  const caps = (k: string): string[] => (k === 'enter' ? ['↩'] : (() => { const f = formatCombo(k); const m = f.match(/^[⌃⌥⇧⌘]*/)?.[0] ?? ''; return [...m, f.slice(m.length)].filter(Boolean) })())
+  let lastGroup = ''
+  return <Modal title={beside ? `Open beside ${beside.title}` : commandMode ? 'Commands' : 'Quick switcher'} onClose={close} width="max-w-[760px]" bare className="switcher-modal">
+    <div className={`launcher switcher ${commandMode ? 'commands' : ''}`}>
+      <div className="launcher-search">
+        <span className="launcher-logo" aria-hidden="true">{commandMode ? '>' : beside ? <Icon.split /> : <>&gt;_</>}</span>
+        <input ref={inputRef} autoFocus spellCheck={false} aria-label="Find a host or open session" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={results.length ? `${listId}-${index}` : undefined}
+          placeholder={beside ? 'A host, an open tab or a tool to show beside it…' : commandMode ? 'Search commands and tools…' : 'Find a host, IP, account, tag, session or site…'} value={query} onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            const plain = !e.metaKey && !e.ctrlKey && !e.altKey
+            if (panel !== null) {
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setPanel((n) => ((n ?? 0) + (e.key === 'ArrowDown' ? 1 : -1) + actions.length) % actions.length); return }
+              if (e.key === 'Enter') { e.preventDefault(); actions[panel]?.run(); return }
+              // Esc and ⌘K close the menu only (stopped here, before the dialog's and the app's own handlers).
+              if (e.key === 'Escape' || (e.metaKey && e.key.toLowerCase() === 'k')) { e.preventDefault(); e.stopPropagation(); setPanel(null); return }
+            }
+            if (e.metaKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopPropagation(); if (actions.length > 1) setPanel(0); return }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSelected((index + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % (results.length || 1)) }
+            if (e.key === 'Enter' && e.metaKey) {
+              const hit = actions.find((a) => a.key === 'cmd+enter')
+              if (hit) { e.preventDefault(); hit.run() }
+              return
+            }
+            if (e.key === 'Backspace' && e.metaKey) {
+              const hit = actions.find((a) => a.key === 'cmd+backspace')
+              if (hit) { e.preventDefault(); hit.run() }
+              return
+            }
+            if (e.key === 'Enter' && plain) { e.preventDefault(); activate(index, e.shiftKey) }
+            if (e.key === 'Backspace' && query === '>') { e.preventDefault(); setQuery('') }
+          }} />
+        {!beside && (
+          <button type="button" className="launcher-quickai" title={commandMode ? 'Back to hosts and sessions' : 'Commands and tools (type >)'} onMouseDown={(e) => e.preventDefault()} onClick={toggleMode}>
+            {commandMode ? 'Hosts & Sessions' : 'Commands'} <kbd className="launcher-cap">{commandMode ? '⌫' : '>'}</kbd>
+          </button>
+        )}
+      </div>
+      <div className="launcher-body">
+        <div ref={listRef} id={listId} role="listbox" aria-label="Hosts and sessions" className="launcher-list">
+          {results.map((item, n) => {
+            const group = groupOf(item)
+            const head = group !== lastGroup ? group : ''
+            lastGroup = group
+            const keys = item.keys && /^[⌃⌥⇧⌘]/.test(item.keys) ? item.keys : ''
+            return (
+              <div key={item.id} className="contents">
+                {head && <div className="launcher-group" aria-hidden="true">{head}</div>}
+                <button id={`${listId}-${n}`} type="button" role="option" aria-selected={n === index} tabIndex={-1}
+                  className={`launcher-item switcher-result ${n === index ? 'on' : ''} ${item.nested ? `nested-${item.nested}` : ''} ${item.id.startsWith('space:') ? 'space' : ''}`}
+                  onMouseMove={() => { if (n !== index) setSelected(n) }} onClick={() => activate(n)}>
+                  <span className="launcher-icon">{item.image ?? <item.icon />}</span>
+                  <span className="launcher-text"><span className="launcher-title">{item.title}</span>{item.subtitle && <span className="launcher-sub">{item.subtitle}</span>}</span>
+                  {keys ? <span className="launcher-caps">{[...keys.match(/^[⌃⌥⇧⌘]*/)![0], keys.replace(/^[⌃⌥⇧⌘]*/, '')].filter(Boolean).map((k, i) => <kbd key={i} className="launcher-cap">{k}</kbd>)}</span>
+                    : item.keys ? <span className="launcher-acc">{item.keys}</span> : null}
+                  <span className="launcher-type">{typeOf(item)}</span>
+                </button>
+              </div>
+            )
+          })}
+          {!results.length && <div className="launcher-empty">{commandMode ? 'No matching commands.' : 'No matching hosts, sessions or sites. Try a name, IP or account, or type > for commands.'}</div>}
+        </div>
+      </div>
+      <div className="launcher-bar">
+        {beside
+          ? <span className="launcher-pill launcher-command" title="Shown side by side with it; drag a pane’s header to move it, or its border to resize"><Icon.split /><span>Beside {beside.title}</span></span>
+          : <button type="button" className="launcher-pill launcher-command" title={commandMode ? 'Back to hosts and sessions' : 'Commands and tools (type >)'} onMouseDown={(e) => e.preventDefault()} onClick={toggleMode}>
+            {commandMode ? <Icon.launcher /> : <Icon.search />}<span>{commandMode ? 'Commands & Tools' : 'Hosts & Sessions'}</span>
+          </button>}
+        <span className="flex-1" />
+        {actions[0] && (
+          <div className="launcher-pill launcher-actionbar">
+            <button type="button" className="launcher-primary" onMouseDown={(e) => e.preventDefault()} onClick={() => actions[0].run()}>{actions[0].title} <kbd className="launcher-cap">↩</kbd></button>
+            {actions.length > 1 && <>
+              <span className="launcher-pill-sep" />
+              <button type="button" className="launcher-hint" onMouseDown={(e) => e.preventDefault()} onClick={() => setPanel(panel === null ? 0 : null)}>Actions <kbd className="launcher-cap">⌘</kbd><kbd className="launcher-cap">K</kbd></button>
+            </>}
+          </div>
+        )}
+      </div>
+      {panel !== null && current && (
+        <div className="launcher-actions" role="menu" aria-label="Actions">
+          <div className="launcher-actions-title">{current.title}</div>
+          {actions.map((a, n) => (
+            <div key={a.title} role="menuitem" className={`launcher-action ${n === panel ? 'on' : ''}`} onMouseMove={() => setPanel(n)} onMouseDown={(e) => e.preventDefault()} onClick={() => a.run()}>
+              <span>{a.title}</span>
+              <span className="launcher-caps">{caps(a.key).map((k, i) => <kbd key={i} className="launcher-cap">{k}</kbd>)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
-    <p className="muted my-3 text-xs">{query ? `${results.length}${results.length === 60 ? '+' : ''} result${results.length === 1 ? '' : 's'}` : beside ? 'Shown side by side with it; drag a pane’s header to move it, or its border to resize' : 'Open sessions, recent connections, and favorites first'}</p>
-    <div ref={listRef} id={listId} role="listbox" aria-label="Hosts and sessions" className="max-h-[50vh] overflow-y-auto space-y-1">
-      {results.map((item, n) => <button key={item.id} id={`${listId}-${n}`} type="button" role="option" aria-selected={n === index} tabIndex={-1}
-        className={`switcher-result ${n === index ? 'on' : ''} ${item.nested ? `nested-${item.nested}` : ''} ${item.id.startsWith('space:') ? 'space' : ''}`} onMouseMove={() => setSelected(n)} onClick={() => activate(n)}>
-        {item.image ?? <item.icon />}<span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">{item.title}</span>{item.subtitle && <span className="muted block truncate text-[11px]">{item.subtitle}</span>}</span>
-        {item.hint && <span className="muted text-[11px]">{item.hint}</span>}
-      </button>)}
-      {!results.length && <p className="muted py-10 text-center">{commandMode ? 'No matching commands.' : 'No matching hosts or sessions. Try a name, IP, or account, or type > for commands.'}</p>}
-    </div>
-    <div className="muted mt-3 flex flex-wrap gap-4 border-t border-default pt-3 text-[11px]"><span>↑ ↓ Navigate</span><span>↵ Open</span><span>⇧ ↵ Host details</span><span><span className="mono">&gt;</span> Commands</span><span>start / stop / forward &lt;host&gt;</span><span>Esc Close</span></div>
   </Modal>
 }
