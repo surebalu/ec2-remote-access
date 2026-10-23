@@ -158,6 +158,7 @@ export default function App(): ReactElement {
     else if (c.kind === 'console') openAccountConsole(c.profile, c.url ?? consoleHomeFor(c.profile))
     else if (c.kind === 'ask') st.askAssistant(c.app, c.text)
     else if (c.kind === 'today') void window.api.invoke('notes:daily').then((p) => st.openNotes(p), (e: Error) => st.toast('error', e.message))
+    else if (c.kind === 'links') st.showInLinks({ view: c.view, id: c.id })
   }), [])
 
   // ⌘B shows or hides the hosts sidebar. Here rather than in the sidebar, which unmounts while hidden; on document so

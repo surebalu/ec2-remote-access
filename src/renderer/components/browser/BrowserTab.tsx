@@ -219,6 +219,12 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   // The tab on screen: one of this space's, its favorites included.
   const current = st ? [...spaceTabs, ...favorites].find((t) => t.id === st.activeTab[space.id]) : undefined
   const cur = current ? rt[current.id] ?? {} : {}
+  // The save-to-Links key pressed with this app in front saves the page shown here (main/linksPanel.ts).
+  useEffect(() => {
+    if (!active || !current?.url) return
+    void window.api.invoke('browser:frontPage', { url: current.url, title: current.title }).catch(() => undefined)
+    return () => void window.api.invoke('browser:frontPage', null).catch(() => undefined)
+  }, [active, current?.url, current?.title])
   const showStart = !current || (!current.url && !cur.signingIn && !cur.auth)
 
   const stRef = useRef(st)

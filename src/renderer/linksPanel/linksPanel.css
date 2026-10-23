@@ -1,0 +1,74 @@
+/* The Links panels (LinksPanel.tsx): a card in a transparent window, the margin around it for its shadow. */
+html.links-panel-page, html.links-panel-page body { background: transparent; }
+html.links-panel-page #root { height: auto; }
+.lp-frame { padding: 8px 20px 24px; }
+.lp-card { overflow: hidden; border: 1px solid var(--border-strong, var(--border)); border-radius: 12px; background: var(--panel); box-shadow: 0 18px 48px rgba(0, 0, 0, .36), 0 2px 8px rgba(0, 0, 0, .16); color: var(--text); font-size: 12px; }
+.lp-card .flex-1 { flex: 1; }
+.lp-muted { color: var(--muted); }
+.lp-error { color: var(--err); }
+.lp-ok { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-weight: 600; }
+.lp-ok svg { width: 13px; height: 13px; }
+.lp-link { margin-left: 6px; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Save */
+.lp-save { display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 12px; }
+.lp-field { width: 100%; height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; outline: none; background: var(--bg); color: var(--text); font: 400 13px/1.2 var(--ui-font); }
+.lp-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.lp-field::placeholder { color: var(--muted); }
+.lp-title-field { font-weight: 600; }
+.lp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.lp-chip { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; font-weight: 550; }
+.lp-chip button { display: inline-flex; margin-right: -4px; padding: 2px; border-radius: 50%; color: inherit; opacity: .7; }
+.lp-chip button:hover { opacity: 1; background: var(--accent-soft-2); }
+.lp-chip svg { width: 9px; height: 9px; }
+.lp-tags { display: flex; flex-direction: column; gap: 6px; }
+.lp-tag-field { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 30px; padding: 3px 6px; border: 1px solid var(--accent); border-radius: 7px; background: var(--bg); box-shadow: 0 0 0 3px var(--accent-soft); cursor: text; }
+.lp-tag-field input { flex: 1; min-width: 140px; height: 22px; border: 0; outline: none; background: transparent; color: var(--text); font: 400 13px/1.2 var(--ui-font); }
+.lp-tag-field input::placeholder { color: var(--muted); }
+.lp-options { display: flex; flex-direction: column; max-height: 168px; padding: 3px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); }
+.lp-options.tall { max-height: 220px; }
+.lp-option { display: flex; flex-shrink: 0; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border-radius: 6px; color: var(--text); font-size: 12px; text-align: left; white-space: nowrap; cursor: default; }
+.lp-option.on { background: var(--accent-soft-2); }
+.lp-option.current { font-weight: 650; }
+.lp-option svg { flex-shrink: 0; width: 13px; height: 13px; color: var(--text-2); }
+.lp-option svg:last-child:not(:first-child) { margin-left: auto; color: var(--accent); }
+.lp-hash { color: var(--accent); font-weight: 700; }
+.lp-hash.big { font-size: 17px; line-height: 1; }
+.lp-status { min-height: 16px; font-size: 11.5px; line-height: 16px; overflow-wrap: anywhere; }
+.lp-actions { display: flex; align-items: center; gap: 6px; }
+.lp-btn { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; height: 28px; padding: 0 11px; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.lp-btn:hover:not(:disabled) { border-color: var(--border-strong, var(--border)); background: var(--accent-soft); }
+.lp-btn.on { border-color: var(--accent); color: var(--accent); }
+.lp-btn svg { flex-shrink: 0; width: 13px; height: 13px; }
+.lp-btn.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent, #fff); }
+.lp-btn.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+.lp-btn:disabled { opacity: .6; }
+.lp-count { min-width: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--on-accent, #fff); font-size: 10px; line-height: 16px; text-align: center; }
+.lp-star { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; color: var(--muted); }
+.lp-star:hover { background: var(--accent-soft); color: var(--text); }
+.lp-star svg { width: 16px; height: 16px; }
+.lp-star.on { color: var(--warn); }
+.lp-star.on svg { fill: currentColor; }
+
+/* Find */
+.lp-find { display: flex; flex-direction: column; }
+.lp-search { display: flex; align-items: center; gap: 9px; height: 48px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.lp-search-icon { flex-shrink: 0; width: 16px; height: 16px; color: var(--muted); }
+.lp-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: 400 16px/1.2 var(--ui-font); }
+.lp-search input::placeholder { color: var(--muted); }
+.lp-scope { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; max-width: 45%; height: 24px; padding: 0 8px; overflow: hidden; border-radius: 6px; background: var(--accent-soft-2); color: var(--accent); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.lp-scope svg { flex-shrink: 0; width: 10px; height: 10px; }
+.lp-list { max-height: 384px; padding: 5px 6px; overflow-y: auto; }
+.lp-row { display: flex; align-items: center; gap: 11px; height: 46px; padding: 0 10px; border-radius: 8px; cursor: default; }
+.lp-row.on { background: var(--accent-soft-2); }
+.lp-icon { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 26px; height: 26px; color: var(--text-2); }
+.lp-icon svg { width: 18px; height: 18px; }
+.lp-icon img { width: 26px; height: 26px; object-fit: contain; }
+.lp-icon .favicon, .lp-icon .favicon-letter { width: 18px !important; height: 18px !important; border-radius: 4px; }
+.lp-badge { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 26px; border-radius: 4px; color: #fff; font-size: 7.5px; font-weight: 800; letter-spacing: .02em; }
+.lp-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.25; }
+.lp-row-title { overflow: hidden; font-size: 13.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.lp-row-sub { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.lp-num { flex-shrink: 0; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-2); font: 500 10.5px/16px var(--ui-font); }
+.lp-empty { padding: 26px 16px; color: var(--muted); text-align: center; }
+.lp-foot { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-top: 1px solid var(--border); background: var(--bg-elev); color: var(--text-2); font-size: 11px; white-space: nowrap; }

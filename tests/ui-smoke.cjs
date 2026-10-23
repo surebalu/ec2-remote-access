@@ -89,6 +89,9 @@ let launcherUsage = {}
 const launcherDone = []
 // While the launcher's window is up, notes:search finds notes by name.
 let launcherNotes = false
+// The Links panels: the page the save key found in front, and what the panels asked of main.
+let panelPage = { url: '', title: '' }
+const panelDone = []
 // A fake zsh for the Terminal tab: shell-integration markers, echo, a few commands, ⌃C.
 let termSaved = null
 // The Finder tab's pretend disk under /Users/fixture, its Finder favorites and locations, and what it was asked to do.
@@ -531,6 +534,10 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     }
     case 'launcher:quickLook': case 'launcher:system': launcherDone.push([channel, ...args]); return
     case 'launcher:status': return { key: settings.launcherKey ?? '', registered: true }
+    case 'linksPanel:page': return structuredClone(panelPage)
+    case 'linksPanel:status': return { save: { key: settings.linkSaveKey ?? 'ctrl+s', registered: true }, find: { key: settings.linkFindKey ?? 'ctrl+f', registered: true } }
+    case 'linksPanel:show': case 'linksPanel:hide': case 'linksPanel:command': case 'linksPanel:resize': case 'linksPanel:automation': panelDone.push([channel, ...args]); return
+    case 'browser:frontPage': return
     case 'launcher:open': case 'launcher:used': case 'launcher:command': case 'launcher:show': case 'launcher:hide': case 'launcher:pause': {
       launcherDone.push([channel, ...args])
       const id = channel === 'launcher:open' ? args[1] : channel === 'launcher:used' ? args[0] : null
@@ -2580,6 +2587,12 @@ app.whenReady().then(async () => {
     assert.ok(guests().some((g) => g.getURL().includes('/chat/chatgpt.com/?q=why%20502')), 'the question is in the address')
     bwin.webContents.send('app:command', { kind: 'section', section: 'hosts' })
     await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'section command')
+    // The Links search panel's ⌘↵: Links, with the item selected in its folder.
+    const shownLink = Object.values(recordDocs.links.items).find((l) => l.type === 'link' && l.folderId)
+    bwin.webContents.send('app:command', { kind: 'links', id: shownLink.id })
+    await buntil(`document.querySelector('button[aria-label="Links"]').classList.contains('on') && !!document.querySelector('.link-row.selected[data-link="${shownLink.id}"]')`, 'links shows the item')
+    bwin.webContents.send('app:command', { kind: 'section', section: 'hosts' })
+    await buntil(`document.querySelector('button[aria-label="Hosts"]').classList.contains('on')`, 'back to hosts')
     // The rail's Launcher button opens it without the keyboard.
     const shows = launcherDone.filter((d) => d[0] === 'launcher:show').length
     await bjs(`document.querySelector('button[aria-label="Launcher"]').click()`)
@@ -2708,6 +2721,80 @@ app.whenReady().then(async () => {
     await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Recent"] .launcher-title')].some((t) => t.textContent === 'Visual Studio Code')`, 'recent items')
     lwin.destroy()
     launcherNotes = false
+
+    // The Links panels (the save and search keys, from any app): the page in front saved with a comment, a new tag
+    // and a star; saved again it is updated, not added twice; a browser that cannot be asked says so; the search
+    // narrows to a tag with ⌘1 and opens a link in the app's Browser.
+    const pwin = new BrowserWindow({ show: false, width: 640, height: 520, frame: false, transparent: true, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    pwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const kjs = (code) => pwin.webContents.executeJavaScript(code)
+    const kuntil = async (code, what = code) => {
+      for (let n = 0; n < 200; n++) { if (await kjs(code)) return; await new Promise((r) => setTimeout(r, 30)) }
+      throw new Error(`Timed out (links panel): ${what}`)
+    }
+    const kshot = async (name) => { await kjs('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await new Promise((r) => setTimeout(r, 150)); writeFileSync(join(output, name), (await pwin.webContents.capturePage()).toPNG()) }
+    const ktype = (sel, v) => kjs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); i.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    const kkey = (sel, k, mods = {}) => kjs(`document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, code: ${JSON.stringify(/^[1-9]$/.test(k) ? `Digit${k}` : '')}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} }))`)
+    const kdone = async (what, test) => {
+      for (let n = 0; n < 100 && !panelDone.some(test); n++) await new Promise((r) => setTimeout(r, 30))
+      assert.ok(panelDone.some(test), what)
+    }
+    await pwin.loadFile(resolve('out/renderer/index.html'), { query: { links: '1' } })
+    panelPage = { url: 'https://www.speedtest.net/result/19821881827', title: 'Speedtest by Ookla - The Global Broadband Speed Test', app: 'Safari' }
+    pwin.webContents.send('linksPanel:shown', { mode: 'save', at: Date.now() })
+    await kuntil(`document.querySelector('[aria-label="Title"]')?.value === 'Speedtest by Ookla - The Global Broadband Speed Test'`, 'the page in front fills the form')
+    await kuntil(`document.querySelector('.lp-status').textContent === 'From Safari'`, 'where it came from')
+    await kdone('the window fits the card', (d) => d[0] === 'linksPanel:resize' && d[1] > 150 && d[1] < 400)
+    await ktype('[aria-label="Comment"]', 'Home internet speed')
+    await kjs(`[...document.querySelectorAll('.lp-btn')].find((b) => b.textContent.startsWith('Tags')).click()`)
+    await kuntil(`document.activeElement?.getAttribute('aria-label') === 'Add a tag'`, 'the tag field takes the keyboard')
+    await ktype('[aria-label="Add a tag"]', 'Home/Network')
+    await kuntil(`document.querySelector('.lp-option.on')?.textContent.includes('Home/Network')`, 'a new tag is offered')
+    await kkey('[aria-label="Add a tag"]', 'Enter')
+    await kuntil(`[...document.querySelectorAll('.lp-tag-field .lp-chip')].map((c) => c.textContent).join() === '#Home/Network'`, 'the tag is added')
+    await kjs(`document.querySelector('.lp-star').click()`)
+    await kshot('links-panel-save.png')
+    await kkey('[aria-label="Add a tag"]', 'Escape')
+    await kuntil(`!document.querySelector('.lp-tag-field') && document.querySelector('.lp-chips')?.textContent === '#Home/Network'`, 'Esc closes the tag field, not the panel')
+    const hidesBefore = panelDone.filter((d) => d[0] === 'linksPanel:hide').length
+    await kkey('[aria-label="Title"]', 'Enter')
+    await kuntil(`document.querySelector('.lp-status').textContent === 'Saved to Links'`, 'saved')
+    const savedLink = () => Object.values(recordDocs.links?.items ?? {}).filter((l) => l.url === 'https://www.speedtest.net/result/19821881827')
+    assert.equal(savedLink().length, 1)
+    assert.deepEqual([savedLink()[0].note, savedLink()[0].tags, savedLink()[0].starred], ['Home internet speed', ['Home/Network'], true])
+    // Saved before the site answered: its description follows.
+    for (let n = 0; n < 100 && !savedLink()[0].description; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(savedLink()[0].description, 'A page about fixtures.')
+    await kdone('then it goes away', () => panelDone.filter((d) => d[0] === 'linksPanel:hide').length > hidesBefore)
+    // The same page again: what it was saved with, and Update.
+    panelPage = { url: 'https://speedtest.net/result/19821881827/', title: 'Speedtest', app: 'Chrome' }
+    pwin.webContents.send('linksPanel:shown', { mode: 'save', at: Date.now() })
+    await kuntil(`document.querySelector('.lp-status').textContent.startsWith('In Links since') && document.querySelector('.lp-btn.primary').textContent === 'Update'`, 'a saved page is recognised')
+    assert.equal(await kjs(`document.querySelector('[aria-label="Comment"]').value`), 'Home internet speed')
+    await kkey('[aria-label="Title"]', 'Enter', { metaKey: true })
+    await kuntil(`document.querySelector('.lp-status').textContent === 'Updated in Links'`, 'updated')
+    assert.equal(savedLink().length + Object.values(recordDocs.links.items).filter((l) => l.url === 'https://speedtest.net/result/19821881827/').length, 1, 'not added twice')
+    // A browser that cannot say what it shows.
+    panelPage = { url: '', title: '', app: 'Zen', problem: 'no-script' }
+    pwin.webContents.send('linksPanel:shown', { mode: 'save', at: Date.now() })
+    await kuntil(`document.querySelector('.lp-status').textContent.startsWith('Zen cannot tell other apps its page') && document.activeElement?.getAttribute('aria-label') === 'Address'`, 'Zen: paste the address')
+    // Search: a tag first, ⌘1 narrows to it, ↵ opens the link in the app's Browser.
+    pwin.webContents.send('linksPanel:shown', { mode: 'find', at: Date.now() })
+    await kuntil(`document.activeElement?.getAttribute('aria-label') === 'Search Links'`, 'the search field takes the keyboard')
+    await ktype('[aria-label="Search Links"]', 'network')
+    await kuntil(`document.querySelector('.lp-row .lp-row-title')?.textContent === 'Network' && document.querySelector('.lp-row .lp-row-sub').textContent.startsWith('Tag · 1 item')`, 'the tag comes first')
+    await kshot('links-panel-find.png')
+    await kkey('[aria-label="Search Links"]', '1', { metaKey: true })
+    await kuntil(`document.querySelector('.lp-scope')?.textContent === '#Home/Network' && document.querySelector('[aria-label="Search Links"]').value === ''`, '⌘1 narrows the search to the tag')
+    await kuntil(`document.querySelector('.lp-row.on .lp-row-title')?.textContent.startsWith('Speedtest')`, 'its link')
+    await kkey('[aria-label="Search Links"]', 'Enter')
+    await kdone('↵ opens it in the Browser', (d) => d[0] === 'linksPanel:command' && d[1].kind === 'browse' && d[1].url === 'https://www.speedtest.net/result/19821881827')
+    assert.ok(savedLink()[0].openedAt, 'opening counts as a use')
+    await kkey('[aria-label="Search Links"]', 'Enter', { metaKey: true })
+    await kdone('⌘↵ shows it in Links', (d) => d[0] === 'linksPanel:command' && d[1].kind === 'links' && d[1].id === savedLink()[0].id)
+    await kkey('[aria-label="Search Links"]', 'Backspace')
+    await kuntil(`!document.querySelector('.lp-scope')`, '⌫ on an empty field searches everything again')
+    pwin.destroy()
 
     // The Terminal tab: Warp-style tabs, split panes, command blocks and the input box, against a fake zsh.
     const twin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })

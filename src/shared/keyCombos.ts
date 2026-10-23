@@ -176,11 +176,18 @@ export type ComboCheck =
   /** `from`: the section that had this combination and loses it. `notes`: where a tool keeps it. */
   | { ok: true; from?: ShortcutTarget; notes: string[] }
 
-/** Whether `combo` can be the shortcut of `section`; `launcherKey` is the launcher's, which works in every app. */
-export function checkCombo(combo: string, section: ShortcutTarget, saved: Partial<Record<string, string>> | undefined, launcherKey = ''): ComboCheck {
+/** A key that works in every app (the launcher's, the Links panels'), and what it does there ("opens the launcher"). */
+export interface GlobalKey { combo: string; does: string }
+
+/**
+ * Whether `combo` can be the shortcut of `section`. `globals` are the keys that work in every app (a bare string is the
+ * launcher's): macOS hands those to this app first, so a section could never have one.
+ */
+export function checkCombo(combo: string, section: ShortcutTarget, saved: Partial<Record<string, string>> | undefined, globals: string | GlobalKey[] = ''): ComboCheck {
   const { mods, key } = parts(combo)
   const shown = formatCombo(combo)
-  if (launcherKey && normalizeCombo(launcherKey) === combo) return { ok: false, reason: `${shown} opens the launcher, from any app.` }
+  const global = (typeof globals === 'string' ? [{ combo: globals, does: 'opens the launcher' }] : globals).find((g) => g.combo && normalizeCombo(g.combo) === combo)
+  if (global) return { ok: false, reason: `${shown} ${global.does}, from any app.` }
   if (!mods.has('cmd') && !mods.has('ctrl') && !/^f\d+$/.test(key)) return { ok: false, reason: 'Hold ⌘ or ⌃ with the key (or use an F-key), so typing never sets it off.' }
   if (SYSTEM[combo]) return { ok: false, reason: `macOS keeps ${shown} for ${SYSTEM[combo]}.` }
   if (APP[combo]) return { ok: false, reason: `${shown} is already ${APP[combo]}.` }
@@ -194,23 +201,28 @@ export function checkCombo(combo: string, section: ShortcutTarget, saved: Partia
 }
 
 /**
- * Whether `combo` can open the launcher from any app (a global shortcut takes the key from every app, this one
- * included). ⌥Space is allowed, as launchers use it; ⌥ with a letter types a character everywhere.
+ * Whether `combo` can work from any app (a global shortcut takes the key from every app, this one included): the
+ * launcher's or a Links panel's. ⌥Space is allowed, as launchers use it; ⌥ with a letter types a character everywhere.
+ * ⌃ with a letter is refused unless `controlLetters`: the Links panels allow it with a warning, since ⌃S and ⌃F are
+ * Anybox's keys and people moving from it keep them. `others` are the other global keys, which it must not repeat.
  */
-export function checkGlobalCombo(combo: string, saved: Partial<Record<string, string>> | undefined): ComboCheck {
+export function checkGlobalCombo(combo: string, saved: Partial<Record<string, string>> | undefined, opts: { others?: GlobalKey[]; controlLetters?: boolean } = {}): ComboCheck {
   const { mods, key } = parts(combo)
   const shown = formatCombo(combo)
+  const other = opts.others?.find((g) => g.combo && normalizeCombo(g.combo) === combo)
+  if (other) return { ok: false, reason: `${shown} already ${other.does}, from any app.` }
   const fkey = /^f\d+$/.test(key)
   if (!mods.has('cmd') && !mods.has('ctrl') && !mods.has('alt') && !fkey) return { ok: false, reason: 'Hold ⌘, ⌃ or ⌥ with the key (or use an F-key), so typing in other apps never sets it off.' }
   if (mods.has('alt') && !mods.has('cmd') && !mods.has('ctrl') && key !== 'space' && !fkey) return { ok: false, reason: `${shown} types a character in every app (⌥E is an accent). Add ⌘ or ⌃, or use ⌥Space.` }
   if (SYSTEM[combo]) return { ok: false, reason: `macOS keeps ${shown} for ${SYSTEM[combo]}.` }
   if (APP[combo]) return { ok: false, reason: `${shown} is already ${APP[combo]} in this app.` }
-  if (mods.has('ctrl') && !mods.has('cmd') && !mods.has('alt') && /^[a-z[\]\\]$/.test(key)) {
-    return { ok: false, reason: `${shown} is a terminal control key in every terminal. Add ⌘ or ⌥.` }
-  }
+  const controlLetter = mods.has('ctrl') && !mods.has('cmd') && !mods.has('alt') && /^[a-z[\]\\]$/.test(key)
+  if (controlLetter && !opts.controlLetters) return { ok: false, reason: `${shown} is a terminal control key in every terminal. Add ⌘ or ⌥.` }
   const section = sectionFor(saved, combo)
   if (section) return { ok: false, reason: `${shown} opens ${section === 'radial' ? 'the radial menu' : SECTION_NAMES[section]} in this app; give one of them another key.` }
-  return { ok: true, notes: combo === 'alt+space' ? ['Raycast and Alfred use ⌥Space too: if one of them is on it, only one app gets the key.'] : [] }
+  const notes = combo === 'alt+space' ? ['Raycast and Alfred use ⌥Space too: if one of them is on it, only one app gets the key.'] : []
+  if (controlLetter) notes.push(`While the app holds ${shown}, terminals and text fields (this app's too) no longer get it, as with Anybox. Turn it off in Anybox, or only one of the two gets it.`)
+  return { ok: true, notes }
 }
 
 const ACCELERATOR_KEYS: Record<string, string> = {

@@ -76,7 +76,7 @@ const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) =
  * is said there. Shells on this machine (term:*) are refused too unless `allowTerminals` says otherwise.
  */
 export function desktopOnly(channel: string): boolean {
-  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'browser:paneTargets', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal', 'app:emojiPanel', 'app:pointer', 'local:open', 'local:quickLook'].includes(channel) || channel.startsWith('finder:') || channel.startsWith('launcher:') || channel.startsWith('ext:')
+  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'browser:paneTargets', 'browser:frontPage', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal', 'app:emojiPanel', 'app:pointer', 'local:open', 'local:quickLook'].includes(channel) || channel.startsWith('finder:') || channel.startsWith('launcher:') || channel.startsWith('linksPanel:') || channel.startsWith('ext:')
 }
 
 export function createGatewayServer(opts: GatewayOptions): Gateway {

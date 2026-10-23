@@ -73,6 +73,8 @@ export const defaultSettings: Settings = {
   dictationLocale: '',
   shortcuts: {},
   launcherKey: '',
+  linkSaveKey: 'ctrl+s',
+  linkFindKey: 'ctrl+f',
   onePasswordStayApproved: true,
   quicklinks: []
 }

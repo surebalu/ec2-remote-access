@@ -2,11 +2,12 @@ import { addExtensionFolder, clickExtension, installFromStore, listExtensions, r
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, nativeTheme, safeStorage, screen, ShareMenu, shell, systemPreferences } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Host, LauncherHost, VoiceHost } from './host'
+import type { Host, LauncherHost, LinksPanelHost, VoiceHost } from './host'
 import { broadcastToPhones } from './phoneAccess'
 import { cancelDownload, fillPage } from './webviews'
 import { mainWindow } from './windows'
 import { fileIcons, hideLauncher, launcherCommand, launcherConfirm, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
+import { hideLinksPanel, linksPanelCommand, linksPanelPage, linksPanelStatus, openAutomationSettings, pauseLinksPanelKeys, resizeLinksPanel, setOwnPage, showLinksPanel } from './linksPanel'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
 const electronVoice: VoiceHost = {
@@ -33,12 +34,24 @@ const electronLauncher: LauncherHost = {
   show: showLauncher,
   hide: hideLauncher,
   command: launcherCommand,
-  pause: pauseLauncherKey,
+  // Settings is recording a key: every key that works from any app is let go, the Links panels' too.
+  pause: (p) => { pauseLauncherKey(p); pauseLinksPanelKeys(p) },
   status: launcherStatus,
   icons: fileIcons,
   thumbnail,
   quickLook: launcherQuickLook,
   confirm: launcherConfirm
+}
+
+const electronLinksPanel: LinksPanelHost = {
+  show: showLinksPanel,
+  hide: hideLinksPanel,
+  page: linksPanelPage,
+  resize: resizeLinksPanel,
+  command: linksPanelCommand,
+  automation: openAutomationSettings,
+  status: linksPanelStatus,
+  setOwnPage
 }
 
 /** Host implementation backed by Electron: real windows, native dialogs, Keychain-backed safeStorage. */
@@ -122,5 +135,6 @@ export const electronHost: Host = {
   decrypt: (cipher) => safeStorage.decryptString(cipher),
   voice: electronVoice,
   launcher: electronLauncher,
+  linksPanel: electronLinksPanel,
   extensions: { list: listExtensions, installFromStore, addFolder: addExtensionFolder, setEnabled: setExtensionEnabled, remove: removeExtension, action: clickExtension }
 }

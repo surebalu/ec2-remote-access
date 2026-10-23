@@ -168,6 +168,9 @@ interface State {
   askAssistant: (kind: WebAppKind, text: string) => void
   /** The latest page a chat tab is asked to load (nonce makes repeats distinct). */
   webAppRequest: { kind: WebAppKind; url: string; nonce: number } | null
+  /** What Links is asked to show (a view such as 'tag:aws', or an item), from the Links search panel's ⌘↵. */
+  linksRequest: { view?: string; id?: string; nonce: number } | null
+  showInLinks: (req: { view?: string; id?: string }) => void
   moveTab: (id: string, beforeId: string | null) => void
   /** Opens another session with the same parameters; `split` shows it next to the original. */
   duplicateTab: (id: string, split?: boolean) => void
@@ -402,6 +405,11 @@ export const useStore = create<State>((set, get) => ({
     else void window.api.invoke('shell:open', WEB_APPS[kind as WebAppKind].home)
   },
   webAppRequest: null,
+  linksRequest: null,
+  showInLinks: (req) => {
+    set({ linksRequest: { ...req, nonce: Date.now() + Math.random() } })
+    get().openTool('links')
+  },
   askAssistant: (kind, text) => {
     if (!inElectron) {
       void window.api.invoke('shell:open', askUrl(kind, text))

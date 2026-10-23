@@ -1,5 +1,6 @@
 import type { ExtensionInfo } from './extensions'
 import type { AnyboxLibrary } from './links'
+import type { FrontPage, LinksPanelMode } from './linksPanel'
 import type { RecordDoc, RecordKind, RecordOp } from './records'
 import type { DbAudit, DbKillRequest, DbTarget, LockReport } from './dbLocks'
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
@@ -141,6 +142,21 @@ export interface IpcApi {
   'links:anybox': () => Promise<AnyboxLibrary>
   /** A page's title and description, for a link added by its address. */
   'links:preview': (url: string) => Promise<{ title?: string; description?: string }>
+  /**
+   * The Links panels over any app (Mac app only; main/linksPanel.ts). `page` is what was in front when the save key was
+   * pressed (read from the browser, which can take a moment, or for macOS to ask about Automation the first time).
+   */
+  'linksPanel:page': () => Promise<FrontPage>
+  'linksPanel:show': (mode: LinksPanelMode) => Promise<void>
+  'linksPanel:hide': () => Promise<void>
+  /** The panel's card height, so the window fits it. */
+  'linksPanel:resize': (height: number) => Promise<void>
+  /** Puts the panel away and has the app's window carry out a command, bringing it to the front. */
+  'linksPanel:command': (c: AppCommand) => Promise<void>
+  /** Opens System Settings at Privacy & Security → Automation, where macOS lets this app ask browsers for their page. */
+  'linksPanel:automation': () => Promise<void>
+  /** Both keys, and whether macOS gave each one to the app (Anybox may still hold them). */
+  'linksPanel:status': () => Promise<Record<LinksPanelMode, { key: string; registered: boolean }>>
   /** An iCal subscription's .ics text (webcal:// works too). */
   'calendar:feed': (url: string) => Promise<string>
   /** Saves a PNG (data: URL) into the notes folder (EC2 Remote/Boards) and returns its path there, for ![[embeds]]. */
@@ -199,6 +215,8 @@ export interface IpcApi {
   'browser:share': (url: string) => Promise<boolean>
   /** The terminals beside the Browser in a split, offered by its page menu as "Paste into …" (empty when none). */
   'browser:paneTargets': (targets: { id: string; title: string }[]) => Promise<void>
+  /** The page the Browser shows while it is in front (null when it is not), which the save-to-Links key takes when this app is in front. */
+  'browser:frontPage': (page: { url: string; title: string } | null) => Promise<void>
   /** The macOS emoji picker, for the text field that has the keyboard (the Mac app only). */
   'app:emojiPanel': () => Promise<void>
   /** Where the mouse pointer is in the window (Mac app only; null outside it or elsewhere), for the radial menu. */
@@ -296,6 +314,8 @@ export interface IpcEvents {
   'app:command': AppCommand
   /** Sent to the launcher's own window each time it appears. */
   'launcher:shown': { at: number }
+  /** Sent to the Links panel's own window each time it appears, with what it is for. */
+  'linksPanel:shown': { mode: LinksPanelMode; at: number }
   'scan:progress': ScanProgress
   'ssh:event': SshEvent
   'sftp:transfer': SftpTransfer

@@ -225,6 +225,12 @@ export interface Settings {
   /** Opens the launcher from any app (Settings → Keyboard), a combination like 'alt+space'; '' for none, the default. */
   launcherKey?: string
   /**
+   * The Links panels' keys, from any app (main/linksPanel.ts): save the page in front to Links, and search Links.
+   * Anybox's ⌃S and ⌃F by default, so moving from it changes nothing; '' turns one off.
+   */
+  linkSaveKey?: string
+  linkFindKey?: string
+  /**
    * Keep the 1Password CLI approvals given in this run from lapsing after ten idle minutes (main/onepassword.ts), so
    * filling asks once per account per app start, for up to twelve hours.
    */
@@ -575,6 +581,8 @@ export type AppCommand =
   | { kind: 'console'; profile: string; url?: string }
   | { kind: 'ask'; app: 'claude' | 'chatgpt'; text: string }
   | { kind: 'today' }
+  /** Links, showing a view ('tag:aws', 'folder:<id>') or with an item selected (the Links search panel's ⌘↵). */
+  | { kind: 'links'; view?: string; id?: string }
 
 /* ---------- Run Command (SSM SendCommand on many hosts) ---------- */
 
