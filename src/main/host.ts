@@ -82,6 +82,19 @@ export interface Host {
   toolWindows: ToolWindowsHost | null
   /** Chrome extensions in the Browser (main/extensions.ts); null where there is no Browser (gateway). */
   extensions: ExtensionsHost | null
+  /** The Storage tool's scan process (main/storage/scanClient.ts); null without a Mac to scan (gateway). */
+  storage: StorageHost | null
+}
+
+/** The Storage tool's disk scan, run apart from the main process (main/storage/scanProcess.ts). */
+export interface StorageHost {
+  /** Asks the scan process (starting it when needed): 'scan', 'view', 'largest', 'search', 'hidden', 'duplicates'… */
+  call<T>(op: string, args?: Record<string, unknown>): Promise<T>
+  /** Progress the scan process reports while it works. */
+  onEvent(fn: (e: { event: string } & Record<string, unknown>) => void): void
+  running(): boolean
+  /** Ends the scan process, and the memory its tree holds. */
+  stop(): void
 }
 
 /** What the Browser's extensions need from the Mac app. */

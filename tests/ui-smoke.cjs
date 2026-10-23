@@ -103,6 +103,33 @@ const finderFs = {
   '/Users/fixture/Downloads': [], '/Users/fixture/Projects': [fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200)]
 }
 const finderDone = []
+// The Storage tool's pretend scan of a Mac: folders and big files by path, the disk, and what went to the Trash.
+const stIds = new Map()
+const stId = (path) => { if (!stIds.has(path)) stIds.set(path, stIds.size); return stIds.get(path) }
+const stEntry = (path, size, extra = {}) => ({ id: stId(path), name: path === '/' ? '/' : path.split('/').pop(), path, size, files: Math.max(1, Math.round(size / 2e6)), dir: true, ...extra })
+const stFile = (path, size, kind, ageDays = 30) => stEntry(path, size, { dir: false, files: 1, kind, mtime: now - ageDays * 86400000 })
+const stKids = {
+  '/': [stEntry('/Users', 210e9, { more: true }), stEntry('/Applications', 38e9, { more: true }), stEntry('/System', 15e9, { more: true }), stEntry('/Library', 9e9, { more: true }), stEntry('/private', 6e9, { more: true }), stEntry('/opt', 2e9, { more: true })],
+  '/Users': [stEntry('/Users/fixture', 205e9, { more: true }), stEntry('/Users/Shared', 5e9, { more: true })],
+  '/Users/fixture': [stEntry('/Users/fixture/Library', 90e9, { more: true }), stEntry('/Users/fixture/Documents', 60e9, { more: true }), stEntry('/Users/fixture/Movies', 30e9, { more: true }), stEntry('/Users/fixture/Downloads', 12e9, { more: true }), stEntry('/Users/fixture/Pictures', 8e9, { more: true }), stEntry('/Users/fixture/.npm', 2.5e9, { more: true }), stEntry('/Users/fixture/.cache', 1.4e9, { more: true }), stEntry('/Users/fixture/.Trash', 0.8e9, { more: true })],
+  '/Users/fixture/Movies': [stFile('/Users/fixture/Movies/Trip 2024.mov', 9e9, 'video', 200), stEntry('/Users/fixture/Movies/Edits', 21e9, { more: true })],
+  '/Users/fixture/Downloads': [stFile('/Users/fixture/Downloads/ubuntu-24.04.iso', 5e9, 'diskimage', 120), stFile('/Users/fixture/Downloads/Xcode_16.xip', 4e9, 'archive', 90), stFile('/Users/fixture/Downloads/Installer.dmg', 0.6e9, 'diskimage', 10)]
+}
+const stAll = () => Object.values(stKids).flat()
+const stView = (path) => {
+  const all = [{ ...stEntry('/', 280e9, { more: true }) }, ...stAll()]
+  const node = all.find((n) => n.path === path)
+  if (!node) throw new Error('That folder is not in the last scan. Scan again.')
+  const chain = []
+  for (let p = path; p !== '/';) { p = p.replace(/\/[^/]+$/, '') || '/'; chain.unshift({ id: stId(p), name: p === '/' ? '/' : p.split('/').pop() }) }
+  const children = (stKids[path] ?? []).slice().sort((a, b) => b.size - a.size)
+  return { node, chain, children, small: { bytes: Math.max(0, node.size - children.reduce((t, c) => t + c.size, 0)), files: 3000 }, inner: Object.fromEntries(children.filter((c) => stKids[c.path]).map((c) => [c.id, stKids[c.path].map((g) => ({ size: g.size, dir: g.dir, kind: g.kind }))])) }
+}
+let stState = { status: 'idle' }
+let stRemoved = []
+const stPutBacks = []
+const stSummary = () => ({ root: '/', kind: 'mac', at: Date.now(), took: 41000, bytes: 280e9, files: 2100000, dirs: 400000, unreadable: 3, fullDiskAccess: false, byKind: { video: 30e9, diskimage: 5.6e9, archive: 4e9, document: 2e9, image: 6e9, developer: 9e9, other: 3e9 },
+  parts: [{ id: 'apps', bytes: 38e9 }, { id: 'documents', bytes: 90e9 }, { id: 'downloads', bytes: 12e9 }, { id: 'pictures', bytes: 8e9 }, { id: 'library', bytes: 99e9 }, { id: 'other', bytes: 9e9 }, { id: 'trash', bytes: 0.8e9 }, { id: 'system', bytes: 285e9 }] })
 // A JVM's heap over a window: an hour-long saw-tooth from 1.5 to 6 GB, a full collection at each drop, a steady floor.
 const gcFixture = (instance, hours) => {
   const step = { 1: 15, 6: 60, 24: 240, 72: 600, 168: 1800, 336: 3600 }[hours] ?? 240
@@ -412,6 +439,40 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'boards:delete': delete boardsSaved[args[0]]; return
     case 'notes:saveImage': noteImages.push(args[1]); return `EC2 Remote/Boards/${args[0]}.png`
     case 'local:home': return '/Users/fixture'
+    case 'storage:state': return stState
+    case 'storage:fullDiskAccess': return false
+    case 'storage:disk': return { name: 'Macintosh HD', total: 994e9, free: 452e9, freeNow: 416e9, history: Array.from({ length: 12 }, (_, i) => ({ day: new Date(now - (11 - i) * 86400000).toISOString().slice(0, 10), used: 530e9 + i * 1.2e9, total: 994e9 })) }
+    case 'storage:scan':
+      stState = { status: 'scanning', root: '/', progress: { dirs: 1200, files: 40000, bytes: 12e9, path: '/Users/fixture/Library/Caches' } }
+      setTimeout(() => { stState = { status: 'done', summary: stSummary(), live: true }; if (!_e.sender.isDestroyed()) _e.sender.send('storage:scanState', stState) }, 300)
+      return stState
+    case 'storage:cancel': case 'storage:cancelDuplicates': case 'storage:openTrash': return
+    case 'storage:pickFolder': return '/Users/fixture/Projects'
+    case 'storage:view': return stView(args[0].path ?? [{ path: '/' }, ...stAll()].find((n) => stId(n.path) === args[0].id)?.path ?? '/')
+    case 'storage:large': return stAll().filter((n) => !n.dir && n.size >= args[0]).sort((a, b) => b.size - a.size)
+    case 'storage:search': { const q = args[0].toLowerCase(); return stAll().filter((n) => n.name.toLowerCase().includes(q.replace(/^"|"$/g, ''))) }
+    case 'storage:hidden': return stAll().filter((n) => n.name.startsWith('.'))
+    case 'storage:duplicates': return [{ length: 3e9, files: [stFile('/Users/fixture/Movies/Edits/cut.mov', 3e9, 'video', 300), stFile('/Users/fixture/Downloads/cut copy.mov', 3e9, 'video', 2)] }]
+    case 'storage:junk': return { at: Date.now(), notes: [], groups: [
+      { id: 'caches', title: 'App caches', text: 'Copies apps and browsers keep to open faster.', items: [
+        { path: '/Users/fixture/Library/Caches/com.spotify.client', name: 'com.spotify.client', size: 1.2e9, dir: true, safe: true, note: 'The app rebuilds its cache when it next needs it.' },
+        { path: '/Users/fixture/Library/Caches/Google', name: 'Google', size: 2e9, dir: true, safe: false, note: 'Google Chrome is open, and may be writing into it: quit it first.' }] },
+      { id: 'logs', title: 'Logs and crash reports', text: 'Records apps wrote about what they did.', items: [{ path: '/Users/fixture/Library/Logs/DiagnosticReports', name: 'DiagnosticReports', size: 0.3e9, dir: true, safe: true }] }] }
+    case 'storage:ai': return { at: Date.now(), notes: [], groups: [{ id: 'ollama', title: 'Ollama', text: 'Only Ollama removes a model safely.', items: [
+      { path: '/Users/fixture/.ollama/models/manifests/registry.ollama.ai/library/llama3.2/latest', name: 'llama3.2:latest', size: 2e9, dir: false, safe: false, blocked: 'Removed with ollama rm in Terminal: only Ollama removes its models safely.', action: { label: 'Copy the command', copy: 'ollama rm llama3.2:latest' } }] }] }
+    case 'storage:systemData': case 'storage:installers': return { at: Date.now(), notes: [], groups: [] }
+    case 'storage:receipts': return []
+    case 'storage:trashSize': return 0.8e9
+    case 'storage:trash': {
+      const moved = args[0].map((it, i) => ({ id: `st-${Date.now()}-${i}`, path: it.path, trashPath: `/Users/fixture/.Trash/${it.path.split('/').pop()}`, size: it.size ?? 0 }))
+      stRemoved = [...moved.map((m) => ({ ...m, at: Date.now(), from: args[1], dir: false, state: 'in-trash' })), ...stRemoved]
+      for (const m of moved) for (const k of Object.keys(stKids)) stKids[k] = stKids[k].filter((n) => n.path !== m.path)
+      _e.sender.send('storage:trashed', { count: moved.length, bytes: moved.reduce((t, m) => t + m.size, 0) })
+      return { moved, failed: [], bytes: moved.reduce((t, m) => t + m.size, 0) }
+    }
+    case 'storage:removed': return stRemoved
+    case 'storage:putBack': stPutBacks.push(...args[0]); stRemoved = stRemoved.filter((r) => !args[0].includes(r.id)); return { restored: args[0], failed: [] }
+    case 'storage:forget': stRemoved = stRemoved.filter((r) => !args[0].includes(r.id)); return
     case 'local:list': { const l = finderFs[args[0]]; if (!l) throw new Error(`ENOENT: no such directory, scandir '${args[0]}'`); return l }
     case 'local:mkdir': { const dir = args[0].replace(/\/[^/]+$/, ''); finderFs[dir].push(fsEntry(dir, args[0].split('/').pop(), 'dir', 0, 0)); finderFs[args[0]] = []; finderDone.push(['mkdir', args[0]]); return }
     case 'local:rename': { const dir = args[0].replace(/\/[^/]+$/, ''); const e = finderFs[dir].find((x) => x.path === args[0]); e.name = args[1].split('/').pop(); e.path = args[1]; if (finderFs[args[0]]) { finderFs[args[1]] = finderFs[args[0]]; delete finderFs[args[0]] } finderDone.push(['rename', args[0], args[1]]); return }
@@ -856,7 +917,7 @@ app.whenReady().then(async () => {
     await key('ArrowRight')
     await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
     assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
-    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 12)
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 13)
     await screenshot('workspace-tools.png')
     await workspaceTab('saved-work')
     await until(`!!document.querySelector('[aria-label="Search saved work"]')`)
@@ -1150,7 +1211,7 @@ app.whenReady().then(async () => {
     const keyUp = () => js(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true, cancelable: true }))`)
     await js(`document.dispatchEvent(new PointerEvent('pointermove', { clientX: 760, clientY: 470, bubbles: true }))`)
     await radialKey()
-    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 18`)
+    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 19`)
     assert.ok(await js(`document.querySelector('.radial-item.here').dataset.radial === 'hosts' && document.querySelector('.radial-center strong').textContent === 'Hosts'`), 'it starts on the section in front')
     assert.equal(await js(`document.activeElement === document.querySelector('.radial')`), true, 'the ring takes the keyboard')
     await new Promise((r) => setTimeout(r, 400))
@@ -3268,6 +3329,71 @@ app.whenReady().then(async () => {
     await tjs(`[...document.querySelectorAll('.fi-place')].find((b) => b.textContent === 'Recents').click()`)
     await tuntil(`document.querySelector('.fi-title').textContent === 'Recents' && document.querySelectorAll('.fi-row').length === 2 && document.querySelector('.fi-th.on')?.textContent.startsWith('Name') !== undefined`, 'recents')
     assert.match(await tjs(`document.querySelectorAll('.fi-row')[0].querySelector('.date').textContent`), /^Today at /)
+
+    // Storage: a scan of the Mac and the Overview's bar, the Space Map's cards and going in and out of folders, Large Files
+    // to the Trash and Put Back, Hidden Files ticking only caches, Search, and Recently Removed.
+    const stNav = (label) => tjs(`[...document.querySelectorAll('.storage .plan-nav')].find((b) => b.textContent.includes(${JSON.stringify(label)})).click()`)
+    const stCell = (name) => `[...document.querySelectorAll('.st-cell')].find((c) => c.querySelector('.st-cell-name')?.textContent.startsWith(${JSON.stringify(name)}))`
+    await tjs(`document.querySelector('button[aria-label="Storage"]').click()`)
+    await tuntil(`document.querySelector('.st-disk-free')?.textContent.includes('452 GB')`, 'storage opens with the disk')
+    assert.equal(await tjs(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside for Storage')
+    await stNav('Overview')
+    await tjs(`[...document.querySelectorAll('.storage button')].find((b) => b.textContent.includes('Scan the whole Mac')).click()`)
+    await tuntil(`document.querySelectorAll('.st-legend-item').length >= 8`, 'a scan splits the disk into parts')
+    assert.ok(await tjs(`document.querySelector('.st-banner.info')?.textContent.includes('Full Disk Access') ?? false`), 'asks for Full Disk Access')
+    assert.ok(await tjs(`document.querySelectorAll('.st-kind').length >= 5`), 'bytes by kind')
+    await tshot('storage-overview.png')
+    await stNav('Space Map')
+    await tuntil(`document.querySelectorAll('.st-cell').length >= 5 && !!${stCell('Users')}`, 'the space map draws the Mac')
+    await tjs(`${stCell('Users')}.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await tuntil(`document.querySelector('.st-crumbs b')?.textContent === 'Users'`, 'double-click goes into a folder')
+    await tjs(`${stCell('fixture')}.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await tuntil(`document.querySelector('.st-crumbs b')?.textContent === 'fixture' && !!${stCell('Library')}`, 'into the home folder')
+    await tjs(`${stCell('Movies')}.click()`)
+    await tuntil(`document.querySelector('.st-map-foot-name')?.textContent === '~/Movies'`, 'a click selects and the foot says where')
+    await tshot('storage-map.png')
+    await tkey('Backspace')
+    await tuntil(`document.querySelector('.st-crumbs b')?.textContent === 'Users'`, '⌫ goes up')
+    await tjs(`document.querySelector('.st-map-room button[aria-label="List"]').click()`)
+    await tuntil(`document.querySelectorAll('.st-list .st-row').length >= 2`, 'the list view')
+    await tjs(`document.querySelector('.st-map-room button[aria-label="Cards"]').click()`)
+    await stNav('Large Files')
+    await tuntil(`document.querySelectorAll('.st-list .st-row').length === 4`, 'large files listed, biggest first')
+    assert.equal(await tjs(`document.querySelectorAll('.st-list .st-check:checked').length`), 0, 'none of your files starts ticked')
+    await tjs(`document.querySelector('.st-list .st-row .st-check').click()`)
+    await tuntil(`document.querySelector('.st-trashbar-text')?.textContent.includes('9 GB')`, 'the bar sums what is ticked')
+    await tshot('storage-large.png')
+    await tjs(`document.querySelector('.st-trashbar .btn-danger').click()`)
+    await tuntil(`document.querySelector('.plan-undo')?.textContent.includes('Put Back') && document.querySelectorAll('.st-list .st-row').length === 3`, 'moved to the Trash, with Put Back offered')
+    assert.equal(calls.filter((c) => c.channel === 'storage:trash').at(-1).args[1], 'Large Files')
+    await tjs(`[...document.querySelectorAll('.plan-undo button')].find((b) => b.textContent === 'Put Back').click()`)
+    for (let n = 0; n < 40 && !stPutBacks.length; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(stPutBacks.length, 1, 'Put Back asks main')
+    await stNav('Hidden Files')
+    await tuntil(`document.querySelectorAll('.st-list .st-row').length === 3`, 'hidden items listed')
+    assert.equal(await tjs(`document.querySelectorAll('.st-list .st-check:checked').length`), 2, 'only the caches start ticked')
+    await stNav('Search')
+    await tjs(`(() => { const i = document.querySelector('.st-search input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'ubuntu'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tuntil(`[...document.querySelectorAll('.st-list .st-row')].some((r) => r.textContent.includes('ubuntu-24.04.iso'))`, 'search finds by name')
+    await tshot('storage-search.png')
+    await stNav('Junk Files')
+    await tuntil(`document.querySelectorAll('.st-group').length === 2`, 'junk files measured into groups')
+    assert.equal(await tjs(`document.querySelectorAll('.st-list .st-row .st-check:checked').length`), 2, 'only what is safe starts ticked')
+    await tshot('storage-junk.png')
+    await stNav('AI Models')
+    await tuntil(`[...document.querySelectorAll('.st-list button')].some((b) => b.textContent.includes('Copy the command'))`, 'an Ollama model offers its command')
+    assert.equal(await tjs(`document.querySelectorAll('.st-list .st-row .st-check').length`), 0, 'only Ollama removes its models')
+    await tjs(`[...document.querySelectorAll('.st-list button')].find((b) => b.textContent.includes('Copy the command')).click()`)
+    for (let n = 0; n < 40 && !calls.some((c) => c.channel === 'clipboard:write' && c.args[0] === 'ollama rm llama3.2:latest'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(calls.some((c) => c.channel === 'clipboard:write' && c.args[0] === 'ollama rm llama3.2:latest'), 'the command is copied')
+    await stNav('Duplicates')
+    await tjs(`[...document.querySelectorAll('.st-list-room button')].find((b) => b.textContent.includes('Find duplicates')).click()`)
+    await tuntil(`document.querySelectorAll('.st-group .st-row').length === 2`, 'duplicates found')
+    assert.equal(await tjs(`[...document.querySelectorAll('.st-group .st-row')].map((r) => r.querySelector('.st-check').checked).join()`), 'false,true', 'the oldest copy stays')
+    await tshot('storage-duplicates.png')
+    await stNav('Recently Removed')
+    await tuntil(`document.querySelector('.st-intro')?.textContent.includes('800 MB')`, 'recently removed shows the Trash')
+    await tshot('storage-removed.png')
 
     // Run Command on the hosts listed: a confirmation for production, then each host's result and output; retry the failed.
     await tjs(`document.querySelector('button[aria-label="Hosts"]').click()`)

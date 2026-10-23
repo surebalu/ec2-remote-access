@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { useStore } from '../store'
+import { MAC_TOOLS, useStore } from '../store'
 import { BROWSER_SHORTCUTS, dictationShortcuts, FINDER_SHORTCUTS, NOTES_SHORTCUTS, openKeyboardSettings, SHORTCUTS, TERMINAL_SHORTCUTS, WHITEBOARD_SHORTCUTS, type ShortcutInfo } from '../shortcuts'
 import { dictationKeyLabel } from '@shared/dictation'
 import { formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys } from '@shared/keyCombos'
@@ -32,7 +32,7 @@ export default function ShortcutsDialog(): ReactElement {
     ...(linkSaveKey && hasBrowser() ? [{ keys: formatCombo(linkSaveKey), label: 'Save the page in front to Links, from any browser' }] : []),
     ...(linkFindKey && hasBrowser() ? [{ keys: formatCombo(linkFindKey), label: 'Search Links, from any app' }] : []),
     ...(keys.radial ? [{ keys: formatCombo(keys.radial), label: 'Radial menu: every section in a ring (hold the modifiers and tap again to step round)' }] : []),
-    ...RAIL_SECTIONS.filter((x) => keys[x] && (hasBrowser() || (x !== 'local' && x !== 'finder'))).map((x) => ({ keys: formatCombo(keys[x]), label: SECTION_NAMES[x] }))
+    ...RAIL_SECTIONS.filter((x) => keys[x] && (hasBrowser() || !(MAC_TOOLS as readonly string[]).includes(x))).map((x) => ({ keys: formatCombo(keys[x]), label: SECTION_NAMES[x] }))
   ]
   return (
     <Modal title="Keyboard shortcuts" onClose={() => set({ shortcutsOpen: false })}>

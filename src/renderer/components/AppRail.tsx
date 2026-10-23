@@ -1,6 +1,6 @@
 import { useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import { formatCombo, type RailSection } from '@shared/keyCombos'
-import { isSession, TOOL_NAMES, useStore, type Tab, type ToolKind } from '../store'
+import { isSession, MAC_TOOLS, TOOL_NAMES, useStore, type Tab, type ToolKind } from '../store'
 import { hasBrowser } from '../quickConnect'
 import { openKeyboardSettings, sectionKeyLabel } from '../shortcuts'
 import { Icon } from './icons'
@@ -132,7 +132,7 @@ export default function AppRail(): ReactElement {
         onClick: () => st().showGrid(!gridView || !!gridHost),
         onContextMenu: (el) => setMenu({ kind: 'overview', anchor: el })
       })}
-      {TOOL_GROUPS.flatMap((g) => g.tools).filter((kind) => hasBrowser() || !['local', 'finder'].includes(kind)).map((kind) => tool(kind, LOOKS[kind].icon(), TOOL_DESCRIPTIONS[kind]))}
+      {TOOL_GROUPS.flatMap((g) => g.tools).filter((kind) => hasBrowser() || !MAC_TOOLS.includes(kind)).map((kind) => tool(kind, LOOKS[kind].icon(), TOOL_DESCRIPTIONS[kind]))}
       </div>
       <div className="rail-utilities">
       {hasBrowser() && item({

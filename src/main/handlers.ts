@@ -40,6 +40,8 @@ import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } fr
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
+import { aiReport, installersReport, junkReport, packageReceipts, systemReport } from './storage/cleanup'
+import { cancelDuplicates, cancelScan, diskInfo, findDuplicates, forgetRemoved, fullDiskAccess, hiddenItems, largeFiles, moveToTrash, openTrash, pickScanFolder, putBack, removedItems, searchScan, startScan, storageState, storageView, trashSize } from './storage/storage'
 import { cancelVoice, openPrivacyPane, startVoice, stopVoice, voiceStatus } from './voice'
 import { version as APP_VERSION } from '../../package.json'
 
@@ -149,6 +151,29 @@ export const handlers: Handlers = {
   'local:rename': (from, to) => localRename(from, to),
   'local:trash': (paths) => localTrash(paths),
   'local:reveal': async (path) => localReveal(path),
+  'storage:state': () => storageState(),
+  'storage:scan': (kind, path) => startScan(kind, path),
+  'storage:cancel': () => cancelScan(),
+  'storage:pickFolder': () => pickScanFolder(),
+  'storage:fullDiskAccess': () => fullDiskAccess(),
+  'storage:disk': () => diskInfo(),
+  'storage:view': (ref) => storageView(ref),
+  'storage:large': (min, everywhere) => largeFiles(min, everywhere),
+  'storage:search': (query, min, sort) => searchScan(query, min, sort),
+  'storage:hidden': () => hiddenItems(),
+  'storage:duplicates': () => findDuplicates(),
+  'storage:cancelDuplicates': () => cancelDuplicates(),
+  'storage:trash': (items, from) => moveToTrash(items, from),
+  'storage:removed': () => removedItems(),
+  'storage:putBack': (ids) => putBack(ids),
+  'storage:forget': (ids) => forgetRemoved(ids),
+  'storage:trashSize': () => trashSize(),
+  'storage:openTrash': () => openTrash(),
+  'storage:junk': () => junkReport(),
+  'storage:ai': () => aiReport(),
+  'storage:systemData': () => systemReport(),
+  'storage:installers': () => installersReport(),
+  'storage:receipts': () => packageReceipts(),
   'sftp:cancel': async (tid) => cancelTransfer(tid),
   'sftp:transfers': async (id) => listTransfers(id),
   'sftp:clearTransfers': async (id) => clearTransfers(id),

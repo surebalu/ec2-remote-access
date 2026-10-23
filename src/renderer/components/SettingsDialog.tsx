@@ -10,7 +10,7 @@ import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
 import type { AccentColor } from '@shared/types'
 import { TERMINAL_THEMES, TERMINAL_FONTS, COLOR_PROMPT_PRESET, resolveTerminalTheme, terminalBackdrop, terminalFontFamily, DEFAULT_TERMINAL_FONT_SIZE } from '../terminalThemes'
-import { isDarkMode } from '../store'
+import { isDarkMode, MAC_TOOLS } from '../store'
 import PhoneAccessSection from './PhoneAccessSection'
 import QuicklinkSettings from './QuicklinkSettings'
 import { APP_THEMES, effectiveScheme, type AppTheme } from '../appThemes'
@@ -175,13 +175,14 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
 }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_HINTS: Record<RailSection, string> = {
   devtools: 'Local JSON, encoding, tokens, timestamps and hashes.',
   tasks: 'Today, upcoming and someday to-dos, with projects and tags.',
   calendar: 'Month, week and day, with your tasks and subscribed calendars.',
   links: 'Bookmarks and notes in folders and tags, imported from Anybox.',
+  storage: 'Disk space, large files, junk and Recently Removed, as in Strata.',
   hosts: 'Every account’s hosts. ⌘1 always shows them too (Hosts is the first tab).',
   overview: 'Every open session on one page.',
   health: 'The 3DEXPERIENCE platform at a glance.',
@@ -306,7 +307,7 @@ function KeyboardSettings({ draft, onChange, onGlobal }: { draft: Settings; onCh
   const [status, setStatus] = useState<{ key: string; registered: boolean } | null>(null)
   const [linkStatus, setLinkStatus] = useState<Record<'save' | 'find', { key: string; registered: boolean }> | null>(null)
   const keys = sectionKeys(draft.shortcuts)
-  const sections = RAIL_SECTIONS.filter((x) => IN_ELECTRON || (x !== 'local' && x !== 'finder'))
+  const sections = RAIL_SECTIONS.filter((x) => IN_ELECTRON || !(MAC_TOOLS as readonly string[]).includes(x))
   const launcherKey = draft.launcherKey ?? ''
   const globalKey = (t: GlobalTarget): string => draft[GLOBAL_KEYS[t].field] ?? GLOBAL_KEYS[t].fallback
   const globals = (except?: GlobalTarget): { combo: string; does: string }[] =>

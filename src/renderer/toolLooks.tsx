@@ -19,6 +19,7 @@ export const LOOKS: Record<ToolKind | 'hosts' | 'overview', Look> = {
   health: { hue: 345, icon: () => <Icon.health /> },
   local: { hue: 150, icon: () => <Icon.console /> },
   finder: { hue: 196, icon: () => <Icon.finder /> },
+  storage: { hue: 322, icon: () => <Icon.storage /> },
   browser: { hue: 26, icon: () => <Icon.globe /> },
   notes: { hue: 88, icon: () => <Icon.note /> },
   board: { hue: 302, icon: () => <Icon.board /> },

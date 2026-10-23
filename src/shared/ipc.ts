@@ -4,6 +4,8 @@ import type { FrontPage, LinksPanelMode } from './linksPanel'
 import type { RecordDoc, RecordKind, RecordOp } from './records'
 import type { DbAudit, DbKillRequest, DbTarget, LockReport } from './dbLocks'
 import type { FinderPlaces, OpenWithApp, RecentFile } from './finder'
+import type { DiskInfo, DuplicateGroup, MapNode, MapView, RemovedEntry, ScanRootKind, ScanState, TrashOutcome } from './storage'
+import type { CleanReport, PackageReceipt } from './cleanup'
 import type { JvmGcDetail, KernelHealth, KernelMemoryHistory, MemoryHistory, PlmEnvId, PlmHealthSnapshot } from './plmHealth'
 import type { HostServices, ServiceAudit, ServiceJob, ServiceJobRequest } from './services'
 import type { HostHistory, HostSnapshot, ProcessDetail } from './hostInsight'
@@ -89,6 +91,32 @@ export interface IpcApi {
   'finder:duplicate': (paths: string[]) => Promise<string[]>
   /** The Paste menu item: Edit → Paste in the window, which hands the tab the clipboard's files through a paste event. */
   'finder:pasteCommand': () => Promise<void>
+  /** The Storage tool (Mac app only, main/storage/storage.ts): scans, the rooms' questions, the Trash with Put Back. */
+  'storage:state': () => Promise<ScanState>
+  'storage:scan': (kind: ScanRootKind, path?: string) => Promise<ScanState>
+  'storage:cancel': () => Promise<void>
+  'storage:pickFolder': () => Promise<string | null>
+  'storage:fullDiskAccess': () => Promise<boolean>
+  'storage:disk': () => Promise<DiskInfo>
+  'storage:view': (ref: { id?: number; path?: string }) => Promise<MapView>
+  'storage:large': (min: number, everywhere: boolean) => Promise<MapNode[]>
+  'storage:search': (query: string, min: number, sort: 'size' | 'name' | 'date') => Promise<MapNode[]>
+  'storage:hidden': () => Promise<MapNode[]>
+  'storage:duplicates': () => Promise<DuplicateGroup[]>
+  'storage:cancelDuplicates': () => Promise<void>
+  /** Moves items to the Trash (never deletes), recorded for Put Back; `from` names the room. */
+  'storage:trash': (items: { path: string; size?: number; dir?: boolean }[], from: string) => Promise<TrashOutcome>
+  'storage:removed': () => Promise<RemovedEntry[]>
+  'storage:putBack': (ids: string[]) => Promise<{ restored: string[]; failed: { id: string; reason: string }[] }>
+  'storage:forget': (ids: string[]) => Promise<void>
+  'storage:trashSize': () => Promise<number | null>
+  'storage:openTrash': () => Promise<void>
+  /** The Cleanup rooms: each measures its places and reports what can go, and why. */
+  'storage:junk': () => Promise<CleanReport>
+  'storage:ai': () => Promise<CleanReport>
+  'storage:systemData': () => Promise<CleanReport>
+  'storage:installers': () => Promise<CleanReport>
+  'storage:receipts': () => Promise<PackageReceipt[]>
   'sftp:cancel': (transferId: string) => Promise<void>
   'sftp:transfers': (sessionId: string) => Promise<SftpTransfer[]>
   'sftp:clearTransfers': (sessionId: string) => Promise<void>
@@ -343,6 +371,12 @@ export interface IpcEvents {
   'sftp:transfer': SftpTransfer
   'sftp:event': SftpEvent
   'tunnels:changed': Tunnel[]
+  /** The Storage tool's scan: started, progressing, finished. */
+  'storage:scanState': ScanState
+  /** Finding duplicates: files compared so far. */
+  'storage:dupProgress': { done: number; total: number; phase: string }
+  /** Something went to the Trash from the Storage tool (any room refreshes what it shows). */
+  'storage:trashed': { count: number; bytes: number }
   /** A Tasks, Calendar or Links document changed (from any device): reload it if this revision is newer. */
   'records:changed': { kind: RecordKind; rev: number }
   'data:status': DataStatus

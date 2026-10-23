@@ -12,6 +12,7 @@ import { closeAllVoice } from './voice'
 import { closeOnePassword } from './onepassword'
 import { closePlmHealth } from './plmHealth'
 import { closeDbLocks } from './dbLocks'
+import { closeStorage, noteDiskUse } from './storage/storage'
 import { flushDataFolder, updateDataFolder } from './dataFolder'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
@@ -110,6 +111,11 @@ app.whenReady().then(async () => {
   updateLauncherKey()
   updateLinksPanelKeys()
   updateDataFolder()
+  // The Storage tool's disk trend: one reading a day while the app runs, whether or not the tool is open.
+  if (process.platform === 'darwin') {
+    void noteDiskUse().catch(() => undefined)
+    setInterval(() => void noteDiskUse().catch(() => undefined), 3 * 3_600_000).unref()
+  }
   if (getSettings().phoneAccessEnabled) void startPhoneAccess()
   void setupAutoUpdate()
   app.on('activate', () => {
@@ -129,6 +135,7 @@ app.on('before-quit', (e) => {
   closeAllLocal()
   closeAllVoice()
   closeOnePassword()
+  closeStorage()
   Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder()])
     .then(() => stopProxy())
     .catch(() => undefined)
