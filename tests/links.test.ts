@@ -110,6 +110,16 @@ test('planning an import: folders reused, duplicates merged or skipped', () => {
   assert.deepEqual([again.added, again.merged, again.skipped, again.folders], [0, 0, 3, 0], 'importing twice adds nothing')
 })
 
+test('the same address twice in one file is one link, with both copies\' tags', () => {
+  const plan = planImport({ links: [], folders: [] }, [
+    { kind: 'link', url: 'https://www.example.com/', title: 'A', tags: ['one'] },
+    { kind: 'link', url: 'https://example.com', title: 'A again', tags: ['two'], starred: true }
+  ], id, 1)
+  assert.deepEqual([plan.added, plan.merged, plan.skipped, plan.ops.length], [1, 0, 1, 1])
+  const item = plan.ops[0].op === 'put' ? (plan.ops[0].item as LinkItem) : null
+  assert.deepEqual([item?.title, item?.tags, item?.starred], ['A', ['one', 'two'], true])
+})
+
 test('exports read back: JSON exactly, HTML and CSV with folders and tags', () => {
   const work = folder({ name: 'Work' })
   const docs = folder({ name: 'Docs', parentId: work.id })

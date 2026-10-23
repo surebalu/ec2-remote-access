@@ -11,6 +11,9 @@ import { join } from 'node:path'
 import type { AnyboxLibrary, ParsedLink } from '@shared/links'
 
 const CANDIDATES = ['group.cc.anybox.Anybox', 'S8MRM84X6F.group.cc.anybox.Anybox'].map((g) => join(homedir(), 'Library', 'Group Containers', g, 'Anybox.sqlite'))
+/** Shown when macOS will not let this app read Anybox's library (LinksTab offers the file import with it). */
+export const ANYBOX_PRIVATE = 'macOS keeps Anybox\'s library private to Anybox, so this app cannot read it directly. In Anybox, export your links (File → Export, as HTML or JSON) and import that file here.'
+
 /** Core Data counts seconds from 2001-01-01. */
 const CORE_DATA_EPOCH = 978_307_200
 
@@ -22,7 +25,14 @@ export async function readAnybox(): Promise<AnyboxLibrary> {
   if (!source) throw new Error('Anybox\'s library was not found on this Mac. In Anybox, use File → Export (JSON or HTML) and import that file instead.')
   const tmp = mkdtempSync(join(tmpdir(), 'ec2ra-anybox-'))
   try {
-    for (const suffix of ['', '-wal', '-shm']) if (existsSync(source + suffix)) copyFileSync(source + suffix, join(tmp, `Anybox.sqlite${suffix}`))
+    try {
+      for (const suffix of ['', '-wal', '-shm']) if (existsSync(source + suffix)) copyFileSync(source + suffix, join(tmp, `Anybox.sqlite${suffix}`))
+    } catch (e) {
+      // macOS keeps an app's group container to that app (and to apps the user lets in, which for this ad-hoc signed
+      // app does not survive an update), so the export file is the dependable way.
+      if (['EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) throw new Error(ANYBOX_PRIVATE)
+      throw e
+    }
     const { DatabaseSync } = await import('node:sqlite')
     const db = new DatabaseSync(join(tmp, 'Anybox.sqlite'))
     try {

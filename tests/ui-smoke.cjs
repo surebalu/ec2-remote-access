@@ -188,11 +188,14 @@ const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !r
 const boardsSaved = {}
 // Tasks, Calendar and Links documents (main/records.ts), Anybox's library on "this Mac", a page preview and an iCal link.
 const recordDocs = {}
+// The first Anybox import meets macOS's privacy wall, as on a Mac that has not let this app in.
+let anyboxBlocked = true
 const anyboxFixture = [
   { kind: 'link', url: 'https://grafana.example.com/d/prod', title: 'Grafana — production', description: 'Dashboards', folder: ['Work', 'Monitoring'], tags: ['ops', 'prod'], starred: true, addedAt: 1760000000000, note: 'the main board' },
   { kind: 'link', url: 'https://docs.aws.amazon.com/', title: 'AWS documentation', folder: ['Work'], tags: ['aws'], addedAt: 1760000100000, keyword: 'awsdocs' },
   { kind: 'link', url: 'https://news.ycombinator.com/', title: 'Hacker News', tags: ['reading'], addedAt: 1760000200000 },
-  { kind: 'note', title: 'Wifi at the office', text: 'guest / network', folder: ['Work'], addedAt: 1760000300000 }
+  { kind: 'note', title: 'Wifi at the office', text: 'guest / network', folder: ['Work'], addedAt: 1760000300000 },
+  { kind: 'file', title: 'Architecture review.pdf', path: '/fixture/Links Files/Work/Architecture review.pdf', size: 1258291, folder: ['Work'], addedAt: 1760000400000 }
 ]
 const pad2 = (n) => String(n).padStart(2, '0')
 const icsDay = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`
@@ -363,7 +366,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       for (const o of args[1]) { if (o.op === 'delete') delete d.items[o.id]; else d.items[o.item.id] = structuredClone(o.item) }
       return ++d.rev
     }
-    case 'links:anybox': return { links: structuredClone(anyboxFixture), skippedFiles: 2, source: '/fixture/Anybox.sqlite' }
+    case 'links:anybox': if (anyboxBlocked) throw new Error('macOS keeps Anybox\'s library private to Anybox, so this app cannot read it directly.'); return { links: structuredClone(anyboxFixture), skippedFiles: 2, source: '/fixture/Anybox.sqlite' }
     case 'links:preview': return { title: 'Fixture page title', description: 'A page about fixtures.' }
     case 'calendar:feed': return FIXTURE_ICS
     case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
@@ -720,14 +723,24 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.app-rail [aria-label="Links"]').click()`)
     await until(`!!document.querySelector('.links-welcome')`)
     await click('Import from Anybox')
-    await until(`document.querySelector('.links-import')?.textContent.includes('4 new (3 links and 1 notes read)') && document.querySelector('.links-import').textContent.includes('2 new folders')`)
+    await until(`document.querySelector('.links-import')?.textContent.includes('private to Anybox') && [...document.querySelectorAll('.links-import button')].some((b) => b.textContent === 'Import a file…')`)
+    await click('Close')
+    anyboxBlocked = false
+    await click('Import from Anybox')
+    await until(`document.querySelector('.links-import')?.textContent.includes('5 new (3 links, 1 note, 1 file read)') && document.querySelector('.links-import').textContent.includes('2 new folders')`)
     await js(`document.querySelector('.links-import .btn-primary').click()`)
-    await until(`document.querySelectorAll('.link-row').length === 4`)
+    await until(`document.querySelectorAll('.link-row').length === 5`)
     assert.deepEqual(await js(`[...document.querySelectorAll('.plan.links .plan-nav .plan-nav-label')].map((l) => l.textContent).filter((t) => ['Work', 'Monitoring'].includes(t))`), ['Work', 'Monitoring'], 'nested folders from Anybox')
     await screenshot('links.png')
     await setInput('.links-search input', 'awsdocs')
     await until(`document.querySelectorAll('.link-row').length === 1 && document.querySelector('.link-row').textContent.includes('AWS documentation')`)
     await setInput('.links-search input', '')
+    // A file from Anybox: its type's badge, size, and Open (on the Mac, through local:open).
+    await nav('Files')
+    await until(`document.querySelectorAll('.link-row').length === 1 && document.querySelector('.link-row').textContent.includes('PDF · 1.2 MB') && document.querySelector('.link-row .link-icon.badge')?.textContent === 'PDF'`)
+    await js(`document.querySelector('.link-row .link-go').click()`)
+    for (let i = 0; i < 50 && !calls.some((c) => c.channel === 'local:open'); i++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(calls.filter((c) => c.channel === 'local:open').at(-1)?.args[0], '/fixture/Links Files/Work/Architecture review.pdf')
     await nav('Monitoring')
     await until(`document.querySelectorAll('.link-row').length === 1`)
     await js(`document.querySelector('.link-row').click()`)

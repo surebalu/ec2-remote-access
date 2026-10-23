@@ -26,8 +26,47 @@ const VIEWS: { id: LinkView; label: string; icon: () => ReactElement }[] = [
   { id: 'starred', label: 'Starred', icon: () => <Icon.star /> },
   { id: 'unsorted', label: 'Unsorted', icon: () => <Icon.download /> },
   { id: 'notes', label: 'Notes', icon: () => <Icon.note /> },
+  { id: 'files', label: 'Files', icon: () => <Icon.disk /> },
   { id: 'archived', label: 'Archived', icon: () => <Icon.layers /> }
 ]
+
+const extOf = (l: LinkItem): string => ((l.path ?? l.title).match(/\.([a-z0-9]{1,6})$/i)?.[1] ?? '').toLowerCase()
+const sizeLabel = (n?: number): string => (n === undefined ? '' : n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(1)} GB`)
+/** A colour per kind of file, for the badge shown where Finder's icon is not available (phones). */
+const TYPE_COLORS: [RegExp, string][] = [
+  [/^pdf$/, '#e5484d'], [/^(docx?|pages|rtf|odt)$/, '#2b7cd3'], [/^(xlsx?|numbers|csv|tsv|ods)$/, '#1f9d55'], [/^(pptx?|key|odp)$/, '#e8702a'],
+  [/^(png|jpe?g|gif|heic|webp|svg|tiff?|bmp)$/, '#8e4ec6'], [/^(zip|gz|tgz|tar|7z|rar|dmg)$/, '#a16207'], [/^(md|txt|log|rtfd)$/, '#64748b'],
+  [/^(js|ts|tsx|jsx|py|sh|json|ya?ml|xml|html?|css|java|go|rb|sql|c|cpp|h|swift|kt|rs|ps1|bat)$/, '#0e7490']
+]
+const typeColor = (ext: string): string => TYPE_COLORS.find(([re]) => re.test(ext))?.[1] ?? '#6b7280'
+
+/** Finder's icon for each file's type (Mac app only), fetched once per path for the page. */
+const fileIcons = new Map<string, string>()
+function useFileIcons(paths: string[]): Map<string, string> {
+  const [, setTick] = useState(0)
+  const want = paths.filter((p) => !fileIcons.has(p)).slice(0, 400)
+  const key = want.join('\u0000')
+  useEffect(() => {
+    if (!want.length || !hasBrowser()) return
+    for (const p of want) fileIcons.set(p, '')
+    void window.api.invoke('launcher:icons', want).then((icons) => {
+      for (const [p, url] of Object.entries(icons)) fileIcons.set(p, url)
+      setTick((n) => n + 1)
+    }, () => undefined)
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  return fileIcons
+}
+
+/** A link's site icon, a note's icon, or a file's type icon (Finder's, else a coloured badge with its extension). */
+function ItemIcon({ link, icons }: { link: LinkItem; icons: Map<string, string> }): ReactElement {
+  if (link.kind === 'file') {
+    const icon = link.path ? icons.get(link.path) : undefined
+    if (icon) return <img className="link-icon" src={icon} alt="" />
+    const ext = extOf(link)
+    return <span className="link-icon badge" style={{ background: typeColor(ext) }} aria-hidden="true">{(ext || 'file').slice(0, 4).toUpperCase()}</span>
+  }
+  return <Favicon url={link.url} title={link.title} />
+}
 
 /** A site's icon from the site itself, or its first letter when there is none. */
 function Favicon({ url, title }: { url?: string; title: string }): ReactElement {
@@ -53,6 +92,8 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
   const [menu, setMenu] = useState<{ kind: 'import' | 'export' | 'folder'; anchor: HTMLElement; folder?: LinkFolder } | null>(null)
   const [pending, setPending] = useState<{ source: string; links: ParsedLink[]; plan: ImportPlan; note?: string } | null>(null)
   const [adding, setAdding] = useState(false)
+  /** Why Anybox's library could not be read (macOS privacy), with the file import offered instead. */
+  const [anyboxHelp, setAnyboxHelp] = useState<string | null>(null)
   const [newFolder, setNewFolder] = useState<{ parentId?: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const addRef = useRef<HTMLInputElement>(null)
@@ -74,6 +115,7 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
   // A search looks through everything; otherwise the view, sorted.
   const list = useMemo(() => (query.trim() ? searchLinks(links.filter((l) => !l.archived), query, folderById) : sortLinks(viewLinks(view, links, folders), sort)), [query, links, folders, folderById, view, sort])
   const current = selected ? links.find((l) => l.id === selected) : undefined
+  const icons = useFileIcons(useMemo(() => list.filter((l) => l.kind === 'file' && l.path).map((l) => l.path!), [list]))
 
   const save = (l: LinkItem, patch: Partial<LinkItem>): void => {
     const next = { ...l, ...patch }
@@ -86,6 +128,12 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
     setSelected(null)
   }
   const open = (l: LinkItem, external = false): void => {
+    if (l.kind === 'file' && l.path) {
+      // Files live on the Mac and open in their own app there.
+      if (!hasBrowser()) { toast('info', 'Files open in the Mac app.'); return }
+      void window.api.invoke('local:open', l.path).then(() => save(l, { openedAt: Date.now() }), (e: Error) => toast('error', e.message))
+      return
+    }
     if (!l.url) { setSelected(l.id); return }
     if (external || !hasBrowser() || !/^https?:/i.test(l.url)) void window.api.invoke('shell:open', l.url)
     else openBrowser({ url: l.url })
@@ -129,7 +177,7 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
     try {
       const lib = await window.api.invoke('links:anybox')
       prepareImport('Anybox on this Mac', lib.links, lib.skippedFiles ? `${lib.skippedFiles} files Anybox keeps (documents, images) stay in Anybox.` : undefined)
-    } catch (e) { toast('error', (e as Error).message) }
+    } catch (e) { setAnyboxHelp((e as Error).message) }
   }
   const importFile = async (): Promise<void> => {
     const file = await pickTextFile('.json,.html,.htm,.csv,application/json,text/html,text/csv')
@@ -264,12 +312,13 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
             {doc && links.length > 0 && !list.length && <div className="plan-empty">{query ? `Nothing matches “${query}”.` : 'Nothing here.'}</div>}
             {list.map((l) => (
               <div key={l.id} className={`link-row ${selected === l.id ? 'selected' : ''}`} onClick={() => setSelected(l.id)} onDoubleClick={() => open(l)} data-link={l.id}>
-                <Favicon url={l.url} title={l.title} />
+                <ItemIcon link={l} icons={icons} />
                 <div className="link-body">
                   <div className="link-title">{l.title}</div>
                   <div className="link-meta">
                     {l.url && <span className="link-domain">{domainOf(l.url) || l.url}</span>}
                     {l.kind === 'note' && <span className="link-domain">Note</span>}
+                    {l.kind === 'file' && <span className="link-domain">{[extOf(l).toUpperCase() || 'File', sizeLabel(l.size)].filter(Boolean).join(' · ')}</span>}
                     {layout === 'cards' && (l.description || l.text) && <p className="link-desc">{l.description ?? l.text}</p>}
                     {l.folderId && !folder && folderById.has(l.folderId) && <span className="plan-chip"><Icon.folder />{folderPath(l.folderId, folderById).join(' / ')}</span>}
                     {l.tags?.map((t) => <span key={t} className="plan-chip tag">#{t}</span>)}
@@ -278,11 +327,11 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
                 </div>
                 <span className="link-date">{relativeDay(ymd(new Date(l.addedAt)), today)}</span>
                 <button type="button" className={`link-star ${l.starred ? 'on' : ''}`} aria-label={l.starred ? 'Unstar' : 'Star'} aria-pressed={!!l.starred} onClick={(e) => { e.stopPropagation(); save(l, { starred: l.starred ? undefined : true }) }}><Icon.star /></button>
-                {l.url && <button type="button" className="link-go" aria-label={`Open ${l.title}`} title={hasBrowser() ? 'Open in the Browser (⌘-click: your default browser)' : 'Open'} onClick={(e) => { e.stopPropagation(); open(l, e.metaKey) }}><Icon.external /></button>}
+                {(l.url || l.path) && <button type="button" className="link-go" aria-label={`Open ${l.title}`} title={hasBrowser() ? 'Open in the Browser (⌘-click: your default browser)' : 'Open'} onClick={(e) => { e.stopPropagation(); open(l, e.metaKey) }}><Icon.external /></button>}
               </div>
             ))}
           </div>
-          {current && <LinkDetail key={current.id} link={current} folders={folders} tags={tags} today={today} onSave={(p) => save(current, p)} onOpen={(ext) => open(current, ext)} onDelete={() => remove([current])} onClose={() => setSelected(null)} />}
+          {current && <LinkDetail key={current.id} link={current} icons={icons} folders={folders} tags={tags} today={today} onSave={(p) => save(current, p)} onOpen={(ext) => open(current, ext)} onDelete={() => remove([current])} onClose={() => setSelected(null)} />}
         </div>
         <UndoBar undo={undo} onUndo={() => { if (undo) void applyRecords('links', undo.ops); setUndo(null) }} onDone={() => setUndo(null)} />
       </div>
@@ -316,12 +365,24 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
           }}>Delete…</MenuItem>
         </Popover>
       )}
+      {anyboxHelp && (
+        <Modal title="Import from Anybox" onClose={() => setAnyboxHelp(null)}>
+          <div className="links-import">
+            <p>{anyboxHelp}</p>
+            <div className="cal-edit-foot">
+              <span className="flex-1" />
+              <button type="button" className="btn btn-sm" onClick={() => setAnyboxHelp(null)}>Close</button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => { setAnyboxHelp(null); void importFile() }}>Import a file…</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {pending && (
         <Modal title="Import links" onClose={() => setPending(null)}>
           <div className="links-import">
             <p>From <b>{pending.source}</b>:</p>
             <ul>
-              <li><b>{pending.plan.added}</b> new ({pending.links.filter((l) => l.kind === 'link').length} links and {pending.links.filter((l) => l.kind === 'note').length} notes read)</li>
+              <li><b>{pending.plan.added}</b> new ({(['link', 'note', 'file'] as const).map((k) => [k, pending.links.filter((l) => l.kind === k).length] as const).filter(([, n]) => n).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')} read)</li>
               {pending.plan.folders > 0 && <li><b>{pending.plan.folders}</b> new folder{pending.plan.folders === 1 ? '' : 's'}</li>}
               {pending.plan.merged > 0 && <li><b>{pending.plan.merged}</b> already saved, given their tags or star</li>}
               {pending.plan.skipped > 0 && <li><b>{pending.plan.skipped}</b> already saved, left as they are</li>}
@@ -344,8 +405,8 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
   )
 }
 
-function LinkDetail({ link, folders, tags, today, onSave, onOpen, onDelete, onClose }: {
-  link: LinkItem; folders: LinkFolder[]; tags: string[]; today: string
+function LinkDetail({ link, icons, folders, tags, today, onSave, onOpen, onDelete, onClose }: {
+  link: LinkItem; icons: Map<string, string>; folders: LinkFolder[]; tags: string[]; today: string
   onSave: (patch: Partial<LinkItem>) => void; onOpen: (external: boolean) => void; onDelete: () => void; onClose: () => void
 }): ReactElement {
   const [title, setTitle] = useState(link.title)
@@ -364,7 +425,8 @@ function LinkDetail({ link, folders, tags, today, onSave, onOpen, onDelete, onCl
   return (
     <aside className="link-detail" aria-label="Link details">
       <div className="link-detail-head">
-        <span className="flex-1 muted">{link.kind === 'note' ? 'Note' : domainOf(link.url)}</span>
+        <ItemIcon link={link} icons={icons} />
+        <span className="flex-1 muted">{link.kind === 'note' ? 'Note' : link.kind === 'file' ? [extOf(link).toUpperCase() || 'File', sizeLabel(link.size)].filter(Boolean).join(' · ') : domainOf(link.url)}</span>
         <button type="button" className="plan-add" aria-label="Close" onClick={onClose}><Icon.x /></button>
       </div>
       <textarea className="link-detail-title" value={title} rows={2} aria-label="Title" onChange={(e) => setTitle(e.target.value)} onBlur={() => { if (title.trim() && title !== link.title) commit({ title: title.trim() }) }} />
@@ -377,6 +439,16 @@ function LinkDetail({ link, folders, tags, today, onSave, onOpen, onDelete, onCl
             <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('clipboard:write', link.url!).then(() => useStore.getState().toast('success', 'Link copied'))}><Icon.copy />Copy</button>
           </div>
           {link.description && <p className="link-detail-desc">{link.description}</p>}
+        </>
+      )}
+      {link.kind === 'file' && link.path && (
+        <>
+          <p className="link-detail-path" title={link.path}>{link.path.replace(/^\/Users\/[^/]+/, '~')}</p>
+          <div className="link-detail-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpen(false)}><Icon.external />Open</button>
+            {hasBrowser() && <button type="button" className="btn btn-sm" onClick={() => useStore.getState().openFinder(link.path!.replace(/\/[^/]+$/, ''))}><Icon.finder />Show in Finder</button>}
+            <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('clipboard:write', link.path!).then(() => useStore.getState().toast('success', 'Path copied'))}><Icon.copy />Copy path</button>
+          </div>
         </>
       )}
       {link.kind === 'note' && <textarea className="input link-detail-text" value={text} placeholder="Write the note…" aria-label="Note text" rows={8} onChange={(e) => setText(e.target.value)} onBlur={() => { if (text !== (link.text ?? '')) commit({ text }) }} />}
