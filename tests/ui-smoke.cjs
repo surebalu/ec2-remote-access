@@ -2781,11 +2781,13 @@ app.whenReady().then(async () => {
     // ⌘K lists the Browser's sites under its tab, to switch straight to one.
     await new Promise((r) => setTimeout(r, 450))
     bwin.webContents.send('app:command', { kind: 'switcher' })
-    await buntil(`[...document.querySelectorAll('.switcher-result')].filter((r) => r.textContent.includes('Open site')).length >= 2`, 'the quick switcher lists the open sites')
+    await buntil(`document.querySelectorAll('.switcher-result.space').length >= 2 && document.querySelectorAll('.switcher-result.nested-2').length >= 2`, 'the quick switcher lists the open sites, by space')
+    // Each space's sites follow its own row, never mixed with another space's.
+    assert.ok(await bjs(`(() => { const rows = [...document.querySelectorAll('.switcher-result')]; const seen = []; let cur = null; for (const r of rows) { if (r.classList.contains('space')) { cur = r.querySelector('.font-medium').textContent; if (seen.includes(cur)) return false; seen.push(cur) } } return seen.length >= 2 })()`), 'one row per space')
     await bshot('switcher-sites.png')
     await bjs(`(() => { const i = document.querySelector('[aria-label="Find a host or open session"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'one'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
-    await buntil(`[...document.querySelectorAll('.switcher-result')].some((r) => r.textContent.includes('Open site') && r.textContent.includes('127.0.0.1'))`, 'a site by its address')
-    await bjs(`[...document.querySelectorAll('.switcher-result')].find((r) => r.textContent.includes('Open site')).click()`)
+    await buntil(`[...document.querySelectorAll('.switcher-result')].some((r) => r.id && !r.classList.contains('space') && r.textContent.includes('127.0.0.1'))`, 'a site by its address')
+    await bjs(`[...document.querySelectorAll('.switcher-result')].find((r) => !r.classList.contains('space') && r.textContent.includes('127.0.0.1')).click()`)
     await buntil(`!document.querySelector('.switcher-result') && document.querySelector('button[aria-label="Browser"]').classList.contains('on')`, 'picking a site switches to it')
 
     // Settings → Keyboard: record ⌃⌘C for Claude (⌘C is refused), take ⇧⌘N from Notes for ChatGPT, restore defaults.

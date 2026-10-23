@@ -231,6 +231,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     if (!st) return
     const names = new Map(spaces.map((x) => [x.id, x.name]))
     const t = setTimeout(() => useStore.getState().set({
+      webSpaces: spaces.map((x) => ({ id: x.id, name: x.name, color: x.color, ...(x.custom ? { custom: x.custom } : {}), ...(x.icon ? { icon: x.icon } : {}) })),
       webTabs: st.tabs.filter((x) => x.url || x.homeUrl).map((x) => ({
         id: x.id, title: x.name || x.title, url: x.url || x.homeUrl || '', favicon: x.favicon, space: x.spaceId, spaceName: names.get(x.spaceId) ?? 'Browser',
         pinned: x.pinned, favorite: x.favorite, current: st.activeTab[x.spaceId] === x.id
@@ -238,7 +239,7 @@ function Browser({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
     }), 300)
     return () => clearTimeout(t)
   }, [st?.tabs, st?.activeTab, spaces]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => useStore.getState().set({ webTabs: null }), [])
+  useEffect(() => () => useStore.getState().set({ webTabs: null, webSpaces: null }), [])
 
   const stRef = useRef(st)
   stRef.current = st

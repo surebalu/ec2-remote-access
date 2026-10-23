@@ -2,7 +2,7 @@ import { workspaceSummary } from '@shared/workspaces'
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome, hostOf, spaceIdForProfile } from '@shared/browser'
-import type { BrowserState, Instance } from '@shared/types'
+import type { BrowserState, Instance, WebSpace } from '@shared/types'
 import { formatCombo, type ShortcutTarget } from '@shared/keyCombos'
 import { DESKTOP_TOOLS, filteredInstances, isSession, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind, type WebTabInfo } from '../store'
 import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
@@ -13,7 +13,8 @@ import { APP_THEMES } from '../appThemes'
 import { openKeyboardSettings, openRadial, sectionKeyLabel, terminalAction } from '../shortcuts'
 import Modal from './Modal'
 import { Icon } from './icons'
-import { Favicon } from './browser/parts'
+import { Favicon, SpaceAvatar } from './browser/parts'
+import { metaFor } from '../colors'
 
 type IconFn = (p: { className?: string }) => ReactElement
 
@@ -26,8 +27,8 @@ interface Result {
   icon: IconFn
   /** Drawn instead of `icon` (a site's favicon). */
   image?: ReactElement
-  /** Shown indented under the row before it (a site under the Browser's tab). */
-  nested?: boolean
+  /** How far it is indented under the rows before it: 1 for a Browser space under the Browser's tab, 2 for its sites. */
+  nested?: 1 | 2
   hint: string
   action: () => void
 }
@@ -136,10 +137,45 @@ function savedWebTabs(b: BrowserState | null, names: (space: string) => string):
 function siteResult(t: WebTabInfo): Result {
   const host = hostOf(t.url)
   return {
-    id: `site:${t.id}`, title: t.title || host, subtitle: `${t.favorite ? 'Favorite' : t.pinned ? 'Pinned site' : 'Open site'} · ${t.spaceName} · ${host}`,
+    id: `site:${t.id}`, title: t.title || host, subtitle: `${t.current ? 'Showing' : t.favorite ? 'Favorite' : t.pinned ? 'Pinned' : 'Open'} · ${host}`,
     icon: Icon.globe, image: <Favicon src={t.favicon} url={t.url} size={16} />, hint: 'Switch',
     action: () => useStore.getState().openBrowser({ tab: t.id })
   }
+}
+
+/** The saved state's spaces in the Browser's order: its own, then one per AWS account (as BrowserTab derives them). */
+function savedSpaces(b: BrowserState | null, profiles: { name: string; enabled: boolean; kind?: string }[], settings: Parameters<typeof metaFor>[1]): WebSpace[] {
+  if (!b) return []
+  const aws = profiles.filter((p) => p.enabled && p.kind !== 'static').map((p): WebSpace => {
+    const m = metaFor(p.name, settings)
+    const id = spaceIdForProfile(p.name)
+    return { id, name: m.label, color: m.color, ...b.spaceLooks?.[id] }
+  })
+  return [...b.spaces, ...aws]
+}
+
+/**
+ * The Browser's sites grouped by space (a Work page never mixed in with Prod's): each space a row of its own that
+ * switches the Browser to it, then its sites, the one it shows first, then favorites, pinned and open tabs. Without a
+ * query a space lists a few; the space row says how many it has.
+ */
+function siteGroups(sites: WebTabInfo[], spaces: WebSpace[], q: string): Result[] {
+  const rank = (t: WebTabInfo): number => (t.current ? 0 : t.favorite ? 1 : t.pinned ? 2 : 3)
+  const order = new Map(spaces.map((x, i) => [x.id, i]))
+  const ids = [...new Set(sites.map((t) => t.space))].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999))
+  const out: Result[] = []
+  for (const id of ids) {
+    const mine = sites.filter((t) => t.space === id).sort((a, b) => rank(a) - rank(b))
+    const space = spaces.find((x) => x.id === id) ?? { id, name: mine[0].spaceName, color: 'slate' as WebSpace['color'] }
+    const shown = mine.slice(0, q ? 12 : 5)
+    out.push({
+      id: `space:${id}`, title: space.name, subtitle: `Browser space · ${mine.length} ${q ? 'matching ' : ''}site${mine.length === 1 ? '' : 's'}${shown.length < mine.length ? `, ${shown.length} shown` : ''}`,
+      icon: Icon.globe, image: <SpaceAvatar space={space} size={18} />, hint: 'Switch space', nested: 1,
+      action: () => useStore.getState().openBrowser({ space: id })
+    })
+    out.push(...shown.map((t) => ({ ...siteResult(t), nested: 2 as const })))
+  }
+  return out
 }
 
 const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
@@ -223,6 +259,7 @@ export default function QuickSwitcher(): ReactElement {
     return p ? (s.settings?.accountMeta?.[p.name]?.label ?? p.name) : 'Browser'
   }
   const sites = s.webTabs ?? savedWebTabs(saved, spaceName)
+  const spaces = s.webSpaces ?? savedSpaces(saved, s.profiles, s.settings)
 
   const cmdResults: Result[] = commands()
     .filter((c) => !q || fuzzy(`${c.title} ${c.keywords ?? ''}`, q))
@@ -239,13 +276,12 @@ export default function QuickSwitcher(): ReactElement {
     const tabs = s.tabs.filter((t) => !t.transient && `${t.title} ${t.shellLabel ?? ''} ${t.kind} ${t.status}`.toLowerCase().includes(q.toLowerCase()))
     // Every word in the site's title, address or space; the Browser's own tab stays first, its sites right under it.
     const siteHits = sites.filter((t) => !q || fuzzy(`${t.title} ${t.url} ${t.spaceName} site web`, q))
-      .sort((a, b) => Number(!!b.current) - Number(!!a.current) || Number(!!b.favorite) - Number(!!a.favorite) || Number(!!b.pinned) - Number(!!a.pinned))
     const tabResults: Result[] = tabs.flatMap((t) => {
-      const r: Result = { id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `Open ${t.kind.toUpperCase()} session · ${t.status}` : t.kind === 'browser' && sites.length ? `Open tab · ${sites.length} site${sites.length === 1 ? '' : 's'}` : 'Open tab', key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch' }
-      return t.kind === 'browser' ? [r, ...siteHits.slice(0, 25).map((x) => ({ ...siteResult(x), nested: true }))] : [r]
+      const r: Result = { id: `tab:${t.id}`, title: t.title, subtitle: isSession(t) ? `Open ${t.kind.toUpperCase()} session · ${t.status}` : t.kind === 'browser' && sites.length ? `Open tab · ${sites.length} site${sites.length === 1 ? '' : 's'} in ${new Set(sites.map((x) => x.space)).size} space${new Set(sites.map((x) => x.space)).size === 1 ? '' : 's'}` : 'Open tab', key: t.instanceKey || undefined, icon: tabIcon(t), action: () => s.setActive(t.id), hint: 'Switch' }
+      return t.kind === 'browser' ? [r, ...siteGroups(siteHits, spaces, q)] : [r]
     })
     // Sites whose Browser tab is not open here (a detached Browser, or the Browser closed since): still listed.
-    const orphanSites = tabs.some((t) => t.kind === 'browser') ? [] : siteHits.slice(0, q ? 25 : 12).map(siteResult)
+    const orphanSites = tabs.some((t) => t.kind === 'browser') ? [] : siteGroups(siteHits, spaces, q).map((x) => ({ ...x, nested: x.nested === 2 ? 1 as const : undefined }))
     results = [
       ...hostVerbs(query, visible),
       ...tabResults,
@@ -289,7 +325,7 @@ export default function QuickSwitcher(): ReactElement {
     <p className="muted my-3 text-xs">{query ? `${results.length}${results.length === 60 ? '+' : ''} result${results.length === 1 ? '' : 's'}` : beside ? 'Shown side by side with it; drag a pane’s header to move it, or its border to resize' : 'Open sessions, recent connections, and favorites first'}</p>
     <div ref={listRef} id={listId} role="listbox" aria-label="Hosts and sessions" className="max-h-[50vh] overflow-y-auto space-y-1">
       {results.map((item, n) => <button key={item.id} id={`${listId}-${n}`} type="button" role="option" aria-selected={n === index} tabIndex={-1}
-        className={`switcher-result ${n === index ? 'on' : ''} ${item.nested ? 'nested' : ''}`} onMouseMove={() => setSelected(n)} onClick={() => activate(n)}>
+        className={`switcher-result ${n === index ? 'on' : ''} ${item.nested ? `nested-${item.nested}` : ''} ${item.id.startsWith('space:') ? 'space' : ''}`} onMouseMove={() => setSelected(n)} onClick={() => activate(n)}>
         {item.image ?? <item.icon />}<span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">{item.title}</span>{item.subtitle && <span className="muted block truncate text-[11px]">{item.subtitle}</span>}</span>
         {item.hint && <span className="muted text-[11px]">{item.hint}</span>}
       </button>)}
