@@ -1838,101 +1838,189 @@ html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 .webapp-error { position: absolute; z-index: 2; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: var(--bg); text-align: center; }
 .webapp-error-logo { width: 34px; height: 34px; margin-bottom: 4px; color: var(--muted); }
 
-/* The launcher (src/renderer/launcher): a card in a transparent floating window, the margin leaving room for its shadow.
-   The list on the left, the chosen result's details on the right, the actions along the bottom (as in FileMinutes). */
+/* The launcher (src/renderer/launcher), drawn as Raycast 2.9 draws its window: a frosted card with large round corners in a
+   transparent floating window (the margin leaves room for its shadow), the search field on top, one column of results
+   with what each is on the right, and a floating bar at the bottom: the command (or the launcher's menu) on the left, the
+   main action and Actions ⌘K on the right. Colours are the theme's tokens and the type is the app font (Settings). */
 html.launcher-page, html.launcher-page body { background: transparent; }
 .launcher-frame { display: flex; height: 100%; padding: 8px 14px 22px; }
-.launcher { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; border: 1px solid var(--border-strong, var(--border)); border-radius: 12px; background: var(--panel); box-shadow: 0 18px 48px rgba(0, 0, 0, .36), 0 2px 8px rgba(0, 0, 0, .16); font-size: 12px; }
-.launcher-search { display: flex; flex-shrink: 0; align-items: center; gap: 9px; height: 44px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--border); }
-.launcher-search-icon { flex-shrink: 0; width: 15px; height: 15px; color: var(--muted); }
-.launcher-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: 400 15px/1.2 var(--ui-font); }
+.launcher {
+  --l-bg: color-mix(in srgb, color-mix(in srgb, var(--panel) 58%, var(--bg)) 96%, transparent);
+  --l-line: color-mix(in srgb, var(--text) 9%, transparent);
+  --l-hover: color-mix(in srgb, var(--text) 8%, transparent);
+  --l-sel: color-mix(in srgb, var(--text) 11%, transparent);
+  --l-pill: color-mix(in srgb, var(--panel) 88%, transparent);
+  position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--text) 13%, transparent); border-radius: 18px; background: var(--l-bg);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .34), 0 3px 10px rgba(0, 0, 0, .14), inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent);
+  color: var(--text); font: 400 13px/1.3 var(--ui-font);
+}
+.launcher-search { display: flex; flex-shrink: 0; align-items: center; gap: 12px; height: 58px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--l-line); }
+.launcher-logo { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font: 700 9px/1 var(--mono-font); }
+.launcher-back { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 28px; height: 28px; margin-left: -6px; border-radius: 8px; color: var(--text-2); }
+.launcher-back:hover { background: var(--l-hover); color: var(--text); }
+.launcher-back svg { width: 17px; height: 17px; }
+.launcher-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: 400 17px/1.2 var(--ui-font); caret-color: var(--accent); }
 .launcher-search input::placeholder { color: var(--muted); }
-.launcher-clear { display: inline-flex; padding: 3px; border-radius: 50%; color: var(--muted); }
-.launcher-clear:hover { background: var(--accent-soft); color: var(--text); }
+.launcher-search input.launcher-input-hidden { flex: 0 0 1px; width: 1px; opacity: 0; }
+/* A command's own view (Speed Test) has only the back arrow above it, as in Raycast. */
+.launcher.custom .launcher-search { height: 44px; border-bottom: 0; }
+.launcher-clear { display: inline-flex; padding: 4px; border-radius: 50%; color: var(--muted); }
+.launcher-clear:hover { background: var(--l-hover); color: var(--text); }
 .launcher-clear svg { width: 12px; height: 12px; }
+.launcher-quickai { display: inline-flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 7px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.launcher-quickai:hover { background: var(--l-hover); color: var(--text); }
+.launcher-cap { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--text) 16%, transparent); border-radius: 5px; background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text-2); font: 500 11px/1 var(--ui-font); }
+.launcher-caps { display: inline-flex; gap: 3px; }
 .launcher-body { display: flex; flex: 1; min-height: 0; }
-.launcher-list { flex: 0 0 56%; min-width: 0; padding: 2px 6px 6px; overflow-y: auto; }
-.launcher-group { padding: 7px 8px 2px; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .02em; }
-.launcher-item { display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 8px; border-radius: 7px; cursor: default; }
-.launcher-item.on { background: var(--accent-soft-2); }
+.launcher-list { flex: 1; min-width: 0; padding: 4px 8px 58px; overflow-y: auto; scrollbar-width: none; }
+.launcher-list::-webkit-scrollbar { display: none; }
+.launcher-group { padding: 10px 12px 5px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.launcher-item { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 9px; cursor: default; }
+.launcher-item.on { background: var(--l-sel); }
 .launcher-icon { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 22px; height: 22px; color: var(--text-2); }
 .launcher-icon img { width: 22px; height: 22px; object-fit: contain; }
-.launcher-icon svg { width: 16px; height: 16px; }
-.launcher-icon .favicon, .launcher-icon .favicon-letter { width: 16px !important; height: 16px !important; border-radius: 4px; }
-.launcher-text { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
-.launcher-title { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
-.launcher-sub { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.launcher-acc { display: inline-flex; flex-shrink: 0; align-items: center; padding-left: 6px; color: var(--muted); font-size: 10.5px; }
-.launcher-acc .kbd { font-size: 9.5px; line-height: 14px; }
-.launcher-fav, .launcher-pin { width: 11px; height: 11px; color: var(--warn); fill: currentColor; }
+.launcher-icon svg { width: 17px; height: 17px; }
+.launcher-icon .favicon, .launcher-icon .favicon-letter { width: 18px !important; height: 18px !important; border-radius: 5px; }
+.launcher-text { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.launcher-title { flex-shrink: 0; max-width: 100%; overflow: hidden; color: var(--text); font-size: 13.5px; font-weight: 500; text-overflow: ellipsis; }
+.launcher-sub { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; }
+.launcher-acc { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.launcher-acc .kbd { font-size: 10.5px; line-height: 16px; }
+.launcher-type { flex-shrink: 0; padding-left: 8px; color: var(--muted); font-size: 12.5px; }
+.launcher-fav, .launcher-pin { width: 12px; height: 12px; color: var(--warn); fill: currentColor; }
 .launcher-pin { color: var(--muted); }
-.launcher-state { padding: 0 5px; border-radius: 4px; background: var(--panel-2); text-transform: capitalize; }
-.launcher-calc { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; background: var(--accent-soft-2); color: var(--accent); font: 700 13px/1 var(--ui-font); }
-.launcher-empty { padding: 20px; color: var(--muted); text-align: center; }
-.launcher-detail { flex: 1; min-width: 0; padding: 14px 14px 10px; overflow-y: auto; border-left: 1px solid var(--border); background: var(--bg-elev); }
+.launcher-state { padding: 1px 6px; border-radius: 5px; background: var(--l-hover); text-transform: capitalize; }
+.launcher-calc { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft-2); color: var(--accent); font: 700 13px/1 var(--ui-font); }
+.launcher-empty { padding: 28px; color: var(--muted); text-align: center; }
+.launcher-meter { font-variant-numeric: tabular-nums; }
+.launcher-go { width: 12px; height: 12px; opacity: .55; }
+/* The floating bar over the list's end. */
+.launcher-bar { position: absolute; right: 0; bottom: 0; left: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 26px 10px 10px; background: linear-gradient(to bottom, transparent, var(--l-bg) 55%); pointer-events: none; }
+.launcher-bar > * { pointer-events: auto; }
+.launcher-pill { display: inline-flex; align-items: center; height: 38px; border: 1px solid color-mix(in srgb, var(--text) 13%, transparent); border-radius: 999px; background: var(--l-pill); box-shadow: 0 2px 10px rgba(0, 0, 0, .12); color: var(--text); font-size: 12.5px; white-space: nowrap; }
+.launcher-menu { justify-content: center; width: 38px; color: var(--text-2); }
+.launcher-menu svg { width: 16px; height: 16px; }
+.launcher-command { gap: 9px; padding: 0 16px 0 12px; }
+.launcher-command svg { width: 15px; height: 15px; }
+.launcher-pill:hover, .launcher-actionbar button:hover { background: color-mix(in srgb, var(--l-pill) 80%, var(--text) 8%); }
+.launcher-actionbar { padding: 0 5px; }
+.launcher-actionbar button { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 999px; color: var(--text); }
+.launcher-actionbar .launcher-hint { color: var(--text-2); }
+.launcher-pill-sep { width: 1px; height: 16px; margin: 0 2px; background: var(--l-line); }
+.launcher-actions { position: absolute; right: 10px; bottom: 58px; z-index: 3; width: 290px; padding: 6px; border: 1px solid color-mix(in srgb, var(--text) 13%, transparent); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow-lg); }
+.launcher-actions-title { padding: 4px 9px 6px; overflow: hidden; color: var(--muted); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; padding: 0 9px; border-radius: 8px; font-size: 12.5px; cursor: default; }
+.launcher-action.on { background: var(--l-sel); }
+/* A line of news under the search field. */
+.launcher-notice { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 7px 18px; border-bottom: 1px solid var(--l-line); font-size: 12px; }
+.launcher-notice svg { flex-shrink: 0; width: 13px; height: 13px; }
+.launcher-notice.ok svg { color: var(--ok); }
+.launcher-notice.err { background: var(--err-soft); }
+.launcher-notice.err svg { color: var(--err); }
+/* Details beside the list, for the modes that show them (Downloads). */
+.launcher-detail { flex: 0 0 40%; min-width: 0; padding: 16px 16px 60px; overflow-y: auto; border-left: 1px solid var(--l-line); }
 .launcher-thumb { display: flex; align-items: center; justify-content: center; height: 132px; margin-bottom: 10px; }
-.launcher-thumb img { max-width: 100%; max-height: 132px; border-radius: 4px; box-shadow: 0 2px 10px rgba(0, 0, 0, .18); object-fit: contain; }
+.launcher-thumb img { max-width: 100%; max-height: 132px; border-radius: 6px; box-shadow: 0 2px 10px rgba(0, 0, 0, .18); object-fit: contain; }
 .launcher-thumb.app img, .launcher-thumb img.small { max-height: 72px; border-radius: 0; box-shadow: none; }
 .launcher-thumb.host { height: 64px; color: var(--text-2); }
 .launcher-thumb.host svg { width: 34px; height: 34px; }
 .launcher-thumb-blank svg { width: 40px; height: 40px; color: var(--muted); }
-.launcher-detail-title { margin-bottom: 8px; font-size: 12.5px; font-weight: 650; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
-.launcher-facts { display: grid; grid-template-columns: max-content 1fr; gap: 5px 10px; margin: 0; font-size: 11px; }
+.launcher-detail-title { margin-bottom: 8px; font-size: 13px; font-weight: 650; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+.launcher-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; margin: 0; font-size: 11.5px; }
 .launcher-facts dt { color: var(--muted); }
 .launcher-facts dd { margin: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; }
-.launcher-url { font-size: 10.5px; }
-.launcher-snippet { margin: 0 0 8px; color: var(--text-2); font-size: 11px; line-height: 1.45; text-align: center; overflow-wrap: anywhere; }
+.launcher-url { font-size: 11px; }
+.launcher-snippet { margin: 0 0 8px; color: var(--text-2); font-size: 11.5px; line-height: 1.45; text-align: center; overflow-wrap: anywhere; }
+.launcher-note { margin-top: 10px; }
+.launcher-big-text { color: var(--text); font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: center; }
+.launcher-facts-big { height: auto; min-height: 64px; padding: 4px 0; color: var(--accent); }
 .launcher-calc-big { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 100%; text-align: center; }
 .launcher-calc-value { font-size: 26px; font-weight: 650; overflow-wrap: anywhere; }
-.launcher-foot { display: flex; flex-shrink: 0; align-items: center; gap: 4px; height: 34px; padding: 0 8px 0 10px; border-top: 1px solid var(--border); background: var(--bg-elev); color: var(--text-2); font-size: 11px; }
-.launcher-mark { width: 18px; height: 18px; border-radius: 5px; font-size: 8px; line-height: 18px; }
-.launcher-hint { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; border-radius: 6px; color: var(--text-2); white-space: nowrap; }
-.launcher-hint:hover { background: var(--accent-soft); color: var(--text); }
-.launcher-hint .kbd { font-size: 9.5px; line-height: 14px; }
-.launcher-actions { position: absolute; right: 8px; bottom: 40px; z-index: 2; width: 260px; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); box-shadow: var(--shadow-lg); }
-.launcher-actions-title { padding: 3px 7px 5px; overflow: hidden; color: var(--muted); font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.launcher-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 28px; padding: 0 7px; border-radius: 6px; font-size: 12px; cursor: default; }
-.launcher-action .kbd { font-size: 9.5px; line-height: 14px; }
-.launcher-form { position: absolute; inset: 45px 0 0; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 16px 22px; overflow-y: auto; background: var(--panel); }
-.launcher-form-title { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; font-size: 13px; font-weight: 700; }
+.launcher-capture { display: block; padding: 6px 8px; border-radius: 6px; background: var(--l-hover); font: 11px/1.45 var(--mono-font); text-align: left; white-space: pre-wrap; }
+/* The quicklink form over the list. */
+.launcher-form { position: absolute; inset: 59px 0 0; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 18px 24px; overflow-y: auto; background: var(--l-bg); }
+.launcher-form-title { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; font-size: 14px; font-weight: 700; }
 .launcher-form-title svg { width: 15px; height: 15px; color: var(--accent); }
 .launcher-form-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 4px 12px; }
 .launcher-form-row > span { color: var(--text-2); font-size: 12px; text-align: right; }
-.launcher-form-row .input { height: 30px; font-size: 12.5px; }
-.launcher-form-row small { grid-column: 2; font-size: 10.5px; }
-.launcher-form-error { margin-left: 102px; color: var(--err); font-size: 11.5px; }
-.launcher-form-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 8px; }
+.launcher-form-row .input { height: 32px; font-size: 13px; }
+.launcher-form-row small { grid-column: 2; font-size: 11px; }
+.launcher-form-error { margin-left: 102px; color: var(--err); font-size: 12px; }
+.launcher-form-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 8px; padding-bottom: 46px; }
 .launcher-form-buttons .kbd { margin-left: 4px; font-size: 9.5px; }
-.launcher-action.on { background: var(--accent-soft-2); }
-/* The launcher's modes (launcher/modes.tsx): a back chip in the search field, a line of news under it, the emoji grid. */
-.launcher-mode { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: 24px; padding: 0 8px 0 5px; border-radius: 6px; background: var(--accent-soft-2); color: var(--accent); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-.launcher-mode svg { width: 12px; height: 12px; }
-.launcher-mode:hover { background: var(--accent-soft); }
-.launcher-notice { display: flex; flex-shrink: 0; align-items: center; gap: 7px; padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
-.launcher-notice svg { flex-shrink: 0; width: 13px; height: 13px; }
-.launcher-notice.ok { background: var(--ok-soft); color: var(--text); }
-.launcher-notice.ok svg { color: var(--ok); }
-.launcher-notice.err { background: var(--err-soft); color: var(--text); }
-.launcher-notice.err svg { color: var(--err); }
-.launcher-cells { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 2px 2px 6px; }
-.launcher-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 8px; font-size: 24px; line-height: 1; cursor: default; }
-.launcher-cell.on { background: var(--accent-soft-2); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.launcher-emoji { font-size: 22px; line-height: 1; }
-.launcher-item .launcher-emoji { font-size: 17px; }
+/* Emoji: a grid of large cells across the whole width. */
+.launcher-cells { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; padding: 2px 4px 8px; }
+.launcher-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1.15; border-radius: 12px; background: color-mix(in srgb, var(--text) 4%, transparent); font-size: 32px; line-height: 1; cursor: default; }
+.launcher-cell.on { background: var(--l-sel); box-shadow: inset 0 0 0 2px var(--accent); }
+.launcher-emoji { font-size: 30px; line-height: 1; }
+.launcher-item .launcher-emoji { font-size: 18px; }
 .launcher-emoji-sm { font-size: 15px; line-height: 1; }
 .launcher-emoji-detail { display: flex; flex-direction: column; align-items: center; padding-top: 10px; }
 .launcher-emoji-big { margin-bottom: 10px; font-size: 76px; line-height: 1.1; }
-.launcher-meter { font-variant-numeric: tabular-nums; }
-.launcher-big-text { color: var(--text); font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: center; }
-.launcher-facts-big { height: auto; min-height: 64px; padding: 4px 0; color: var(--accent); }
-.launcher-facts-big .layout-glyph { color: var(--accent); }
-.launcher-note { margin-top: 10px; }
-.launcher-capture { display: block; padding: 6px 8px; border-radius: 6px; background: var(--panel-2); font: 11px/1.45 var(--mono-font); text-align: left; white-space: pre-wrap; }
-.launcher-go { width: 11px; height: 11px; opacity: .6; }
 .launcher-spin { animation: launcher-spin 1.2s linear infinite; }
 @keyframes launcher-spin { to { transform: rotate(360deg); } }
 .layout-glyph { display: block; flex-shrink: 0; color: var(--text-2); }
 .launcher-item.on .layout-glyph { color: var(--accent); }
+/* A command's own view in place of the list (Speed Test). */
+.launcher-custom { flex: 1; min-width: 0; overflow-y: auto; padding-bottom: 58px; }
+
+/* Speed Test (launcher/SpeedTest.tsx), as Raycast lays it out: two dials, how each direction went, three pills, details. */
+.sp { --sp-down: #3b82f6; --sp-up: #6d3df2; --sp-ping: #e0a526; display: flex; min-height: 100%; }
+.sp-main { display: flex; flex: 1; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 14px 4px 18px; }
+.sp-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sp-gauge svg { display: block; max-height: 172px; overflow: visible; }
+.sp-track { fill: none; stroke: color-mix(in srgb, var(--text) 13%, transparent); stroke-width: 14; stroke-linecap: round; }
+.sp-fill { fill: none; stroke-width: 14; stroke-linecap: round; transition: d .25s; }
+.sp-gauge.down .sp-fill { stroke: var(--sp-down); }
+.sp-gauge.up .sp-fill { stroke: var(--sp-up); }
+.sp-knob { fill: color-mix(in srgb, var(--text) 85%, #000); stroke: var(--l-bg); stroke-width: 3; }
+.sp-tick { stroke: color-mix(in srgb, var(--text) 35%, transparent); stroke-width: 1.2; }
+.sp-tick-label { fill: var(--muted); font: 500 8.5px var(--ui-font); }
+.sp-value { fill: var(--text); font: 700 27px var(--ui-font); font-variant-numeric: tabular-nums; }
+.sp-unit { fill: var(--muted); font: 500 10px var(--ui-font); }
+.sp-label { font: 600 10.5px var(--ui-font); }
+.sp-gauge.down .sp-label { fill: var(--sp-down); }
+.sp-gauge.up .sp-label { fill: var(--sp-up); }
+.sp-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sp-card { padding: 9px 11px; border: 1px solid var(--l-line); border-radius: 12px; background: color-mix(in srgb, var(--panel) 80%, transparent); }
+.sp-card-title { margin-bottom: 4px; color: var(--text-2); font-size: 10.5px; font-weight: 650; }
+.sp-card-body { display: flex; align-items: flex-end; gap: 10px; }
+.sp-spark { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.sp-peak { color: var(--muted); font-size: 9.5px; }
+.sp-spark svg { width: 100%; height: 38px; }
+.sp-card.down .sp-area { fill: color-mix(in srgb, var(--sp-down) 22%, transparent); }
+.sp-card.up .sp-area { fill: color-mix(in srgb, var(--sp-up) 22%, transparent); }
+.sp-line { fill: none; stroke-width: 2; }
+.sp-card.down .sp-line { stroke: var(--sp-down); }
+.sp-card.up .sp-line { stroke: var(--sp-up); }
+.sp-card-now { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; white-space: nowrap; }
+.sp-card-now b { font-size: 12px; font-variant-numeric: tabular-nums; }
+.sp-card-now span { color: var(--muted); font-size: 9.5px; }
+.sp-pills { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sp-pill { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-radius: 11px; }
+.sp-pill i { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; }
+.sp-pill div { display: flex; flex-direction: column; min-width: 0; }
+.sp-pill b { font-size: 11.5px; }
+.sp-pill span { color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sp-pill.ping { background: color-mix(in srgb, var(--sp-ping) 16%, transparent); }
+.sp-pill.ping i { background: var(--sp-ping); }
+.sp-pill.down { background: color-mix(in srgb, var(--sp-down) 16%, transparent); }
+.sp-pill.down i { background: var(--sp-down); }
+.sp-pill.up { background: color-mix(in srgb, var(--sp-up) 18%, transparent); }
+.sp-pill.up i { background: var(--sp-up); }
+.sp-side { display: flex; flex: 0 0 34%; flex-direction: column; gap: 13px; min-width: 0; padding: 12px 16px 8px; border-left: 1px solid var(--l-line); }
+.sp-fact > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
+.sp-fact > div { font-size: 13px; overflow-wrap: anywhere; }
+.sp-status { display: inline-flex; align-items: center; gap: 7px; }
+.sp-status svg { width: 15px; height: 15px; }
+.sp-status.ok svg { color: var(--ok); }
+.sp-status.err svg { color: var(--err); }
+.sp-error { margin: -6px 0 0; color: var(--err); font-size: 11.5px; }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.sp-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--muted); font-size: 11px; }
+.sp-chip svg { width: 12px; height: 12px; }
+.sp-chip.ok { background: color-mix(in srgb, var(--sp-down) 16%, transparent); color: color-mix(in srgb, var(--sp-down) 75%, var(--text)); }
 
 /* ---------- Health (components/health): the 3DEXPERIENCE platform at a glance ---------- */
 .lvl-ok { --lvl: var(--ok); --lvl-soft: var(--ok-soft); }

@@ -52,7 +52,95 @@ export interface SpeedResult {
   idleMs: number
   interface: string
   server: string
+  /** Apple's word for the responsiveness (High, Medium, Low) and the round trip under load, in milliseconds. */
+  rating?: string
+  workingMs?: number
+  /** Who carries the connection and where (ipinfo.io), this Mac's public and local addresses. */
+  isp?: string
+  location?: string
+  externalIp?: string
+  internalIp?: string
 }
+
+/** One progress reading while the test runs, in megabits a second. */
+export interface SpeedSample { t: number; down: number; up: number; rpm: number }
+
+/** A speed test as the launcher shows it: the readings so far, then the result (or why there is none). */
+export interface SpeedRun {
+  id: string
+  started: number
+  ended?: number
+  samples: SpeedSample[]
+  result?: SpeedResult
+  error?: string
+  /** False when no terminal could be made for networkQuality: no readings until it ends. */
+  live: boolean
+}
+
+const PROGRESS = /Downlink: ([\d.]+) Mbps, (\d+) RPM - Uplink: ([\d.]+) Mbps, (\d+) RPM/g
+
+/**
+ * networkQuality's live line, which it writes only to a terminal, again and again over itself:
+ * "Downlink: 565.641 Mbps, 0 RPM - Uplink: 73.016 Mbps, 0 RPM".
+ */
+export function parseSpeedProgress(text: string): { down: number; up: number; rpm: number }[] {
+  return [...text.matchAll(PROGRESS)].map((m) => ({ down: Number(m[1]), up: Number(m[3]), rpm: Number(m[2]) }))
+}
+
+/** "342.614 Mbps", "1.098 Gbps", "850.2 Kbps" in bits a second. */
+export function capacityBps(text: string): number {
+  const m = /([\d.]+)\s*([KMG])bps/i.exec(text)
+  if (!m) return 0
+  return Math.round(Number(m[1]) * ({ K: 1e3, M: 1e6, G: 1e9 } as Record<string, number>)[m[2].toUpperCase()])
+}
+
+/** The summary networkQuality ends with (and, with -v, its endpoint and interface). */
+export function parseSpeedSummary(text: string): SpeedResult | null {
+  const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '\n')
+  const line = (label: string): string => new RegExp(`^\\s*${label}:\\s*(.+)$`, 'm').exec(plain)?.[1].trim() ?? ''
+  const summary = plain.slice(Math.max(0, plain.lastIndexOf('==== SUMMARY ====')))
+  const sline = (label: string): string => new RegExp(`^\\s*${label}:\\s*(.+)$`, 'm').exec(summary)?.[1].trim() ?? ''
+  const down = sline('Downlink capacity')
+  const up = sline('Uplink capacity')
+  if (!down && !up) return null
+  const resp = /^(\w+)\s*\(([\d.]+) milliseconds \| (\d+) RPM\)/.exec(sline('Responsiveness'))
+  const idle = /([\d.]+) milliseconds/.exec(sline('Idle Latency'))
+  return {
+    download: capacityBps(down), upload: capacityBps(up), rpm: resp ? Number(resp[3]) : 0, idleMs: idle ? Math.round(Number(idle[1]) * 10) / 10 : 0,
+    rating: resp?.[1] ?? '', workingMs: resp ? Math.round(Number(resp[2]) * 10) / 10 : undefined,
+    interface: line('Interface'), server: line('Test Endpoint')
+  }
+}
+
+/** The gauge's marks, as Raycast's: equal steps on the dial, each ten or five times the last. */
+export const GAUGE_TICKS = [0, 1, 5, 10, 50, 100, 500, 1000]
+
+/** Where on the dial (0…1) a speed in megabits a second goes: straight between two marks, the end beyond 1000. */
+export function gaugeFraction(mbps: number): number {
+  if (!(mbps > 0)) return 0
+  const t = GAUGE_TICKS
+  for (let i = 1; i < t.length; i++) {
+    if (mbps <= t[i]) return (i - 1 + (mbps - t[i - 1]) / (t[i] - t[i - 1])) / (t.length - 1)
+  }
+  return 1
+}
+
+/** What the connection is good for, as Raycast lists it: the levels each needs, down and up, in megabits a second. */
+export const SPEED_NEEDS = {
+  voice: [{ label: 'SD', down: 0.1, up: 0.1 }, { label: 'HD', down: 0.5, up: 0.5 }],
+  video: [{ label: '480', down: 1, up: 1 }, { label: '720', down: 2.6, up: 1.8 }, { label: '1080', down: 3.8, up: 3 }, { label: '4K', down: 15, up: 12 }],
+  streaming: [{ label: '480', down: 3, up: 0 }, { label: '720', down: 5, up: 0 }, { label: '1080', down: 8, up: 0 }, { label: '4K', down: 25, up: 0 }]
+} as const
+
+export function speedCapabilities(downBps: number, upBps: number): Record<keyof typeof SPEED_NEEDS, { label: string; ok: boolean }[]> {
+  const d = downBps / 1e6
+  const u = upBps / 1e6
+  const check = (list: readonly { label: string; down: number; up: number }[]): { label: string; ok: boolean }[] => list.map((x) => ({ label: x.label, ok: d >= x.down && u >= x.up }))
+  return { voice: check(SPEED_NEEDS.voice), video: check(SPEED_NEEDS.video), streaming: check(SPEED_NEEDS.streaming) }
+}
+
+/** "AS5650 Frontier Communications of America, Inc." → "Frontier Communications of America". */
+export const ispName = (org: string): string => org.replace(/^AS\d+\s+/, '').replace(/,?\s+(Inc|LLC|Ltd|Corp|Corporation|Co)\.?$/i, '').trim()
 
 /** `networkQuality -c`'s JSON (macOS 12 and later; the field names have stayed the same). */
 export function parseSpeedTest(text: string): SpeedResult | null {

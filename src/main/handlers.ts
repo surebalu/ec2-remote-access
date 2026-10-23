@@ -40,7 +40,7 @@ import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } fr
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
-import { downloads, killProcess, networkInfo, pasteText, processes, quitAllApps, speedTest } from './macTools'
+import { downloads, killProcess, networkInfo, pasteText, processes, quitAllApps, speedStatus, startSpeedTest } from './macTools'
 import { control, controlPath, controlStatus, NO_HELPER } from './macControl'
 import type { MacCalendar, MacEvent } from '@shared/calendar'
 import { aiReport, installersReport, junkReport, packageReceipts, systemCards } from './storage/cleanup'
@@ -300,7 +300,8 @@ export const handlers: Handlers = {
   'launcher:processes': () => processes(),
   'launcher:kill': async (pid, force) => killProcess(Number(pid), !!force),
   'launcher:network': () => networkInfo(),
-  'launcher:speedTest': () => speedTest(),
+  'launcher:speedTest': () => startSpeedTest(),
+  'launcher:speedStatus': async () => speedStatus(),
   'launcher:downloads': () => downloads(),
   'launcher:quitAll': () => quitAllApps(),
   'launcher:paste': (text) => pasteText(String(text ?? '')),

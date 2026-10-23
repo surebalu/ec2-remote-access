@@ -33,6 +33,8 @@ export interface Row {
   /** A file or app whose icon (the app that opens it, for a file) replaces `icon` once it has loaded. */
   iconPath?: string
   accessory?: ReactNode
+  /** What it is, on the right of the row (Application, Command…); found from its id when not given. */
+  type?: string
   detail?: Detail
   actions: Action[]
 }

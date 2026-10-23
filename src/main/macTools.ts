@@ -4,13 +4,15 @@
  * Apps asks first; Kill Process ends only what the user picked. The gateway refuses launcher:* (desktopOnly).
  */
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
 import { homedir, networkInterfaces, userInfo } from 'node:os'
 import { join } from 'node:path'
 import {
-  interfaceLabel, isFinishedDownload, parseProcesses, parseSpeedTest, quitAllPlan, sortProcesses,
-  type AddressRow, type DownloadItem, type NetworkInfo, type ProcessInfo, type SpeedResult
+  interfaceLabel, ispName, isFinishedDownload, parseProcesses, parseSpeedProgress, parseSpeedSummary, parseSpeedTest, quitAllPlan, sortProcesses,
+  type AddressRow, type DownloadItem, type NetworkInfo, type ProcessInfo, type SpeedResult, type SpeedRun
 } from '@shared/macTools'
+import { loadPty } from './pty'
 import { host } from './host'
 import { control, ControlError } from './macControl'
 import { quitApps } from './storage/macApps'
@@ -83,19 +85,62 @@ export async function networkInfo(): Promise<NetworkInfo> {
   return { addresses: rows, publicError }
 }
 
-let speed: Promise<SpeedResult> | null = null
+let speed: SpeedRun | null = null
 
-/** One speed test at a time (about twenty seconds); asking again while it runs joins it. */
-export function speedTest(): Promise<SpeedResult> {
-  speed ??= run('networkQuality', ['-c', '-M', '25'], 60_000)
-    .then((out) => {
-      const r = parseSpeedTest(out)
-      if (!r) throw new Error('networkQuality gave no result. Are you online?')
-      return r
-    }, (e: Error) => { throw new Error(`The speed test failed: ${e.message.split('\n')[0]}`) })
-    .finally(() => { speed = null })
-  return speed
+/** Who carries the connection, where, and this Mac's addresses: asked while the test runs (ipinfo.io sees the address anyway). */
+async function connectionFacts(): Promise<Pick<SpeedResult, 'isp' | 'location' | 'externalIp' | 'internalIp'>> {
+  const [info, route] = await Promise.all([
+    fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } })
+      .then(async (r): Promise<Record<string, string>> => (r.ok ? await r.json() as Record<string, string> : {}), (): Record<string, string> => ({})),
+    run('route', ['-n', 'get', 'default'], 4000).catch(() => '')
+  ])
+  const iface = /interface:\s*(\S+)/.exec(route)?.[1] ?? ''
+  const internalIp = (networkInterfaces()[iface] ?? []).find((a) => a.family === 'IPv4' && !a.internal)?.address
+  return {
+    isp: info.org ? ispName(info.org) : undefined,
+    location: [info.city, info.region, info.country].filter(Boolean).join(', ') || undefined,
+    externalIp: info.ip, internalIp
+  }
 }
+
+/**
+ * Starts a speed test (or joins the one running): macOS's networkQuality, which writes its live readings only to a
+ * terminal, so it runs in a pseudo-terminal and each "Downlink: … Mbps - Uplink: … Mbps" line becomes a sample; the
+ * summary it ends with is the result. The launcher reads speedStatus() a few times a second. Without node-pty it runs
+ * plainly (-c) and only the result comes.
+ */
+export async function startSpeedTest(): Promise<{ id: string }> {
+  if (speed && !speed.ended) return { id: speed.id }
+  const r: SpeedRun = { id: randomUUID(), started: Date.now(), samples: [], live: true }
+  speed = r
+  const facts = connectionFacts()
+  const finish = async (result: SpeedResult | null, error?: string): Promise<void> => {
+    if (result) r.result = { ...result, ...(await facts) }
+    else r.error = error ?? 'networkQuality gave no result. Are you online?'
+    r.ended = Date.now()
+  }
+  try {
+    const pty = await loadPty()
+    let all = ''
+    const p = pty.spawn('/usr/bin/networkQuality', ['-v', '-M', '25'], { name: 'xterm', cols: 220, rows: 40, cwd: homedir(), env: process.env as Record<string, string> })
+    const timer = setTimeout(() => p.kill(), 60_000)
+    p.onData((d) => {
+      all += d
+      const readings = parseSpeedProgress(all)
+      for (let i = r.samples.length; i < readings.length; i++) r.samples.push({ t: Date.now() - r.started, ...readings[i] })
+    })
+    p.onExit(() => {
+      clearTimeout(timer)
+      void finish(parseSpeedSummary(all))
+    })
+  } catch {
+    r.live = false
+    run('networkQuality', ['-c', '-M', '25'], 60_000).then((out) => finish(parseSpeedTest(out)), (e: Error) => finish(null, `The speed test failed: ${e.message.split('\n')[0]}`))
+  }
+  return { id: r.id }
+}
+
+export const speedStatus = (): SpeedRun | null => speed
 
 /** The Downloads folder, newest arrival first (Spotlight's date added, which a download's own dates do not tell). */
 export async function downloads(limit = 150): Promise<DownloadItem[]> {

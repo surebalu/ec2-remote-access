@@ -23,8 +23,8 @@ let paused = false
 /** Quick Look is up over the launcher: it takes the keyboard, which must not put the launcher away. */
 let quickLooking = false
 
-/** The card plus a margin for its shadow (the window is transparent). */
-const SIZE = { width: 700, height: 446 }
+/** Raycast's window (about 750 × 475) plus a margin for its shadow (the window is transparent). */
+const SIZE = { width: 780, height: 505 }
 
 function create(): BrowserWindow {
   const w = new BrowserWindow({
