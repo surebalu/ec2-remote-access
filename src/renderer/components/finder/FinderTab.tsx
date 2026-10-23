@@ -4,6 +4,7 @@ import {
   favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, sortEntries,
   type FinderPlace, type FinderPlaces, type FinderSort, type OpenWithApp, type RecentFile
 } from '@shared/finder'
+import { registerWorkspaceContext } from '../../workspaceContext'
 import { useStore, type Tab } from '../../store'
 import { setTabKeys, type TabKey } from '../../shortcuts'
 import { Icon } from '../icons'
@@ -78,12 +79,15 @@ const PLACE_ICONS: Record<FinderPlace['kind'], ReactElement> = {
   computer: svg(<><rect x="4" y="5" width="16" height="10.5" rx="1.5" /><path d="M2.5 19h19" /></>)
 }
 
-export default function FinderTab({ active }: { tab: Tab; active: boolean }): ReactElement {
+export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }): ReactElement {
   const settings = useStore((s) => s.settings)
   const toast = useStore((s) => s.toast)
   const request = useStore((s) => s.finderRequest)
   const [places, setPlaces] = useState<FinderPlaces | null>(null)
   const [loc, setLoc] = useState<string | null>(null)
+  const locRef = useRef(loc)
+  locRef.current = loc
+  useEffect(() => registerWorkspaceContext('finder', () => locRef.current ? { id: tab.id, kind: 'finder', path: locRef.current } : null), [tab.id])
   const [history, setHistory] = useState<{ back: string[]; fwd: string[] }>({ back: [], fwd: [] })
   const [entries, setEntries] = useState<Entry[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -117,7 +121,7 @@ export default function FinderTab({ active }: { tab: Tab; active: boolean }): Re
     setLoc(read<string | null>(LOC_KEY, null) ?? places.home)
   }, [places]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (request) go(request.path)
+    if (request) { go(request.path); useStore.getState().set({ finderRequest: null }) }
   }, [request?.nonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async (where: string, quiet = false): Promise<void> => {

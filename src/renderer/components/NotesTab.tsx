@@ -242,6 +242,12 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
 
   const load = async (path: string): Promise<void> => {
     await save()
+    // Project switches must not replace an editor whose save failed or needs conflict resolution.
+    if (cur.current?.dirty) {
+      updateTab(tab.id, { notesPath: cur.current.path })
+      toast('info', 'Save the current note or resolve its conflict before opening another note.')
+      return
+    }
     try {
       const f = await window.api.invoke('notes:read', path)
       cur.current = { path: f.path, mtime: f.mtime, dirty: false }
@@ -252,7 +258,7 @@ export default function NotesTab({ tab, active }: { tab: Tab; active: boolean })
       setConflict(null)
       setMobileView('note')
       setTargetFolder(noteFolder(f.path))
-      updateTab(tab.id, { title: `Notes · ${noteName(f.path)}` })
+      updateTab(tab.id, { notesPath: f.path, title: `Notes · ${noteName(f.path)}` })
       setRecent((r) => {
         const next = [f.path, ...r.filter((x) => x !== f.path)].slice(0, 6)
         writePref(RECENT_KEY, next)

@@ -3,6 +3,15 @@ import type { ReactElement } from 'react'
 const base = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
 
 export const Icon = {
+  code: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><rect x="2" y="3" width="20" height="18" rx="5" fill="currentColor" fillOpacity=".08" strokeOpacity=".35" /><path d="m8 8-4 4 4 4m8-8 4 4-4 4m-3-10-2 12" /></svg>
+  ),
+  convert: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4" /></svg>
+  ),
+  fingerprint: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M3 11a9 9 0 0 1 18 0M6 13v-2a6 6 0 0 1 12 0v3c0 3-1 5-2 7M9 20c2-2 3-5 3-8m-3 4v-5a3 3 0 0 1 6 0v3c0 2-.5 4-1 6M3 15c0 2-.5 3-1 4m4-2c0 2-.5 3-1 4m16-6c0 2-.5 4-1 5" /></svg>
+  ),
   list: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
   ),

@@ -14,8 +14,8 @@ import Sheet, { SheetItem } from './Sheet'
 type View = 'hosts' | 'sessions' | 'more'
 
 const dotFor = (st: Tab['status']): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'health' ? <Icon.health /> : <Icon.terminal />)
-const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : t.kind === 'health' ? 'Health' : 'Terminal')
+const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'health' ? <Icon.health /> : <Icon.terminal />)
+const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : t.kind === 'devtools' ? 'Dev tools' : t.kind === 'health' ? 'Health' : 'Terminal')
 
 const LIST_HIDDEN_KEY = 'ui.mobileListHidden'
 
@@ -257,6 +257,10 @@ function MobileMore(): ReactElement {
           </div>
         </>
       )}
+      <h3 className="m-group-title">Tools</h3>
+      <div className="m-card-list"><button className="m-host" onClick={() => s.openTool('devtools')}>
+        <span className="m-host-os"><Icon.code /></span><span className="min-w-0 flex-1 text-left"><span className="m-host-name">Dev tools</span><span className="m-host-meta">JSON, encoding, tokens, timestamps and hashes</span></span>
+      </button></div>
       <h3 className="m-group-title">Appearance</h3>
       <div className="m-segment" role="radiogroup" aria-label="Theme">
         {(['system', 'light', 'dark'] as const).map((t) => (

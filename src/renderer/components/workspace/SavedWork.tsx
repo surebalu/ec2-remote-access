@@ -1,5 +1,6 @@
+import { workspaceSize, workspaceSummary } from '@shared/workspaces'
 import { useState, type ReactElement } from 'react'
-import { isSession, useStore, visibleInstances } from '../../store'
+import { useStore, visibleInstances } from '../../store'
 import { hasBrowser } from '../../quickConnect'
 import { EXTERNAL, quicklinkUrl, takesQuery, type Quicklink } from '@shared/quicklinks'
 import { Icon } from '../icons'
@@ -27,7 +28,7 @@ export default function SavedWork(): ReactElement {
   }
   return <div className="ws-saved">
     <div className="ws-saved-top"><input className="input" type="search" aria-label="Search saved work" placeholder="Find a workspace, view, tunnel or quicklink…" value={search} onChange={(e) => setSearch(e.target.value)} />
-      <button className="btn btn-sm" disabled={!s.tabs.some((t) => isSession(t) && !t.transient)} onClick={() => s.set({ workspaceSaveOpen: true })}><Icon.plus />Save workspace</button>
+      <button className="btn btn-sm" disabled={!s.tabs.some((t) => !t.transient)} onClick={() => s.set({ workspaceSaveOpen: true })}><Icon.plus />Save workspace</button>
     </div>
     {queryFor && <form className="ws-link-query" onSubmit={(e) => { e.preventDefault(); if (query.trim()) openLink(queryFor, query.trim()) }}>
       <label htmlFor="workspace-link-query">Search {queryFor.name}</label><input id="workspace-link-query" className="input" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -37,9 +38,9 @@ export default function SavedWork(): ReactElement {
       <section><h3><Icon.grid />Workspaces <span>{workspaces.length}</span></h3>
         {workspaces.map((w) => {
           const unavailable = w.tabs.filter((t) => !hosts.has(t.instanceKey)).length
-          return <button className="ws-saved-item" key={w.id} disabled={!!unavailable || !w.tabs.length} title={unavailable ? 'One or more hosts are missing or in disabled accounts. Review this workspace in the sidebar.' : `Reopen ${w.tabs.length} saved sessions`} onClick={() => s.openWorkspace(w.id)}><strong>{w.name}</strong><small>{w.tabs.length} {w.tabs.length === 1 ? 'session' : 'sessions'}{unavailable ? ` · ${unavailable} unavailable` : ' · Reopen together'}</small></button>
+          return <button className="ws-saved-item" key={w.id} disabled={!!s.openingWorkspace || unavailable === workspaceSize(w)} title={`${workspaceSummary(w)}${unavailable ? ' · Unavailable hosts will be skipped' : ''}`} onClick={() => void s.openWorkspace(w.id)}><strong>{w.name}</strong><small>{workspaceSummary(w)}{unavailable ? ` · ${unavailable} unavailable` : ''}</small></button>
         })}
-        {!workspaces.length && <p>Save a group of remote sessions to reopen them together.</p>}
+        {!workspaces.length && <p>Save your terminals, browser pages, notes, and remote sessions as a project workspace.</p>}
       </section>
       <section><h3><Icon.layers />Host views <span>{views.length}</span></h3>
         {views.map((v) => <button className="ws-saved-item" key={v.id} onClick={() => s.applyHostView(v.filters)}><strong>{v.name}</strong><small>{[v.filters.profileFilter, v.filters.search, v.filters.favoritesOnly && 'Favorites'].filter(Boolean).join(' · ') || 'Saved inventory filters'}</small></button>)}

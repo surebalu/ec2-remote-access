@@ -38,6 +38,7 @@ let failWorkspaceHealth = false
 let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
 let emptyScenario = false
+let failNoteWrites = false
 // Notes vault for the Notes tab.
 const noteFolders = new Set(['Projects'])
 const notes = {
@@ -234,7 +235,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'notes:rename': { const [from, to] = args; if (notes[from]) { notes[to] = notes[from]; delete notes[from] } return to }
     case 'notes:delete': delete notes[args[0]]; noteFolders.delete(args[0]); return
     case 'notes:read': { const n = notes[args[0]]; if (!n) throw new Error(`No note ${args[0]}`); return { path: args[0], text: n.text, mtime: n.mtime } }
-    case 'notes:write': notes[args[0]] = { text: args[1], mtime: Date.now() }; return { mtime: notes[args[0]].mtime }
+    case 'notes:write': if (failNoteWrites) throw new Error('Fixture: disk is read only'); notes[args[0]] = { text: args[1], mtime: Date.now() }; return { mtime: notes[args[0]].mtime }
     case 'notes:stat': return notes[args[0]]?.mtime ?? null
     case 'notes:create': notes[args[0]] ??= { text: `# ${args[0].replace(/\.md$/, '')}\n\n`, mtime: Date.now() }; return args[0]
     case 'notes:hostNote': { const p = 'EC2 Remote/Hosts/web-prod-01 (production).md'; notes[p] ??= { text: '---\nec2_key: production/us-east-1/web-prod-01\n---\n# web-prod-01\n\n', mtime: Date.now() }; return p }
@@ -562,25 +563,94 @@ app.whenReady().then(async () => {
       console.log(`Isolated workspace preview. Temporary data: ${output}`)
       return
     }
+    const projectCallsStart = calls.length
+    const beforeProjects = { settings, terminal: termSaved, browser: browserSaved, notes: structuredClone(notes) }
+    await require('./ui-workspaces.cjs')({
+      calls, output, hostKey: running.key, webPort, getSettings: () => settings, failNotes: (value) => { failNoteWrites = value },
+      seed: (value) => { termSaved = value.terminal; browserSaved = value.browser },
+      restore: () => { settings = beforeProjects.settings; termSaved = beforeProjects.terminal; browserSaved = beforeProjects.browser; Object.assign(notes, beforeProjects.notes); failNoteWrites = false }
+    })
+    // The older suite checks its first SSH call; keep the new scenario's IPC history isolated.
+    calls.splice(projectCallsStart)
+    if (process.argv.includes('--project-workspaces')) {
+      console.log(`Workspace checks passed. Screenshots: ${output}`)
+      app.exit(0)
+      return
+    }
     // Save a filtered view, switch away, and restore it after a reload through the command palette.
     const setInput = (selector, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    // Developer workbench: real navigation, keyboard transformation, clipboard and draft lifecycle.
+    const setToolInput = (value) => js(`(() => { const el = document.querySelector('#dev-input'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await js(`document.querySelector('.app-rail [aria-label="Search"]').click()`)
+    await until(`!!document.querySelector('[role="combobox"]')`)
+    await click('Commands & tools')
+    await setInput('[role="combobox"]', '>JSON')
+    await until(`[...document.querySelectorAll('[role="option"]')].some((el) => el.textContent.includes('Open developer tools'))`)
+    await key('Enter')
+    await until(`!!document.querySelector('.dev-workbench')`)
+    assert.equal(await js(`document.querySelector('.app-rail [aria-label="Dev tools"]').getAttribute('aria-current')`), 'page')
+    await setToolInput('{"hello":"engineer","healthy":true}')
+    await js(`document.querySelector('#dev-input').focus()`)
+    await key('Enter', { metaKey: true })
+    await until(`document.querySelector('#dev-output').value.includes('\\n  "hello"')`)
+    await click('Copy result')
+    await until(`document.body.textContent.includes('Result copied')`)
+    assert.ok(calls.some((c) => c.channel === 'clipboard:write' && c.args[0].includes('"hello"')), 'copies exactly the transformed text')
+    await screenshot('devtools-dark.png')
+    await click('Hosts')
+    await js(`document.querySelector('.app-rail [aria-label="Dev tools"]').click()`)
+    await until(`document.querySelector('#dev-input').value.includes('engineer')`)
+    await key('\\', { metaKey: true })
+    await until(`!!document.querySelector('[role="combobox"]')`)
+    await setInput('[role="combobox"]', 'Notes')
+    await key('Enter')
+    await until(`document.querySelectorAll('.split-pane:not(.hidden)').length === 2 && !!document.querySelector('.notes-tab')`)
+    assert.equal(await js(`document.querySelector('#dev-input').value.includes('engineer')`), true, 'docking another tool preserves the draft')
+    await screenshot('devtools-beside-notes.png')
+    await key('w', { metaKey: true })
+    await until(`!document.querySelector('.notes-tab')`)
+    await js(`document.querySelector('.app-rail [aria-label="Dev tools"]').click()`)
+    await click('Base64')
+    await setToolInput('工程师 👋')
+    await click('Encode')
+    await until(`document.querySelector('#dev-output').value.length > 0`)
+    await click('Use as input')
+    await click('Decode')
+    await until(`document.querySelector('#dev-output').value === '工程师 👋'`)
+    await click('JSON')
+    await until(`document.querySelector('#dev-input').value.includes('engineer')`)
+    await setToolInput('{bad json')
+    await click('Format JSON')
+    await until(`!!document.querySelector('.dev-error[role="alert"]')`)
+    assert.equal(await js(`document.querySelector('#dev-output').value`), '', 'failed transforms clear old output')
+    await click('Load example')
+    await click('Format JSON')
+    await until(`document.querySelector('#dev-output').value.includes('"service"')`)
+    win.setSize(680, 700)
+    await new Promise((r) => setTimeout(r, 100))
+    await screenshot('devtools-narrow.png')
+    assert.ok(await js(`(() => { const e = document.querySelector('.dev-workbench'); return e.scrollWidth <= e.clientWidth + 1 })()`), 'workbench has no horizontal overflow in a narrow window')
+    win.setSize(1400, 900)
+    await key('w', { metaKey: true })
+    await until(`!document.querySelector('.dev-workbench')`)
+    await js(`document.querySelector('.app-rail [aria-label="Dev tools"]').click()`)
+    await until(`!!document.querySelector('#dev-input')`)
+    assert.equal(await js(`document.querySelector('#dev-input').value`), '', 'closing a tool tab discards its transient input')
+    await key('w', { metaKey: true })
+    await click('Hosts')
     // Workspace modules: keyboard access, actionable failures, saved work, freshness and constrained layouts.
     const workspaceTab = (name) => js(`document.getElementById('workspace-tab-' + ${JSON.stringify(name)}).click()`)
     assert.equal(calls.filter((c) => c.channel === 'health:snapshot').length, 0, 'overview does not start platform polling')
     assert.equal(await js(`document.querySelector('.ws-account').textContent`), '2 accounts verified')
     assert.equal(await js(`document.querySelectorAll('.app-rail .rail-group').length`), 4)
-    assert.ok(await js(`(() => {
-      const rail = document.querySelector('.app-rail');
-      const extra = [...rail.querySelectorAll('.rail-item:not(:has(.rail-key)):not([aria-label="Theme"])')].map((b) => b.appendChild(Object.assign(document.createElement('kbd'), { className: 'rail-key' })));
-      extra.forEach((k) => k.dataset.keys = '⌃⌥⇧⌘K');
-      const fits = rail.scrollHeight <= rail.clientHeight; extra.forEach((k) => k.remove()); return fits
-    })()`), 'grouped navigation fits with all shortcuts')
+    assert.equal(await js(`document.querySelectorAll('.app-rail .rail-key').length`), 0, 'no shortcut hints under the rail items')
+    assert.ok(await js(`(() => { const rail = document.querySelector('.app-rail'); return rail.scrollHeight <= rail.clientHeight })()`), 'grouped navigation fits')
     assert.equal(await js(`document.querySelector('.ws-attention').textContent.includes('1 inventory scan needs a retry')`), true)
     await js(`document.getElementById('workspace-tab-overview').focus()`)
     await key('ArrowRight')
     await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
     assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
-    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 8)
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 9)
     await screenshot('workspace-tools.png')
     await workspaceTab('saved-work')
     await until(`!!document.querySelector('[aria-label="Search saved work"]')`)
@@ -638,7 +708,7 @@ app.whenReady().then(async () => {
     assert.ok(await js(`(() => { const r = document.querySelector('.host-table').getBoundingClientRect(); return Math.min(innerHeight - 30, r.bottom) - Math.max(0, r.top) })()`) > 80, 'inventory retains visible space in the viewport')
     await js(`document.querySelector('[aria-label="Fold the home panel"]').click()`)
     await win.loadFile(resolve('out/renderer/index.html'))
-    await until(`!!document.querySelector('.workspace-deck.folded')`)
+    await until(`!!document.querySelector('.workspace-deck.folded [aria-label="Show the home panel"]') && document.querySelectorAll('[data-host-key]').length === 3`)
     await js(`document.querySelector('[aria-label="Show the home panel"]').click()`)
     win.setSize(1400, 900)
     settings = workspaceSettings
@@ -866,7 +936,7 @@ app.whenReady().then(async () => {
     const keyUp = () => js(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true, cancelable: true }))`)
     await js(`document.dispatchEvent(new PointerEvent('pointermove', { clientX: 760, clientY: 470, bubbles: true }))`)
     await radialKey()
-    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 14`)
+    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 15`)
     assert.ok(await js(`document.querySelector('.radial-item.here').dataset.radial === 'hosts' && document.querySelector('.radial-center strong').textContent === 'Hosts'`), 'it starts on the section in front')
     assert.equal(await js(`document.activeElement === document.querySelector('.radial')`), true, 'the ring takes the keyboard')
     await new Promise((r) => setTimeout(r, 400))
@@ -1436,6 +1506,28 @@ app.whenReady().then(async () => {
     await js(`[...document.querySelectorAll('.font-choice')].find((b) => b.textContent.includes('San Francisco')).click()`)
     await until(`getComputedStyle(document.body).fontFamily.startsWith('-apple-system')`)
     assert.equal(settings.uiFont, 'System')
+    // Bundled fonts really load, even with all network traffic blocked by this fixture.
+    for (const family of ['Geist', 'Manrope', 'Geist Mono']) {
+      await js(`[...document.querySelectorAll('.font-choice')].find((b) => b.querySelector('.font-choice-name').textContent === ${JSON.stringify(family)}).click()`)
+      const loaded = await js(`document.fonts.load('14px "${family}"').then((faces) => faces.length > 0 && faces.every((face) => face.status === 'loaded'))`)
+      assert.equal(loaded, true, `${family} is available offline`)
+      await until(`document.documentElement.style.getPropertyValue('--ui-font').includes(${JSON.stringify(family)})`)
+    }
+    await js(`[...document.querySelectorAll('.font-choice')].find((b) => b.querySelector('.font-choice-name').textContent === 'Geist').click()`)
+    for (const id of ['midnight', 'aurora', 'ember', 'porcelain']) {
+      await js(`document.querySelector('[data-color-theme-option="${id}"]').click()`)
+      await until(`document.documentElement.dataset.colorTheme === '${id}'`)
+      assert.equal(settings.colorTheme, id)
+    }
+    await js(`[...document.querySelectorAll('[aria-label="Filter themes"] button')].find((b) => b.textContent === 'Light').click()`)
+    await until(`!!document.querySelector('[data-color-theme-option="porcelain"]') && !document.querySelector('[data-color-theme-option="midnight"]')`)
+    await screenshot('appearance-porcelain-geist.png')
+    await js(`[...document.querySelectorAll('[aria-label="Filter themes"] button')].find((b) => b.textContent === 'All').click()`)
+    await js(`document.querySelector('[data-color-theme-option="midnight"]').click()`)
+    await screenshot('appearance-midnight-geist.png')
+    await js(`document.querySelector('.ctheme-grid').scrollIntoView({ block: 'center' })`)
+    await screenshot('theme-gallery.png')
+    await js(`document.querySelector('[data-color-theme-option="default"]').click()`)
     await js(`[...document.querySelectorAll('.font-choice')].find((b) => b.textContent.includes('Monaco')).click()`)
     await until(`getComputedStyle(document.body).fontFamily.startsWith('Monaco')`)
     await js(`document.querySelector('.settings-nav [data-section="phone"]').click()`)
@@ -2299,14 +2391,14 @@ app.whenReady().then(async () => {
     await bjs(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Restore defaults').click()`)
     await buntil(`document.querySelector('[aria-label="Shortcut for Notes"]').textContent === '⇧⌘N' && document.querySelector('[aria-label="Shortcut for Claude"]').textContent === 'None'`, 'defaults')
     assert.deepEqual(settings.shortcuts, {})
-    // Each rail icon carries its shortcut underneath, straight from these settings: none for Claude now.
-    await buntil(`!document.querySelector('button[aria-label="Claude"] .rail-key')`, 'no key, no hint under Claude')
-    assert.equal(await bjs(`document.querySelector('button[aria-label="Notes"] .rail-key').dataset.keys`), '⇧⌘N')
-    assert.equal(await bjs(`document.querySelector('button[aria-label="Hosts"] .rail-key').dataset.keys`), '⌘1')
+    // Each rail item names its shortcut in its tooltip, straight from these settings: none for Claude now.
+    await buntil(`!/\\(.+\\)$/.test(document.querySelector('button[aria-label="Claude"]').title)`, 'no key, none in Claude\'s tooltip')
+    assert.match(await bjs(`document.querySelector('button[aria-label="Notes"]').title`), /\(⇧⌘N\)$/)
+    assert.match(await bjs(`document.querySelector('button[aria-label="Hosts"]').title`), /\(⌘1\)$/)
     await bjs(`document.querySelector('[aria-label="Shortcut for Claude"]').click()`)
     await press('c', 'KeyC', { metaKey: true, ctrlKey: true })
     await buntil(`document.querySelector('[aria-label="Shortcut for Claude"]').textContent === '⌃⌘C'`, 'recorded again')
-    await buntil(`document.querySelector('button[aria-label="Claude"] .rail-key')?.dataset.keys === '⌃⌘C'`, 'the hint under the rail icon follows the new key at once')
+    await buntil(`document.querySelector('button[aria-label="Claude"]').title.endsWith('(⌃⌘C)')`, 'the rail tooltip follows the new key at once')
     // The launcher's key works in every app: ⌥E would type a character everywhere, ⌥Space is fine (with a note about
     // Raycast), and the old key is let go while recording.
     const pausesBefore = launcherDone.filter((d) => d[0] === 'launcher:pause').length
@@ -2316,16 +2408,9 @@ app.whenReady().then(async () => {
     await press(' ', 'Space', { altKey: true })
     await buntil(`document.querySelector('[aria-label="Shortcut for the launcher"]').textContent === '⌥Space'`, 'launcher key recorded')
     assert.equal(settings.launcherKey, 'alt+space')
-    await buntil(`document.querySelector('button[aria-label="Launcher"] .rail-key')?.dataset.keys === '⌥Space'`, 'the launcher hint follows its key')
-    // Even with a shortcut under every item, the rail keeps Settings on screen in a 900-point-tall window.
-    assert.ok(await bjs(`(() => {
-      const rail = document.querySelector('.app-rail')
-      const extra = [...rail.querySelectorAll('.rail-item:not(:has(.rail-key)):not([aria-label="Theme"])')].map((b) => b.appendChild(Object.assign(document.createElement('kbd'), { className: 'rail-key' })))
-      extra.forEach((k) => (k.dataset.keys = '⌃⌥⇧⌘K'))
-      const fits = rail.scrollHeight <= rail.clientHeight
-      extra.forEach((k) => k.remove())
-      return fits
-    })()`), 'the rail fits with a hint under every item')
+    await buntil(`document.querySelector('button[aria-label="Launcher"]').title.includes('(⌥Space, from any app)')`, 'the launcher tooltip follows its key')
+    // The rail keeps Settings on screen in a 900-point-tall window.
+    assert.ok(await bjs(`(() => { const rail = document.querySelector('.app-rail'); return rail.scrollHeight <= rail.clientHeight })()`), 'the rail fits')
     assert.match(await bjs(`document.querySelector('[data-shortcut-row="launcher"]').closest('.set-row').querySelector('.set-key-note').textContent`), /Raycast/)
     for (let n = 0; n < 60 && launcherDone.filter((d) => d[0] === 'launcher:pause').length < pausesBefore + 2; n++) await new Promise((r) => setTimeout(r, 30))
     assert.deepEqual(launcherDone.filter((d) => d[0] === 'launcher:pause').slice(pausesBefore).map((d) => d[1]), [true, false], 'the key is let go while recording')

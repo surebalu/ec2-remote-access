@@ -173,9 +173,10 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
 }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  devtools: Icon.code, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_HINTS: Record<RailSection, string> = {
+  devtools: 'Local JSON, encoding, tokens, timestamps and hashes.',
   hosts: 'Every account’s hosts. ⌘1 always shows them too (Hosts is the first tab).',
   overview: 'Every open session on one page.',
   health: 'The 3DEXPERIENCE platform at a glance.',
@@ -371,6 +372,7 @@ export default function SettingsDialog(): ReactElement | null {
       return saved && SECTIONS.some((x) => x.id === saved) && (saved !== 'voice' || CAN_DICTATE) ? saved : 'general'
     } catch { return 'general' }
   })
+  const [themeFilter, setThemeFilter] = useState<'all' | 'dark' | 'light'>('all')
   useEffect(() => { void window.api.invoke('notes:info').then(setNotesInfo, () => undefined) }, [])
   useEffect(() => { void window.api.invoke('app:paths').then(setPaths) }, [])
   useEffect(() => { void window.api.invoke('app:about').then(setAbout, () => undefined) }, [])
@@ -425,7 +427,7 @@ export default function SettingsDialog(): ReactElement | null {
             ))}
           </div>
         </Row>
-        <Row label="App font" hint="Every label, menu and list in the app. Notes and terminals have their own font settings." stack>
+        <Row label="App font" hint="Geist, Manrope and Geist Mono are included and work offline. Notes and terminals have their own font settings." stack>
           <div className="font-choices" role="radiogroup" aria-label="App font">
             {UI_FONTS.map((f) => {
               const on = (draft.uiFont || DEFAULT_UI_FONT) === f.id
@@ -433,6 +435,7 @@ export default function SettingsDialog(): ReactElement | null {
                 <button key={f.id} type="button" role="radio" aria-checked={on} className={`font-choice ${on ? 'on' : ''}`} style={{ fontFamily: f.stack }} onClick={() => { upd('uiFont', f.id); void s.setUiFont(f.id) }}>
                   <span className="font-choice-sample">Aa</span>
                   <span className="font-choice-name">{f.label}</span>
+                  <span className="font-choice-detail">{f.bundled ? 'Included · Variable' : 'System font'}</span>
                 </button>
               )
             })}
@@ -454,8 +457,9 @@ export default function SettingsDialog(): ReactElement | null {
       <Group title="Colour theme">
         <div className="set-row stack">
           <div className="set-hint !mt-0">Colours for the whole app, from the terminal schemes. Terminals switch to the same scheme; pick a different one under Terminal if you want them to differ.</div>
+          <div className="theme-gallery-bar"><span>{APP_THEMES.length} curated palettes</span><div className="seg" role="group" aria-label="Filter themes">{(['all', 'dark', 'light'] as const).map((filter) => <button key={filter} aria-pressed={themeFilter === filter} className={themeFilter === filter ? 'on' : ''} onClick={() => setThemeFilter(filter)}>{filter === 'all' ? 'All' : filter === 'dark' ? 'Dark' : 'Light'}</button>)}</div></div>
           <div className="ctheme-grid" role="radiogroup" aria-label="Colour theme">
-            {[null, ...APP_THEMES].map((th) => {
+            {[null, ...APP_THEMES.filter((th) => themeFilter === 'all' || th.dark === (themeFilter === 'dark'))].map((th) => {
               const on = (draft.colorTheme ?? '') === (th?.id ?? '')
               const pick = (): void => { setDraft((d) => (d ? { ...d, colorTheme: th?.id ?? '', terminalTheme: 'auto' } : d)); void s.setColorTheme(th?.id ?? '') }
               return <ThemePreview key={th?.id ?? 'default'} theme={th} on={on} onPick={pick} appDark={draft.theme === 'dark' || (draft.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)} />

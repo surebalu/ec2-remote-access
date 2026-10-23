@@ -1,3 +1,4 @@
+import { workspaceSize, workspaceSummary } from '@shared/workspaces'
 import { useEffect, useState, type ReactElement } from 'react'
 import { routeOf, useStore, visibleInstances } from '../store'
 import { MANUAL_PROFILE, manualKey } from '@shared/manual'
@@ -343,7 +344,7 @@ export default function Sidebar(): ReactElement | null {
         )}
       </ul>
 
-      {/* Saved sets of session tabs */}
+      {/* Saved project workspaces */}
       {(workspaces.length > 0 || s.tabs.length > 0) && (
         <>
           <div className="mt-4 flex items-center justify-between px-3">
@@ -356,11 +357,11 @@ export default function Sidebar(): ReactElement | null {
             {workspaces.map((w) => (
               <li key={w.id} className="group">
                 <div className="nav-row">
-                  <button className="flex min-w-0 flex-1 items-center gap-2 text-left" title={`Open ${w.tabs.length} session${w.tabs.length === 1 ? '' : 's'}: ${w.tabs.map((t) => t.kind.toUpperCase()).join(', ')}`} onClick={() => s.openWorkspace(w.id)}>
+                  <button className="flex min-w-0 flex-1 items-center gap-2 text-left" title={`Open ${w.name}: ${workspaceSummary(w)}`} onClick={() => s.openWorkspace(w.id)}>
                     <Icon.grid className="muted" />
                     <span className="truncate">{w.name}</span>
                   </button>
-                  <span className="mono muted text-[11px]">{w.tabs.length}</span>
+                  <span className="mono muted text-[11px]">{workspaceSize(w)}</span>
                   <button
                     className="muted opacity-0 group-hover:opacity-70 hover:!opacity-100"
                     title="Delete workspace"

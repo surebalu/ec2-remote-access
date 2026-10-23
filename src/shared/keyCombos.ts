@@ -6,13 +6,13 @@
  * covers it.
  */
 
-export type RailSection = 'hosts' | 'overview' | 'health' | 'local' | 'finder' | 'browser' | 'notes' | 'board' | 'claude' | 'chatgpt'
+export type RailSection = 'hosts' | 'overview' | 'health' | 'local' | 'finder' | 'browser' | 'notes' | 'board' | 'claude' | 'chatgpt' | 'devtools'
 
 /** Top to bottom, as the rail shows them. */
-export const RAIL_SECTIONS: RailSection[] = ['hosts', 'overview', 'health', 'local', 'finder', 'browser', 'notes', 'board', 'claude', 'chatgpt']
+export const RAIL_SECTIONS: RailSection[] = ['hosts', 'overview', 'health', 'local', 'finder', 'browser', 'devtools', 'notes', 'board', 'claude', 'chatgpt']
 
 export const SECTION_NAMES: Record<RailSection, string> = {
-  hosts: 'Hosts', overview: 'Overview', health: 'Health', local: 'Terminal', finder: 'Finder', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT'
+  hosts: 'Hosts', overview: 'Overview', health: 'Health', local: 'Terminal', finder: 'Finder', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', claude: 'Claude', chatgpt: 'ChatGPT', devtools: 'Dev tools'
 }
 
 /** What a recorded shortcut can do: show a rail section, or open the radial menu of every section. */

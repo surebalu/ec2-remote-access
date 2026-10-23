@@ -30,6 +30,31 @@ const p = (
 
 export const TERMINAL_THEMES: TerminalTheme[] = [
   { id: 'auto', name: 'Match app', dark: true, theme: {} },
+  // App originals: quiet surfaces with distinct accents, shared by the chrome and terminal.
+  {
+    id: 'midnight', name: 'Midnight', dark: true,
+    theme: p('#101629', '#e2e8fc', '#9aaeff', '#657bba55',
+      '#29314b', '#ff8f9b', '#a6dfb5', '#ecd398', '#9aaeff', '#d0abf4', '#86dce8', '#e2e8fc',
+      '#727e9f', '#ffb0b8', '#bfedc9', '#f6e0af', '#b9c6ff', '#e2c7ff', '#a5eaf1', '#ffffff')
+  },
+  {
+    id: 'aurora', name: 'Aurora', dark: true,
+    theme: p('#10221f', '#deeee8', '#79d9ba', '#6aab9950',
+      '#293e38', '#f29191', '#79d9ba', '#e7cf91', '#95bded', '#c7a4e8', '#88d5dd', '#deeee8',
+      '#73968b', '#ffb2b2', '#a0efd1', '#f5e2b3', '#b8d4f7', '#dec4f4', '#b0e7ec', '#ffffff')
+  },
+  {
+    id: 'ember', name: 'Ember', dark: true,
+    theme: p('#231a18', '#f0e4db', '#f3b58a', '#b9805c55',
+      '#44312c', '#f39288', '#b4d49c', '#e5ce91', '#a1bddb', '#d5a4c5', '#9ccfc8', '#f0e4db',
+      '#a5897b', '#ffb9af', '#cde5bb', '#f3dfb5', '#c0d5ed', '#e7c1dc', '#bde6e0', '#fff8f3')
+  },
+  {
+    id: 'porcelain', name: 'Porcelain', dark: false,
+    theme: p('#fffcf7', '#353c48', '#5365a0', '#7e8fbd33',
+      '#353c48', '#aa384b', '#32775b', '#866315', '#5365a0', '#82518a', '#2b737d', '#bab6b1',
+      '#727782', '#b44657', '#407c60', '#8f6a20', '#5e70aa', '#906298', '#3c818b', '#ffffff')
+  },
   {
     // Warp's bundled Cyber Wave (warpdotdev/themes, warp_bundled/cyber_wave.yaml): deep teal fading to black, with
     // a teal-to-purple accent. xterm has one cursor colour, so it takes a lighter shade of the accent's purple end.
@@ -128,8 +153,8 @@ export function terminalBackdrop(id: string | undefined, appDark: boolean): stri
   return t?.backdrop ?? resolveTerminalTheme(id, appDark).background ?? (appDark ? AUTO_DARK.background! : AUTO_LIGHT.background!)
 }
 
-/** Fonts offered in Settings. Every one except JetBrains Mono / Fira Code ships with macOS. */
-export const TERMINAL_FONTS = ['Monaco', 'Menlo', 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Courier New', 'Andale Mono']
+/** Geist Mono is bundled; other choices use installed fonts and fall back to the system monospace face. */
+export const TERMINAL_FONTS = ['Geist Mono', 'Monaco', 'Menlo', 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Courier New', 'Andale Mono']
 
 export const DEFAULT_TERMINAL_FONT = 'Monaco'
 export const DEFAULT_TERMINAL_FONT_SIZE = 13

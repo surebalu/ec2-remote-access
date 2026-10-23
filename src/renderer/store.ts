@@ -1,8 +1,10 @@
 import { create } from 'zustand'
-import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, HostShell, PaneNode } from '@shared/types'
+import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, WorkspaceTool, WorkspaceTerminal, WorkspaceBrowser, HostShell, PaneNode } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { captureHostFilters, upsertHostView, type HostView, type HostViewFilters } from '@shared/hostViews'
+import { captureBrowser, captureTerminal, workspaceLayout, workspaceSummary } from '@shared/workspaces'
+import { readWorkspaceContext } from './workspaceContext'
 import { ssoWaitOutcome } from '@shared/ssoWait'
 import { applyColorTheme } from './appThemes'
 import { applyUiFont } from './uiFont'
@@ -46,9 +48,11 @@ export interface Tab {
   transient?: boolean
   /** Notes tab: the note it shows (relative to the notes folder). */
   notesPath?: string
+  workspaceSource?: string
 }
 
 export interface BrowserRequest {
+  workspace?: WorkspaceBrowser
   url?: string
   profile?: string
   space?: string
@@ -60,8 +64,8 @@ export interface BrowserRequest {
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
-export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health'
-export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health' }
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health' | 'devtools'
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools' }
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
 export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'claude', 'chatgpt']
 const inElectron = /\bElectron\//.test(navigator.userAgent)
@@ -178,7 +182,7 @@ interface State {
   browserRequest: (BrowserRequest & { nonce: number }) | null
   /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
   openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
-  terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; nonce: number } | null
+  terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; workspace?: { id: string; terminal: WorkspaceTerminal }; nonce: number } | null
   /** Shows the Whiteboard tab (there is one). */
   openBoard: () => void
   /** Shows the Finder tab (local files; there is one), at `path` when given. */
@@ -207,8 +211,9 @@ interface State {
   openPortForward: (req: PortForwardRequest) => Promise<Tunnel | null>
   snippetsOpen: { hostKey?: string } | null
   workspaceSaveOpen: boolean
-  saveWorkspace: (name: string, tabs: WorkspaceTab[]) => Promise<void>
-  openWorkspace: (id: string) => void
+  saveWorkspace: (name: string, ids: string[], options?: { layout?: boolean; terminalTabs?: string[]; browserTabs?: string[] }) => Promise<void>
+  openingWorkspace: string | null
+  openWorkspace: (id: string) => Promise<void>
   deleteWorkspace: (id: string) => Promise<void>
   shortcutsOpen: boolean
   clearFilters: () => void
@@ -390,7 +395,7 @@ export const useStore = create<State>((set, get) => ({
     else if (kind === 'notes') s.openNotes()
     else if (kind === 'finder') s.openFinder()
     else if (kind === 'board') s.openBoard()
-    else if (kind === 'health') s.setActive(s.toolTab('health'))
+    else if (kind === 'health' || kind === 'devtools') s.setActive(s.toolTab(kind))
     else if (inElectron) s.setActive(s.toolTab(kind))
     else void window.api.invoke('shell:open', WEB_APPS[kind].home)
   },
@@ -502,20 +507,81 @@ export const useStore = create<State>((set, get) => ({
   },
   snippetsOpen: null,
   workspaceSaveOpen: false,
-  saveWorkspace: async (name, tabs) => {
-    const cur = get().settings?.workspaces ?? []
+  saveWorkspace: async (name, ids, options = {}) => {
+    const state = get()
+    const selected = state.tabs.filter((t) => ids.includes(t.id) && !t.transient)
+    if (!name.trim() || !selected.length) throw new Error('Choose a name and at least one tab for this workspace.')
+    const tabs: WorkspaceTab[] = []
+    const tools: WorkspaceTool[] = []
+    for (const t of selected) {
+      if (isSession(t)) { tabs.push({ ...workspaceTabOf(t), id: t.id }); continue }
+      if (t.kind === 'local' || t.kind === 'browser' || t.kind === 'finder') {
+        const context = readWorkspaceContext(t.kind)
+        if (!context) throw new Error(`${TOOL_NAMES[t.kind]} is still loading. Open it, then save the workspace again.`)
+        if (context.kind === 'local') {
+          const terminal = captureTerminal(context.terminal, options.terminalTabs)
+          if (!terminal.tabs.length) throw new Error('Choose at least one terminal tab, or deselect Terminal.')
+          tools.push({ id: t.id, kind: 'local', terminal })
+        } else if (context.kind === 'browser') tools.push({ id: t.id, kind: 'browser', browser: captureBrowser(context.browser, options.browserTabs) })
+        else tools.push({ ...context, id: t.id })
+      } else if (t.kind === 'notes') tools.push({ id: t.id, kind: 'notes', path: t.notesPath })
+      else tools.push({ id: t.id, kind: t.kind as 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' })
+    }
+    const cur = state.settings?.workspaces ?? []
     const existing = cur.find((w) => w.name.toLowerCase() === name.trim().toLowerCase())
-    const ws: Workspace = { id: existing?.id ?? `ws-${Date.now().toString(36)}`, name: name.trim(), tabs, savedAt: Date.now() }
+    const refs = new Map(selected.map((t) => [t.id, t.id]))
+    const ws: Workspace = {
+      id: existing?.id ?? `ws-${Date.now().toString(36)}`, name: name.trim(), tabs, tools, savedAt: Date.now(),
+      layout: options.layout === false ? null : workspaceLayout(state.splitTree, refs),
+      activeTab: refs.get(state.activeTab) ?? selected[0].id
+    }
     await get().saveSettings({ workspaces: [...cur.filter((w) => w.id !== ws.id), ws].sort((a, b) => a.name.localeCompare(b.name)) })
-    get().toast('success', `Workspace "${ws.name}" saved (${tabs.length} tab${tabs.length === 1 ? '' : 's'})`)
+    get().toast('success', `Workspace “${ws.name}” saved · ${workspaceSummary(ws)}`)
   },
-  openWorkspace: (id) => {
+  openingWorkspace: null,
+  openWorkspace: async (id) => {
     const ws = get().settings?.workspaces.find((w) => w.id === id)
-    if (!ws) return
-    const known = new Set(allInstances(get()).map((i) => i.key))
-    const missing = ws.tabs.filter((t) => !known.has(t.instanceKey)).length
-    for (const t of ws.tabs.filter((x) => known.has(x.instanceKey))) openWorkspaceTab(t)
-    if (missing) get().toast('info', `${missing} host${missing === 1 ? '' : 's'} in "${ws.name}" no longer in the inventory; skipped.`)
+    if (!ws || get().openingWorkspace) return
+    set({ openingWorkspace: id })
+    try {
+      const known = new Set(visibleInstances(get()).map((i) => i.key))
+      const refs = new Map<string, string>()
+      const skipped: string[] = []
+      const credentials: string[] = []
+      for (const [index, t] of ws.tabs.entries()) {
+        if (!known.has(t.instanceKey)) { skipped.push('host missing or account disabled'); continue }
+        const source = `${ws.id}/${t.id ?? index}`
+        const live = get().tabs.find((x) => !x.transient && (x.id === t.id || x.workspaceSource === source) && (x.status === 'connected' || x.status === 'connecting'))
+        const tabId = live?.id ?? await openWorkspaceTab(t, source)
+        if (tabId) refs.set(t.id ?? `legacy-${index}`, tabId)
+        else credentials.push(t.instanceKey)
+      }
+      for (const t of ws.tools ?? []) {
+        if (!inElectron && DESKTOP_TOOLS.includes(t.kind)) {
+          const allowed = t.kind === 'local' && await window.api.invoke('term:available').catch(() => false)
+          if (!allowed) { skipped.push(`${TOOL_NAMES[t.kind]} unavailable on this device`); continue }
+        }
+        const tabId = get().toolTab(t.kind)
+        refs.set(t.id, tabId)
+        const nonce = Date.now() + Math.random()
+        if (t.kind === 'local') set({ terminalRequest: { workspace: { id: ws.id, terminal: t.terminal }, nonce } })
+        else if (t.kind === 'browser') set({ browserRequest: { workspace: t.browser, nonce } })
+        else if (t.kind === 'finder' && t.path) set({ finderRequest: { path: t.path, nonce } })
+        else if (t.kind === 'notes') get().updateTab(tabId, { notesPath: t.path })
+      }
+      const active = refs.get(ws.activeTab ?? '') ?? refs.values().next().value
+      if (active) {
+        get().setActive(active)
+        set({ ...splitFields(workspaceLayout(ws.layout, refs), { broadcastInput: false, splitZoom: null }), hostPage: null })
+      }
+      if (credentials.length) {
+        skipped.push(`${credentials.length} RDP ${credentials.length === 1 ? 'session needs' : 'sessions need'} credentials`)
+        // Only one credential dialog can be shown at a time; other missing credentials remain visible in the summary.
+        set({ connectFor: { kind: 'rdp', key: credentials[0] } })
+      }
+      get().toast(skipped.length ? 'info' : 'success', `${active ? 'Opened' : 'Could not open'} “${ws.name}”${skipped.length ? ` · ${skipped.join('; ')}` : ''}`)
+    } catch (e) { get().toast('error', `Could not finish opening “${ws.name}”: ${(e as Error).message}`) }
+    finally { set({ openingWorkspace: null }) }
   },
   deleteWorkspace: async (id) => {
     await get().saveSettings({ workspaces: (get().settings?.workspaces ?? []).filter((w) => w.id !== id) })
@@ -927,7 +993,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'health' || (tab && isWebApp(tab.kind))) { /* nothing in main to close: they save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'health' || tab?.kind === 'devtools' || (tab && isWebApp(tab.kind))) { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
@@ -958,7 +1024,7 @@ export const useStore = create<State>((set, get) => ({
 }))
 
 
-/** Remote sessions, as opposed to the tools' tabs (Notes, Browser, Terminal…): only sessions are tiles, counted, or saved in workspaces. */
+/** Remote sessions, as opposed to the built-in tools; used for host/session counts and grids. */
 export function isSession(t: Tab): boolean {
   return t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp'
 }
@@ -980,22 +1046,22 @@ function shellTab(from: Tab, shell: HostShell, transient: boolean): Tab {
 }
 
 /** Reopens one saved workspace tab through the same openers the hosts table uses. */
-function openWorkspaceTab(t: WorkspaceTab): void {
+async function openWorkspaceTab(t: WorkspaceTab, workspaceSource: string): Promise<string | null> {
   const s = useStore.getState()
   const i = allInstances(s).find((x) => x.key === t.instanceKey)
-  if (!i) return
+  if (!i) return null
   const id = `${t.kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   const title = `${i.name} @ ${i.profile}`
   const params = { user: t.user, port: t.port, identityFile: t.identityFile, useAgent: t.useAgent, forceRoute: t.forceRoute }
-  if (t.kind === 'ssh') s.addTab({ id, kind: 'ssh', instanceKey: i.key, title, status: 'connecting', request: { instanceKey: i.key, sessionId: id, ...params, initCommand: t.initCommand } })
-  else if (t.kind === 'sftp') s.addTab({ id, kind: 'sftp', instanceKey: i.key, title, status: 'connecting', sftpRequest: { instanceKey: i.key, ...params } })
+  const base = { id, instanceKey: i.key, title, status: 'connecting' as const, workspaceSource }
+  if (t.kind === 'ssh') s.addTab({ ...base, kind: 'ssh', request: { instanceKey: i.key, sessionId: id, ...params, initCommand: t.initCommand } })
+  else if (t.kind === 'sftp') s.addTab({ ...base, kind: 'sftp', sftpRequest: { instanceKey: i.key, ...params } })
   else {
-    // RDP passwords are not part of a workspace; the saved Keychain credential is used, or the dialog asks.
-    void window.api.invoke('creds:get', i.key).catch(() => null).then((cred) => {
-      if (!cred) { s.set({ connectFor: { kind: 'rdp', key: i.key } }); return }
-      s.addTab({ id, kind: 'rdp', instanceKey: i.key, title, status: 'connecting', rdpRequest: { user: t.user ?? cred.user, password: cred.password, domain: cred.domain, port: t.port, forceRoute: t.forceRoute } })
-    })
+    const cred = await window.api.invoke('creds:get', i.key).catch(() => null)
+    if (!cred) return null
+    s.addTab({ ...base, kind: 'rdp', rdpRequest: { user: t.user ?? cred.user, password: cred.password, domain: cred.domain, port: t.port, forceRoute: t.forceRoute } })
   }
+  return id
 }
 
 /** What a workspace remembers about an open tab. */

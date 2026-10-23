@@ -1,3 +1,4 @@
+import { workspaceSummary } from '@shared/workspaces'
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome } from '@shared/browser'
@@ -58,6 +59,7 @@ function commands(): Command[] {
     { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', hint: keyOf('browser'), icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
     { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', hint: keyOf('finder'), icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
     { id: 'health', title: 'Open health', keywords: '3dexperience platform status monitoring prometheus grafana metrics alerts', hint: keyOf('health'), icon: Icon.health, run: () => s.openTool('health') },
+    { id: 'devtools', title: 'Open developer tools', keywords: 'json format minify base64 encode decode url jwt uuid timestamp hash sha256 utilities', icon: Icon.code, run: () => s.openTool('devtools') },
     { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', hint: keyOf('board'), icon: Icon.board, run: () => s.openBoard() },
     { id: 'claude', title: 'Open Claude', keywords: 'ai assistant chat anthropic llm ask', hint: keyOf('claude'), icon: Icon.claude, run: () => s.openTool('claude') },
     { id: 'chatgpt', title: 'Open ChatGPT', keywords: 'ai assistant chat openai gpt llm ask', hint: keyOf('chatgpt'), icon: Icon.chatgpt, run: () => s.openTool('chatgpt') },
@@ -96,7 +98,7 @@ function commands(): Command[] {
     }
   }
   for (const w of s.settings?.workspaces ?? []) {
-    cmds.push({ id: `ws:${w.id}`, title: `Open workspace: ${w.name}`, keywords: 'workspace', hint: `${w.tabs.length} tabs`, icon: Icon.grid, run: () => s.openWorkspace(w.id) })
+    cmds.push({ id: `ws:${w.id}`, title: `Open workspace: ${w.name}`, keywords: 'workspace', hint: workspaceSummary(w), icon: Icon.grid, run: () => s.openWorkspace(w.id) })
   }
   for (const v of s.settings?.hostViews ?? []) {
     cmds.push({ id: `view:${v.id}`, title: `Host view: ${v.name}`, keywords: `saved filters ${v.filters.search} ${v.filters.profileFilter ?? ''}`, icon: Icon.server, run: () => s.applyHostView(v.filters) })
@@ -115,7 +117,7 @@ function commands(): Command[] {
 
 const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
-const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health }
+const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code }
 const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
 
 /**
@@ -175,6 +177,7 @@ export default function QuickSwitcher(): ReactElement {
   const [selected, setSelected] = useState(0)
   const listId = useId()
   const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const close = (): void => s.set({ quickSwitcherOpen: false, quickSwitcherQuery: '', quickSwitcherBeside: null })
   const beside = s.quickSwitcherBeside ? s.tabs.find((t) => t.id === s.quickSwitcherBeside) : undefined
   const commandMode = !beside && query.startsWith('>')
@@ -220,9 +223,13 @@ export default function QuickSwitcher(): ReactElement {
     else item.action()
   }
   return <Modal title={beside ? `Open beside ${beside.title}` : commandMode ? 'Commands' : 'Quick switcher'} onClose={close} width="max-w-2xl">
+    {!beside && <div className="switcher-modes" role="group" aria-label="Search mode">
+      <button aria-pressed={!commandMode} onClick={() => { setQuery(q); inputRef.current?.focus() }}><Icon.search />Hosts & sessions</button>
+      <button aria-pressed={commandMode} onClick={() => { setQuery(`>${q}`); inputRef.current?.focus() }}><Icon.launcher />Commands & tools</button>
+    </div>}
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-3 muted"><Icon.search /></span>
-      <input autoFocus className="input !h-10 !pl-9 !text-sm" aria-label="Find a host or open session" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={results.length ? `${listId}-${index}` : undefined}
+      <input ref={inputRef} autoFocus className="input !h-10 !pl-9 !text-sm" aria-label="Find a host or open session" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={results.length ? `${listId}-${index}` : undefined}
         placeholder={beside ? 'A host (name, IP, instance ID), an open tab, or a tool' : 'Find a host, IP, account, region, tag or session. Type > for commands.'} value={query} onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSelected((index + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % (results.length || 1)) }
