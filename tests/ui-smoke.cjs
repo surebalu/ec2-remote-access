@@ -191,6 +191,8 @@ const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !r
 const boardsSaved = {}
 // Tasks, Calendar and Links documents (main/records.ts), Anybox's library on "this Mac", a page preview and an iCal link.
 const recordDocs = {}
+// Settings → Data: the data folder's state as main/dataFolder.ts reports it.
+let dataState = { dir: '', reachable: false, syncing: false, places: [{ id: 'app', label: 'This Mac’s copy', path: '/fixture/userData' }, { id: 'records', label: 'Tasks, Calendar and Links', path: '/fixture/userData/records' }] }
 // The first Anybox import meets macOS's privacy wall, as on a Mac that has not let this app in.
 let anyboxBlocked = true
 const anyboxFixture = [
@@ -364,6 +366,11 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'rdp:prepare': return new Promise(() => undefined)
     case 'rdp:release': return
     case 'records:load': return structuredClone(recordDocs[args[0]] ?? { rev: 0, items: {} })
+    case 'data:status': case 'data:sync': return dataState
+    case 'data:pickFolder': return '/Volumes/home/EC2 Remote Access'
+    case 'data:setFolder': dataState = { ...dataState, dir: args[0], reachable: !!args[0], lastSync: args[0] ? Date.now() : undefined }; return dataState
+    case 'data:copyLinkFiles': dataState = { ...dataState, linkFiles: { to: `${dataState.dir}/Links Files`, done: 3, total: 3, finished: true } }; return dataState
+    case 'data:reveal': return
     case 'records:apply': {
       const d = (recordDocs[args[0]] ??= { rev: 0, items: {} })
       for (const o of args[1]) { if (o.op === 'delete') delete d.items[o.id]; else d.items[o.item.id] = structuredClone(o.item) }
@@ -1292,6 +1299,14 @@ app.whenReady().then(async () => {
     await js(`[...document.querySelectorAll('.ql-edit button')].find((b) => b.textContent === 'Add quicklink').click()`)
     await until(`!document.querySelector('.ql-edit') && document.querySelectorAll('.ql-row').length === 1`)
     assert.deepEqual(settings.quicklinks.map((l) => [l.keyword, l.url, l.space]), [['jira', 'https://example.atlassian.net/browse/{query}', 'general']])
+    // Settings → Data: where things are, then a data folder chosen and in step, and the Links files copied there.
+    await js(`document.querySelector('.settings-nav-item[data-section="data"]').click()`)
+    await until(`[...document.querySelectorAll('.settings .set-row')].some((r) => r.textContent.includes('Tasks, Calendar and Links') && r.textContent.includes('/fixture/userData/records'))`, 'data places')
+    await js(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Choose…').click()`)
+    await until(`[...document.querySelectorAll('.settings .set-row')].some((r) => r.textContent.includes('/Volumes/home/EC2 Remote Access')) && document.querySelector('.settings').textContent.includes('In step: synced just now')`, 'data folder chosen')
+    await js(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Copy to the data folder').click()`)
+    await until(`document.querySelector('.settings').textContent.includes('Copied 3 files to /Volumes/home/EC2 Remote Access/Links Files')`, 'links files copied')
+    await screenshot('settings-data.png')
     await js(`document.querySelector('.settings [aria-label="Close dialog"]').click()`)
     await until(`!document.querySelector('.settings')`)
 

@@ -18,6 +18,7 @@ import { closeAllSftp } from '../main/sftp/session'
 import { closeAllTunnels } from '../main/tunnels'
 import { closePlmHealth } from '../main/plmHealth'
 import { closeDbLocks } from '../main/dbLocks'
+import { flushDataFolder, updateDataFolder } from '../main/dataFolder'
 import { releaseAllRdp } from '../main/rdp/sessions'
 import { ensureProxy, stopProxy } from '../main/rdp/cleanpath'
 import { createGatewayHost } from './host'
@@ -73,13 +74,16 @@ async function main(): Promise<void> {
   for (const h of hosts) log(`[gateway] open  http://${h}:${bound.port}/#token=${token}`)
   log('[gateway] the token is in the URL fragment; the page stores it and drops it from the address bar')
 
+  // A data folder this machine was given (a NAS share mounted here) is kept in step with its lists, as on the Mac.
+  updateDataFolder()
+
   let closing = false
   const shutdown = (): void => {
     if (closing) return
     closing = true
     log('[gateway] shutting down')
     closeAllLocal()
-    Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), closePlmHealth(), closeDbLocks()])
+    Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), closePlmHealth(), closeDbLocks(), flushDataFolder()])
       .then(() => stopProxy())
       .catch(() => undefined)
       .then(() => gateway.close())

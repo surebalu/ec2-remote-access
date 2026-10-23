@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import type { AppAbout, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
+import type { AppAbout, DataStatus, DictationKey, NotesInfo, Settings, VoicePermission, VoiceStatus } from '@shared/types'
+import { agoLabel } from '@shared/dataFolder'
 import { DEFAULT_SERVICES, isUnitName, type ServiceDef } from '@shared/services'
 import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, SHORTCUT_TARGETS, sectionKeys, TARGET_NAMES, type RailSection, type ShortcutTarget } from '@shared/keyCombos'
 import { CAN_DICTATE, voice } from '../voice'
@@ -18,7 +19,7 @@ import { ZOOM_SECTIONS } from '../sectionZoom'
 import { ZoomStepper } from './ZoomControls'
 import { Icon } from './icons'
 
-type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'keyboard' | 'launcher' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
+type SectionId = 'general' | 'accounts' | 'ssh' | 'terminal' | 'notes' | 'data' | 'keyboard' | 'launcher' | 'voice' | 'services' | 'phone' | 'requirements' | 'about'
 
 const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: 'general', label: 'General', blurb: 'Appearance, how hosts are found and how connections are routed.', icon: Icon.settings },
@@ -26,6 +27,7 @@ const SECTIONS: { id: SectionId; label: string; blurb: string; icon: (p: { class
   { id: 'ssh', label: 'SSH & RDP', blurb: 'Users, keys and the SSH agent used when a host has no settings of its own.', icon: Icon.key },
   { id: 'terminal', label: 'Terminal', blurb: 'How SSH tabs look, what runs when they connect, and recordings.', icon: Icon.terminal },
   { id: 'notes', label: 'Notes', blurb: 'Where your Markdown notes live.', icon: Icon.note },
+  { id: 'data', label: 'Data', blurb: 'Where what you make in the app is kept, and a copy on your NAS.', icon: Icon.disk },
   { id: 'keyboard', label: 'Keyboard', blurb: 'Your own shortcut for each section down the left edge, Claude and ChatGPT included.', icon: Icon.keyboard },
   { id: 'launcher', label: 'Launcher', blurb: 'Quicklinks: a word you type in the launcher to open a page. The launcher’s own key is under Keyboard.', icon: Icon.launcher },
   { id: 'voice', label: 'Voice', blurb: 'Talk instead of typing, wherever you type in the app.', icon: Icon.mic },
@@ -210,6 +212,93 @@ const isGlobal = (t: KeyTarget | null): t is GlobalTarget => !!t && Object.hasOw
  * rail, recorded by pressing them. Changes apply at once (and go into the draft, so Save keeps them). Only section
  * shortcuts that differ from the defaults are stored.
  */
+/**
+ * Settings → Data: where the app keeps what you make, and the data folder (main/dataFolder.ts), a share on a NAS that
+ * Tasks, Calendar, Links and the whiteboards are merged into whenever it can be reached. Applies at once, outside the
+ * Settings draft (Save leaves dataDir alone).
+ */
+function DataSettings(): ReactElement {
+  const [st, setSt] = useState<DataStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    void window.api.invoke('data:status').then(setSt, () => undefined)
+    const off = window.api.on('data:status', setSt)
+    // "Synced 2 min ago" moves on by itself.
+    const t = setInterval(() => setTick((n) => n + 1), 30_000)
+    return () => { off(); clearInterval(t) }
+  }, [])
+  const run = async (fn: () => Promise<DataStatus>): Promise<void> => {
+    setError(null)
+    setBusy(true)
+    try { setSt(await fn()) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const choose = async (): Promise<void> => {
+    const dir = await window.api.invoke('data:pickFolder').catch(() => null)
+    if (dir) await run(() => window.api.invoke('data:setFolder', dir))
+  }
+  const stop = (): void => {
+    if (window.confirm('Stop keeping a copy in the data folder? Nothing is deleted, there or on this Mac.')) void run(() => window.api.invoke('data:setFolder', ''))
+  }
+  const dir = st?.dir ?? ''
+  const files = st?.linkFiles
+  const state: ReactNode = !dir ? null
+    : st?.syncing ? 'Syncing…'
+      : st?.lastError ? <span className="set-key-error">{st.lastError}</span>
+        : st?.lastSync ? `In step: synced ${agoLabel(st.lastSync)}. Syncs a moment after each change and every minute.`
+          : 'Not synced yet.'
+  return (
+    <>
+      <Group title="Data folder">
+        <Row label={<span className="flex items-center gap-2"><Icon.disk className="set-key-icon" />Folder</span>}
+          hint={dir ? <span className="mono">{dir}</span> : 'None. Choose a folder on your NAS (a mounted share, such as /Volumes/home/EC2 Remote Access) and Tasks, Calendar, Links and the whiteboards are kept there too, so another Mac can share them.'}>
+          {IN_ELECTRON && (
+            <div className="flex items-center gap-2">
+              <button className="btn" disabled={busy} onClick={() => void choose()}>{dir ? 'Change…' : 'Choose…'}</button>
+              {dir && <button className="btn btn-ghost" disabled={busy} onClick={stop}>Stop using</button>}
+              {dir && <button className="btn btn-ghost" onClick={() => void window.api.invoke('data:reveal', 'folder')}>Show</button>}
+            </div>
+          )}
+        </Row>
+        {dir && (
+          <Row label="State" hint={state}>
+            <button className="btn" disabled={busy || st?.syncing} onClick={() => void run(() => window.api.invoke('data:sync'))}>Sync now</button>
+          </Row>
+        )}
+        {dir && IN_ELECTRON && (
+          <Row label="Links files" hint={files
+            ? files.error ? <span className="set-key-error">{files.error}</span>
+              : files.finished ? `Copied ${files.total} files to ${files.to}; the links open the copies. The originals are where they were: delete them once you have checked the copies.`
+                : `Copying ${files.done} of ${files.total}…`
+            : 'The files Links keeps (those Anybox had) are on this Mac. Copy them into the data folder and the links open the copies there; the originals stay until you delete them.'}>
+            <button className="btn" disabled={!!files && !files.finished} onClick={() => void run(() => window.api.invoke('data:copyLinkFiles'))}>Copy to the data folder</button>
+          </Row>
+        )}
+        {error && <div className="set-row"><span className="set-key-error">{error}</span></div>}
+      </Group>
+      <Group title="Where your data is">
+        {(st?.places ?? []).map((p) => (
+          <Row key={p.id} label={p.label} hint={<><span className="mono">{p.path}</span>{p.note && <><br />{p.note}</>}</>}>
+            {IN_ELECTRON && <button className="btn btn-ghost" onClick={() => void window.api.invoke('data:reveal', p.id)}>Show in Finder</button>}
+          </Row>
+        ))}
+      </Group>
+      <Group title="How the data folder works">
+        <div className="set-row stack">
+          <ul className="set-list">
+            <li><Icon.check /><span>This Mac always works from its own copy, so nothing waits on the network and nothing is lost while the NAS is away; they are merged as soon as it is back.</span></li>
+            <li><Icon.check /><span>Lists merge item by item: a change made on another Mac and one made here both survive; for the same item, the later change wins (deleting counts as a change).</span></li>
+            <li><Icon.check /><span>Whiteboards are copied whole; the later save wins.</span></li>
+            <li><Icon.check /><span>Notes are Markdown files in their own folder: to keep them on the NAS, point Settings → Notes (or your Obsidian vault) at a folder there.</span></li>
+            <li><Icon.check /><span>Settings, sign-ins and saved passwords stay on this Mac.</span></li>
+          </ul>
+        </div>
+      </Group>
+    </>
+  )
+}
+
 function KeyboardSettings({ draft, onChange, onGlobal }: { draft: Settings; onChange: (shortcuts: Record<string, string>) => void; onGlobal: (field: 'launcherKey' | 'linkSaveKey' | 'linkFindKey', key: string) => Promise<void> }): ReactElement {
   const [recording, setRecording] = useState<KeyTarget | null>(null)
   const [held, setHeld] = useState('')
@@ -431,7 +520,7 @@ export default function SettingsDialog(): ReactElement | null {
     // Snippets, port-forward presets and workspaces are edited in their own dialogs while this one is open;
     // writing the draft's copy back would undo those edits.
     // Quicklinks (the launcher adds them too) and the 1Password panel's switch are saved where they are changed.
-    const { snippets: _sn, portForwards: _pf, workspaces: _ws, finderExtra: _fe, finderHidden: _fh, quicklinks: _ql, onePasswordStayApproved: _op, ...rest } = draft
+    const { snippets: _sn, portForwards: _pf, workspaces: _ws, finderExtra: _fe, finderHidden: _fh, quicklinks: _ql, onePasswordStayApproved: _op, dataDir: _dd, ...rest } = draft
     await s.saveSettings(rest)
     await s.refreshProfiles()
     close()
@@ -783,7 +872,7 @@ export default function SettingsDialog(): ReactElement | null {
       </Group>
     </>
   )
-  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, keyboard, launcher: <QuicklinkSettings />, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
+  const body: Record<SectionId, ReactElement> = { general, accounts, ssh, terminal, notes, data: <DataSettings />, keyboard, launcher: <QuicklinkSettings />, voice: voiceSection, services: servicesSection, phone, requirements, about: aboutSection }
 
   return (
     <Modal title="Settings" onClose={close} width="max-w-[880px]" bare>

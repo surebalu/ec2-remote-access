@@ -16,6 +16,7 @@ import { localGitStatus } from './localgit'
 import { loginMatches } from '@shared/browser'
 import { appendNote, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
 import { deleteBoard, listBoards, loadBoard, saveBoard } from './boards'
+import { checkDataFolder, copyLinkFiles, dataStatus, syncNow, updateDataFolder } from './dataFolder'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
 import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
@@ -92,6 +93,21 @@ export const handlers: Handlers = {
   'notes:saveImage': (name, dataUrl) => saveImage(name, dataUrl),
   'boards:list': async () => listBoards(),
   'boards:load': async (id) => loadBoard(id),
+  'data:status': async () => dataStatus(),
+  'data:pickFolder': async () => (await host().pickPaths({ title: 'Choose the data folder (a NAS share, say)', kind: 'directory', buttonLabel: 'Use this folder' }))?.[0] ?? null,
+  'data:setFolder': async (dir) => {
+    const d = typeof dir === 'string' && dir.trim() ? await checkDataFolder(dir) : ''
+    setSettings({ dataDir: d })
+    updateDataFolder()
+    return d ? syncNow() : dataStatus()
+  },
+  'data:sync': () => syncNow(),
+  'data:copyLinkFiles': () => copyLinkFiles(),
+  'data:reveal': async (id) => {
+    const s = dataStatus()
+    const path = id === 'folder' ? s.dir : s.places.find((p) => p.id === id)?.path
+    if (path) await host().revealPath(path)
+  },
   'boards:save': (board) => saveBoard(board),
   'boards:delete': (id) => deleteBoard(id),
   'records:load': async (kind) => loadRecords(kind),

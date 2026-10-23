@@ -231,6 +231,12 @@ export interface Settings {
   linkSaveKey?: string
   linkFindKey?: string
   /**
+   * The data folder (Settings → Data; main/dataFolder.ts), typically a share on a NAS: Tasks, Calendar, Links and the
+   * whiteboards are merged into it whenever it can be reached, while this Mac keeps working from its own copy. ''
+   * for none, the default.
+   */
+  dataDir?: string
+  /**
    * Keep the 1Password CLI approvals given in this run from lapsing after ten idle minutes (main/onepassword.ts), so
    * filling asks once per account per app start, for up to twelve hours.
    */
@@ -633,6 +639,22 @@ export interface AppAbout {
   arch: string
   dataDir: string
   logsDir: string
+}
+
+/** Settings → Data: where the app keeps what you make, and the data folder's state (main/dataFolder.ts). */
+export interface DataStatus {
+  /** The data folder, '' when none is set. */
+  dir: string
+  /** Whether it could be reached at the last sync. */
+  reachable: boolean
+  syncing: boolean
+  /** When the last sync finished without an error. */
+  lastSync?: number
+  lastError?: string
+  /** Where each kind of data is kept on this Mac. */
+  places: { id: string; label: string; path: string; note?: string }[]
+  /** Copying the Links files into the data folder (data:copyLinkFiles). */
+  linkFiles?: { to: string; done: number; total: number; finished: boolean; error?: string }
 }
 
 export interface NotesInfo {
