@@ -93,3 +93,17 @@ test('two copies merge item by item: the later change wins, deletions included',
   assert.equal(mergeDocs(doc, nas).changed, false, 'merging again changes nothing')
   assert.equal(Object.keys(pruneDeleted(doc, 60 + KEEP_DELETED_MS + 1).items).length, 3, 'old markers go')
 })
+
+test('a task from one line said elsewhere (the launcher’s "remind me to …")', async () => {
+  const { quickTask } = await import('../src/shared/tasks.ts')
+  let n = 0
+  const id = (): string => `id${++n}`
+  const now = new Date(2026, 9, 23, 18, 0).getTime()
+  const r = quickTask('renew the cert monday 3pm #Platform', [], [], now, id)!
+  assert.equal(r.task.title, 'renew the cert')
+  assert.equal(r.task.date, '2026-10-26')
+  assert.equal(r.task.time, '15:00')
+  assert.deepEqual(r.ops.map((o) => o.item.type), ['project', 'task'], 'a new project is made for #Platform')
+  assert.equal(r.task.projectId, 'id1')
+  assert.equal(quickTask('   ', [], [], now, id), null)
+})

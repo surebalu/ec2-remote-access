@@ -18,7 +18,7 @@ export default function PortForwardDialog(): ReactElement | null {
     [s.instances] // eslint-disable-line react-hooks/exhaustive-deps
   )
   const [key, setKey] = useState(preset?.instanceKey ?? req.key ?? candidates[0]?.key ?? '')
-  const [remotePort, setRemotePort] = useState(preset ? String(preset.remotePort) : '')
+  const [remotePort, setRemotePort] = useState(preset ? String(preset.remotePort) : req.remotePort ? String(req.remotePort) : '')
   const [remoteHost, setRemoteHost] = useState(preset?.remoteHost ?? '')
   const [localPort, setLocalPort] = useState(preset?.localPort ? String(preset.localPort) : '')
   const [name, setName] = useState(preset?.name ?? '')

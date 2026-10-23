@@ -588,7 +588,8 @@ export interface AppHotkey {
 }
 
 export type AppCommand =
-  | { kind: 'connect'; key: string }
+  /** A session to the host: its usual one, or SSH or Remote Desktop when said ("rdp into …"). */
+  | { kind: 'connect'; key: string; via?: 'ssh' | 'rdp' }
   | { kind: 'switcher' }
   | { kind: 'scan' }
   | { kind: 'section'; section: RailSection }
@@ -600,8 +601,10 @@ export type AppCommand =
   | { kind: 'browse'; url: string; space?: string; tab?: string }
   | { kind: 'note'; path: string }
   | { kind: 'files'; key: string }
-  | { kind: 'run'; key: string }
-  | { kind: 'forward'; key: string }
+  | { kind: 'run'; key: string; command?: string }
+  | { kind: 'forward'; key: string; port?: number }
+  /** Service control for one host (the dialog asks before acting). */
+  | { kind: 'services'; key: string }
   | { kind: 'power'; key: string; action: 'start' | 'stop' }
   | { kind: 'console'; profile: string; url?: string }
   | { kind: 'ask'; app: 'claude' | 'chatgpt'; text: string }

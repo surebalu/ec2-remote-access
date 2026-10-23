@@ -39,7 +39,7 @@ export default function RunCommandDialog(): ReactElement | null {
   const req = s.runCommandFor
   const instances = allInstances(s)
   const [keys, setKeys] = useState<string[]>(() => req?.keys ?? [])
-  const [command, setCommand] = useState(readLast)
+  const [command, setCommand] = useState(() => req?.command || readLast())
   const [timeoutSec, setTimeoutSec] = useState(600)
   const [run, setRun] = useState<RunState | null>(null)
   const [picking, setPicking] = useState(() => (req?.keys.length ?? 0) === 0)

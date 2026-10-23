@@ -27,7 +27,7 @@ import ShortcutsDialog from './components/ShortcutsDialog'
 import RunCommandDialog from './components/RunCommandDialog'
 import { handleAppShortcut } from './shortcuts'
 import { isMobile } from './mobile'
-import { consoleHomeFor, hasBrowser, openAccountConsole, openDefaultFor, openFilesFor } from './quickConnect'
+import { consoleHomeFor, hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openRdpFor, openSshFor } from './quickConnect'
 import { ZoomBadge, zoomSection } from './components/ZoomControls'
 import type { ZoomSection } from './sectionZoom'
 import MobileApp from './components/mobile/MobileApp'
@@ -128,7 +128,11 @@ export default function App(): ReactElement {
   // find one, rescan, or show something of the app's.
   useEffect(() => window.api.on('app:command', (c) => {
     const st = useStore.getState()
-    if (c.kind === 'connect') openDefaultFor(c.key)
+    if (c.kind === 'connect') {
+      if (c.via === 'ssh') openSshFor(c.key)
+      else if (c.via === 'rdp') void openRdpFor(c.key)
+      else openDefaultFor(c.key)
+    }
     else if (c.kind === 'switcher') { if (!st.quickSwitcherOpen) st.openQuickSwitcher() }
     else if (c.kind === 'scan') void st.scan()
     else if (c.kind === 'section') {
@@ -147,8 +151,12 @@ export default function App(): ReactElement {
     else if (c.kind === 'browse') st.openBrowser({ url: c.url, space: c.space, tab: c.tab })
     else if (c.kind === 'note') st.openNotes(c.path)
     else if (c.kind === 'files') openFilesFor(c.key)
-    else if (c.kind === 'run') st.set({ runCommandFor: { keys: [c.key] } })
-    else if (c.kind === 'forward') st.set({ portForwardFor: { key: c.key } })
+    else if (c.kind === 'run') st.set({ runCommandFor: { keys: [c.key], command: c.command } })
+    else if (c.kind === 'forward') st.set({ portForwardFor: { key: c.key, remotePort: c.port } })
+    else if (c.kind === 'services') {
+      const i = allInstances(st).find((x) => x.key === c.key)
+      if (i) st.set({ servicesFor: { targets: [{ key: i.key }], title: i.name } })
+    }
     else if (c.kind === 'power') {
       const i = allInstances(st).find((x) => x.key === c.key)
       if (i && window.confirm(`${c.action === 'start' ? 'Start' : 'Stop'} ${i.name} (${i.instanceId}) in ${i.profile}?`)) {

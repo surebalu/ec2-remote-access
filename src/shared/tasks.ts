@@ -184,3 +184,25 @@ export function completeTask(t: Task, now: number, today: string, newId: () => s
 
 /** The next order number at the end of a list. */
 export const nextOrder = (tasks: { order: number }[]): number => tasks.reduce((m, t) => Math.max(m, t.order), 0) + 1
+
+/**
+ * A task from one line said or typed elsewhere ("remind me to renew the cert friday 3pm #Platform"): the Tasks
+ * quick-add rules, in the Inbox unless the line gives a day. The ops create its project too when "#Name" is new.
+ */
+export function quickTask(text: string, projects: Project[], tasks: Task[], now: number, newId: () => string): { ops: { op: 'put'; item: Task | Project }[]; task: Task } | null {
+  const p = parseTaskInput(text, projects, new Date(now))
+  if (!p.title) return null
+  const ops: { op: 'put'; item: Task | Project }[] = []
+  let projectId = p.projectId
+  if (p.newProject) {
+    projectId = newId()
+    ops.push({ op: 'put', item: { id: projectId, type: 'project', name: p.newProject, color: PROJECT_COLORS[projects.length % PROJECT_COLORS.length], order: Math.max(0, ...projects.map((x) => x.order)) + 1, updatedAt: now } })
+  }
+  const task: Task = {
+    id: newId(), type: 'task', title: p.title, order: Math.max(0, ...tasks.map((t) => t.order)) + 1, createdAt: now, updatedAt: now,
+    ...(projectId ? { projectId } : {}), ...(p.date ? { date: p.date } : {}), ...(p.time ? { time: p.time } : {}), ...(p.priority ? { priority: p.priority } : {}),
+    ...(p.someday ? { someday: true } : {}), ...(p.repeat ? { repeat: p.repeat, repeatFrom: p.date } : {}), ...(p.tags.length ? { tags: p.tags } : {})
+  }
+  ops.push({ op: 'put', item: task })
+  return { ops, task }
+}

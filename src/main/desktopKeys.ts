@@ -1,4 +1,5 @@
 import { globalShortcut, Notification, screen, shell } from 'electron'
+import { execFile } from 'node:child_process'
 import { toAccelerator } from '@shared/keyCombos'
 import { layoutById, layoutFrame, sameFrame, type Rect } from '@shared/windowLayouts'
 import { control, ControlError } from './macControl'
@@ -73,6 +74,19 @@ export async function applyLayout(id: string): Promise<void> {
   const got = await control<Partial<Rect>>('setFrame', { pid: front.pid, ...target })
   placed.set(key, { x: got.x ?? target.x, y: got.y ?? target.y, w: got.w ?? target.w, h: got.h ?? target.h })
   if (placed.size > 500) { placed.clear(); original.clear() }
+}
+
+/** Opens or brings forward an app, waits until it is in front with a window, then moves that window to the layout. */
+export async function layoutApp(path: string, id: string): Promise<void> {
+  if (!path.startsWith('/') || !/\.app\/?$/.test(path)) throw new Error('That is not an app.')
+  await new Promise<void>((resolve, reject) => execFile('open', ['-a', path], { timeout: 15_000 }, (err) => (err ? reject(new Error(`Could not open ${path}: ${err.message}`)) : resolve())))
+  const want = path.replace(/\/+$/, '')
+  for (let n = 0; n < 30; n++) {
+    const front = await control<Front>('front').catch(() => null)
+    if (front && front.path.replace(/\/+$/, '') === want && front.window) return applyLayout(id)
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`${want.split('/').pop()?.replace(/\.app$/, '')} did not come forward with a window.`)
 }
 
 let warned = false

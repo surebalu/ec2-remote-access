@@ -94,6 +94,8 @@ export interface MacHost {
   controlPath(): string | null
   /** Moves the window in front to a layout (src/shared/windowLayouts.ts), or does what it names (Restore, Full Screen). */
   layout(id: string): Promise<void>
+  /** Opens or brings forward the app at `path`, then moves its window to the layout. */
+  layoutApp(path: string, id: string): Promise<void>
   /** Each window and app key in Settings, and whether macOS gave it to the app. */
   hotkeys(): { id: string; combo: string; registered: boolean }[]
   /** Opens System Settings at Privacy & Security → Accessibility or Calendars. */
