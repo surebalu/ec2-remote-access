@@ -153,6 +153,24 @@ export function viewLinks(view: LinkView, links: LinkItem[], folders: LinkFolder
   return live
 }
 
+/**
+ * A folder as Finder shows it: the folders directly inside it, in their order, then the items directly in it (not those
+ * in its subfolders, which are a double-click away). Archived items stay in Archived.
+ */
+export function folderContents(id: string, links: LinkItem[], folders: LinkFolder[]): { folders: LinkFolder[]; items: LinkItem[] } {
+  return {
+    folders: folders.filter((f) => f.parentId === id).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)),
+    items: links.filter((l) => !l.archived && l.folderId === id)
+  }
+}
+
+/** The folders from the top down to `id` (its own included), for a path bar. */
+export function folderChain(id: string | undefined, folders: Map<string, LinkFolder>): LinkFolder[] {
+  const out: LinkFolder[] = []
+  for (let f = id ? folders.get(id) : undefined, i = 0; f && i < 50; f = f.parentId ? folders.get(f.parentId) : undefined, i++) out.unshift(f)
+  return out
+}
+
 /** Whether an item has the tag or one below it ("aws" covers "aws/iam", as Anybox's nested tags do). */
 export const hasTag = (l: Pick<LinkItem, 'tags'>, path: string): boolean => !!l.tags?.some((t) => t === path || t.startsWith(`${path}/`))
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderTree, hasTag, normalizeUrl, parseCsv, parseLinksFile, planImport, searchLinks,
+  asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderChain, folderContents, folderTree, hasTag, normalizeUrl, parseCsv, parseLinksFile, planImport, searchLinks,
   tagTree, viewLinks, type LinkFolder, type LinkItem
 } from '../src/shared/links.ts'
 
@@ -36,6 +36,13 @@ test('views, folders below folders, and search', () => {
   assert.deepEqual([t('starred'), t('archived'), t('notes'), t('unsorted'), t('tag:aws')], [['Grafana'], ['Old thing'], ['Wifi password'], ['Wifi password'], ['AWS console']])
   assert.deepEqual(folderTree(folders).map((x) => `${'-'.repeat(x.depth)}${x.folder.name}`), ['Work', '-Docs', 'Home'])
   const byId = new Map(folders.map((f) => [f.id, f]))
+  // As Finder shows a folder: its subfolders, then only what is directly in it.
+  const archivedHere = link({ title: 'Archived here', folderId: work.id, archived: true })
+  const inWork = folderContents(work.id, [...all, archivedHere], folders)
+  assert.deepEqual([inWork.folders.map((f) => f.name), inWork.items.map((l) => l.title)], [['Docs'], ['Grafana']])
+  assert.deepEqual(folderContents(docs.id, all, folders).items.map((l) => l.title), ['AWS console'])
+  assert.deepEqual(folderChain(docs.id, byId).map((f) => f.name), ['Work', 'Docs'])
+  assert.deepEqual(folderChain(undefined, byId), [])
   assert.deepEqual(searchLinks(all, 'prod', byId).map((l) => l.title), ['Grafana'], 'the comment is searched')
   assert.deepEqual(searchLinks(all, 'docs aws', byId).map((l) => l.title), ['AWS console'], 'and the folder path')
   assert.deepEqual(searchLinks(all, 'guest', byId).map((l) => l.title), ['Wifi password'])
