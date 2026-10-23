@@ -9,7 +9,7 @@ import { mainWindow } from './windows'
 import { fileIcons, hideLauncher, launcherCommand, launcherConfirm, launcherQuickLook, launcherStatus, pauseLauncherKey, showLauncher, thumbnail } from './launcherWindow'
 import { attachTool, detachTool, detachedTools, relayToTool, toolWindowList } from './toolWindows'
 import { electronStorage } from './storage/scanClient'
-import { applyLayout, desktopKeysStatus, openPrivacy, pauseDesktopKeys } from './desktopKeys'
+import { applyLayout, desktopKeysStatus, layoutApp, openPrivacy, pauseDesktopKeys } from './desktopKeys'
 import { hideLinksPanel, linksPanelCommand, linksPanelPage, linksPanelStatus, openAutomationSettings, pauseLinksPanelKeys, resizeLinksPanel, setOwnPage, showLinksPanel } from './linksPanel'
 
 /** Dictation on this Mac: the helper beside the app's resources, and macOS's microphone permission for the app. */
@@ -27,8 +27,10 @@ const electronVoice: VoiceHost = {
     return s === 'granted' ? 'authorized' : s === 'not-determined' ? 'notDetermined' : s === 'denied' || s === 'restricted' ? s : 'unknown'
   },
   askMicrophone: async () => process.platform === 'darwin' && systemPreferences.askForMediaAccess('microphone'),
+  // Every window of this Mac's own (the main one, the launcher, detached tools): each ignores a dictation it did not
+  // start. Never paired phones, which would hear the Mac.
   send(channel, payload) {
-    mainWindow()?.webContents.send(channel, payload)
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload)
   },
   openPrivacy: (pane) => shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?Privacy_${pane === 'microphone' ? 'Microphone' : 'SpeechRecognition'}`)
 }
@@ -54,6 +56,7 @@ const electronMac: MacHost = {
     return existsSync(p) ? p : null
   },
   layout: applyLayout,
+  layoutApp,
   hotkeys: desktopKeysStatus,
   openPrivacy
 }

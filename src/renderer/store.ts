@@ -226,9 +226,9 @@ interface State {
   /** Shows the Finder tab (local files; there is one), at `path` when given. */
   openFinder: (path?: string) => void
   finderRequest: { path: string; nonce: number } | null
-  portForwardFor: { key?: string; presetId?: string } | null
+  portForwardFor: { key?: string; presetId?: string; remotePort?: number } | null
   /** Open Run Command dialog: the hosts it starts with (editable there), or a past run to show. */
-  runCommandFor: { keys: string[]; runId?: string } | null
+  runCommandFor: { keys: string[]; runId?: string; command?: string } | null
   /** The Services dialog (service control) for these servers; `label` names a server ("3DSpace 01"), `env` its environment. */
   servicesFor: { targets: { key: string; label?: string }[]; title: string; env?: string } | null
   /** The Database locks dialog, on this database (or the first of `env`, else the last one shown). */

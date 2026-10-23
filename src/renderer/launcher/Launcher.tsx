@@ -11,7 +11,13 @@ import { manualToInstance } from '@shared/manual'
 import { matchesHost } from '@shared/hostSearch'
 import { consoleHome, ec2InstanceUrl, hostOf, normalizeInput, spaceIdForProfile } from '@shared/browser'
 import { DEFAULT_SPACE, EXTERNAL, checkQuicklink, cleanQuicklink, quicklinkFor, quicklinkUrl, takesQuery, type Quicklink } from '@shared/quicklinks'
-import { applyAppearance } from '../store'
+import { applyAppearance, useStore } from '../store'
+import { installVoice, useVoice } from '../voice'
+import MicButton from '../components/MicButton'
+import { readIntent, type Intent, type IntentContext, type IntentMatch } from '@shared/intent'
+import { DEFAULT_SERVICES } from '@shared/services'
+import { quickTask, type Project, type Task } from '@shared/tasks'
+import { itemsOf, newRecordId } from '@shared/records'
 import { applyUiFont } from '../uiFont'
 import { Icon } from '../components/icons'
 import { Favicon } from '../components/browser/parts'
@@ -155,6 +161,8 @@ export default function Launcher(): ReactElement {
       soft(window.api.invoke('local:home'), '')
     ])
     if (settings) {
+      // The dictation key and language (voice.ts reads them from the store, as the main window's does).
+      useStore.setState({ settings })
       applyUiFont(settings.uiFont)
       applyAppearance(settings.theme, settings.colorTheme)
     }
@@ -163,6 +171,12 @@ export default function Launcher(): ReactElement {
     setData({ apps, usage, settings, hosts, profiles, browser, home })
   }
 
+  // Talk instead of typing: hold the dictation key (or click the mic) and say "ssh to 3dspace one in qa".
+  useEffect(() => installVoice(), [])
+  const listening = useVoice()
+  useEffect(() => {
+    if (listening?.phase === 'error' && listening.error) showNotice(listening.error, 'err')
+  }, [listening?.phase]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     void load()
     // Each time it appears: an empty field with the keyboard, and fresh lists (apps installed, hosts scanned since).
@@ -466,6 +480,116 @@ export default function Launcher(): ReactElement {
     return () => clearTimeout(t)
   }, [query, calc, conversion])
 
+  // ----- plain-language commands ("ssh to 3dspace1", "open mainspringenergy.com", "put slack on the left half") -----
+  const intentCtx: IntentContext = useMemo(() => {
+    const b = data.browser
+    const spaces = [...(b?.spaces ?? []), ...data.profiles.filter((p) => p.enabled && p.kind !== 'static').map((p) => ({ id: spaceIdForProfile(p.name), name: settings?.accountMeta?.[p.name]?.label ?? p.name }))]
+    return {
+      hosts: data.hosts.map((i) => ({ key: i.key, name: i.name, platform: i.platform, profile: i.profile, account: accountLabel(i), region: i.manual ? undefined : i.region, state: i.manual ? 'running' : i.state, privateIp: i.privateIp, publicIp: i.publicIp, instanceId: i.manual ? undefined : i.instanceId, tags: Object.values(i.tags ?? {}) })),
+      apps: data.apps,
+      sites: (b?.tabs ?? []).filter((t) => /^https?:/.test(t.url || t.homeUrl || '')).map((t) => ({ id: t.id, title: t.name || t.title || hostOf(t.url || t.homeUrl || ''), url: t.url || t.homeUrl || '', space: t.spaceId })),
+      spaces: spaces.map((x) => ({ id: x.id, name: x.name })),
+      services: settings?.serviceCatalog?.length ? settings.serviceCatalog : DEFAULT_SERVICES,
+      accounts: data.profiles.filter((p) => p.enabled).map((p) => ({ profile: p.name, label: settings?.accountMeta?.[p.name]?.label ?? p.name })),
+      sections: RAIL_SECTIONS.map((sec) => ({ id: sec, name: SECTION_NAMES[sec] }))
+    }
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
+  const intents = useMemo(() => (query && !mode ? readIntent(query, intentCtx).slice(0, 6) : []), [query, mode, intentCtx])
+
+  /** Adds a task as the Tasks tab's quick add would (records:apply), from "remind me to …". */
+  const addTask = async (text: string): Promise<void> => {
+    const doc = await window.api.invoke('records:load', 'tasks')
+    const made = quickTask(text, itemsOf<Project>(doc, 'project'), itemsOf<Task>(doc, 'task'), Date.now(), () => newRecordId())
+    if (!made) throw new Error('Say what the task is.')
+    await window.api.invoke('records:apply', 'tasks', made.ops)
+    showNotice(`Task added: ${made.task.title}${made.task.date ? ` (${made.task.date}${made.task.time ? ` ${made.task.time}` : ''})` : ' (Inbox)'}`, 'ok')
+    setQ('')
+  }
+
+  /** Carries out what a sentence was read as. */
+  const runIntent = (it: Intent, id: string, alt = false): void => {
+    const fail = (e: Error): void => showNotice(e.message, 'err')
+    switch (it.kind) {
+      case 'connect': return inApp(id, { kind: 'connect', key: it.host.key, via: it.via === 'any' ? undefined : it.via })()
+      case 'files': return inApp(id, { kind: 'files', key: it.host.key })()
+      case 'power': return inApp(id, { kind: 'power', key: it.host.key, action: it.action })()
+      case 'forward': return inApp(id, { kind: 'forward', key: it.host.key, port: it.port })()
+      case 'service': return inApp(id, { kind: 'services', key: it.host.key })()
+      case 'run': return inApp(id, { kind: 'run', key: it.host.key, command: it.command || undefined })()
+      case 'details': return inApp(id, { kind: 'reveal', key: it.host.key })()
+      case 'url': return it.external || alt ? external(it.url)() : inApp(id, { kind: 'browse', url: it.url, space: it.space?.id })()
+      case 'site': return alt ? external(it.site.url)() : inApp(id, { kind: 'browse', url: it.site.url, space: it.site.space, tab: it.site.id })()
+      case 'console': return it.account ? inApp(id, { kind: 'console', profile: it.account.profile }) () : inApp(id, { kind: 'section', section: 'browser' })()
+      case 'app':
+        if (it.action === 'open') return openPath(id, it.app.path)()
+        void window.api.invoke('launcher:quitApp', it.app.path).catch(fail)
+        return
+      case 'section': return inApp(id, { kind: 'section', section: it.section as RailSection })()
+      case 'today': return inApp(id, { kind: 'today' })()
+      case 'layout':
+        if (wm && (!wm.helper || !wm.accessibility)) return allowWindows()
+        void (it.app ? window.api.invoke('wm:layoutApp', it.app.path, it.layout.id) : window.api.invoke('wm:layout', it.layout.id)).catch(() => undefined)
+        return
+      case 'ask': return inApp(id, { kind: 'ask', app: it.to, text: it.text })()
+      case 'search': return external(`https://www.google.com/search?q=${encodeURIComponent(it.text)}`)()
+      case 'capture':
+        window.api.invoke('notes:capture', it.text, it.task).then((path) => { showNotice(`Added to ${path.split('/').pop()}`, 'ok'); setQ('') }, fail)
+        return
+      case 'task': void addTask(it.text).catch(fail); return
+      case 'kill':
+        enterMode('processes')
+        setQ(it.name)
+        return
+      case 'quitAll': void window.api.invoke('launcher:quitAll').catch(() => undefined); return
+      case 'system': return system(id, it.action)()
+      case 'tool':
+        enterMode(it.tool)
+        if (it.query) setQ(it.query)
+        return
+    }
+  }
+  const intentIcon = (m: IntentMatch): ReactNode => {
+    const it = m.intent
+    switch (it.kind) {
+      case 'connect': return it.via === 'rdp' || (it.via === 'any' && it.host.platform === 'windows') ? <Icon.monitor /> : <Icon.terminal />
+      case 'files': return <Icon.folder />
+      case 'power': case 'quitAll': return <Icon.power />
+      case 'forward': return <Icon.plug />
+      case 'service': return <Icon.layers />
+      case 'run': return <Icon.broadcast />
+      case 'details': return <Icon.server />
+      case 'url': return <Favicon url={it.url} size={18} />
+      case 'site': return <Favicon url={it.site.url} size={18} />
+      case 'console': return <Icon.cloud />
+      case 'app': return <Icon.openTab />
+      case 'section': { const SecIcon = SECTION_ICONS[it.section as RailSection] ?? Icon.grid; return <SecIcon /> }
+      case 'today': case 'capture': return <Icon.note />
+      case 'layout': return <LayoutGlyph layout={it.layout} />
+      case 'ask': return it.to === 'claude' ? <Icon.claude /> : <Icon.chatgpt />
+      case 'search': return <Icon.search />
+      case 'task': return <Icon.tasks />
+      case 'kill': return <Icon.x />
+      case 'system': return MAC_COMMANDS.find((c) => c.action === it.action)?.icon ?? <Icon.settings />
+      case 'tool': return TOOL_MODES.find((t) => t.mode === it.tool)?.icon ?? <Icon.launcher />
+    }
+  }
+  const INTENT_TYPES: Partial<Record<Intent['kind'], string>> = {
+    connect: 'Host', files: 'Host', power: 'Host', forward: 'Host', service: 'Host', run: 'Host', details: 'Host', url: 'Web Page', site: 'Browser Tab', console: 'AWS Console',
+    app: 'Application', section: 'Section', today: 'Note', layout: 'Window', ask: 'AI', search: 'Web Search', capture: 'Note', task: 'Task', kill: 'Command', quitAll: 'Command', system: 'Command', tool: 'Command'
+  }
+  const intentRows: Row[] = intents.map((m, n): Row => {
+    const id = `do:${n}:${m.title}`
+    const it = m.intent
+    const host = 'host' in it ? it.host : undefined
+    const primary = it.kind === 'layout' ? (wm && (!wm.helper || !wm.accessibility) ? 'Allow Window Control…' : it.app ? `Open ${it.app.name} and Move It` : 'Move the Window') : m.title.replace(/…$/, '')
+    const actions: Action[] = [{ title: primary, key: 'enter', run: () => runIntent(it, id) }]
+    if (it.kind === 'url' && !it.external) actions.push({ title: 'Open in Your Browser', key: 'cmd+enter', run: () => runIntent(it, id, true) })
+    if (it.kind === 'site') actions.push({ title: 'Open in Your Browser', key: 'cmd+enter', run: () => runIntent(it, id, true) })
+    if (host) actions.push({ title: 'Show in Hosts', key: 'cmd+enter', run: inApp(id, { kind: 'reveal', key: host.key }) })
+    if (host?.privateIp) actions.push({ title: `Copy IP Address (${host.privateIp})`, key: 'shift+cmd+c', run: copy(host.privateIp) })
+    return { id, title: m.title, subtitle: m.subtitle, icon: intentIcon(m), iconPath: it.kind === 'app' ? it.app.path : undefined, type: INTENT_TYPES[it.kind], actions }
+  })
+
   const groups: Group[] = useMemo(() => {
     const now = Date.now()
     if (!query) {
@@ -485,6 +609,8 @@ export default function Launcher(): ReactElement {
       ].filter((g) => g.rows.length)
     }
     const out: Group[] = []
+    // What a sentence asks for comes first ("ssh to 3dspace1"), so ↩ does it.
+    if (intentRows.length) out.push({ title: 'Do This', rows: intentRows })
     // A quicklink's keyword comes first, so "aws" ↩ opens it.
     const keyword = quicklinkFor(query, links)
     if (keyword) out.push({ title: 'Quicklink', rows: [quicklinkRow(keyword.link, keyword.rest)] })
@@ -533,7 +659,10 @@ export default function Launcher(): ReactElement {
     middle.push({ title: 'Commands', rows: tools.rows.slice(0, 5), best: tools.best })
     const windows = rankRows(WINDOW_LAYOUTS.map(windowRow), query, data.usage, now)
     middle.push({ title: 'Window Management', rows: windows.rows.slice(0, 6), best: windows.best })
-    // Groups in the order of their best match (a stable sort keeps this order on ties).
+    // Groups in the order of their best match (a stable sort keeps this order on ties). A result the sentence already
+    // put first ("left half", "speed test") is not repeated further down.
+    const done = new Set(intentRows.map((r) => r.title))
+    for (const g of middle) g.rows = g.rows.filter((r) => !done.has(r.title))
     out.push(...middle.filter((g) => g.rows.length).sort((a, b) => (b.best ?? 0) - (a.best ?? 0)))
     const url = normalizeInput(query)
     const search: Row[] = []
@@ -551,7 +680,7 @@ export default function Launcher(): ReactElement {
     )
     out.push({ title: 'Search', rows: search })
     return out
-  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows, links, wm]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, data, files, notes, calc, conversion, jira, appRows, webRows, links, wm, intents]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const shownGroups = mode ? modeView.groups : groups
   const rows = useMemo(() => shownGroups.flatMap((g) => g.rows), [shownGroups])
@@ -658,13 +787,14 @@ export default function Launcher(): ReactElement {
             spellCheck={false}
             className={custom ? 'launcher-input-hidden' : ''}
             aria-label={mode ? MODES[mode].title : 'Search apps, files, hosts and commands'}
-            placeholder={mode ? MODES[mode].placeholder : 'Search for apps, files, hosts and commands…'}
+            placeholder={listening && listening.phase !== 'error' ? 'Listening… say “ssh to 3dspace one” or “open mainspringenergy.com”' : mode ? MODES[mode].placeholder : 'Search, or say what to do: “ssh to 3dspace1”, “open mainspringenergy.com”…'}
             value={q}
             readOnly={!!custom}
             onChange={(e) => { setQ(e.target.value); setPanel(null) }}
             onKeyDown={onKeyDown}
           />
           {q && !custom && <button type="button" className="launcher-clear" aria-label="Clear" onMouseDown={(e) => e.preventDefault()} onClick={() => setQ('')}><Icon.x /></button>}
+          {!custom && <MicButton className={`launcher-mic ${listening && listening.phase !== 'error' ? 'on' : ''}`} target={() => input.current} />}
           {!mode && (
             <button type="button" className="launcher-quickai" title="Ask Claude what is typed (⇥)" onMouseDown={(e) => e.preventDefault()}
               onClick={() => (query ? inApp('ask:claude', { kind: 'ask', app: 'claude', text: query })() : inApp('section:claude', { kind: 'section', section: 'claude' })())}>

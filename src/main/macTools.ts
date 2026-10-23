@@ -176,6 +176,15 @@ export async function quitAllApps(): Promise<number> {
   return quitApps(plan.apps.map((a) => a.pid))
 }
 
+/** Asks one open app to quit (as its Quit menu item would), by its bundle path. */
+export async function quitApp(path: string): Promise<void> {
+  const want = path.replace(/\/+$/, '')
+  const app = (await runningApps()).find((a) => a.path.replace(/\/+$/, '') === want)
+  if (!app) throw new Error(`${want.split('/').pop()?.replace(/\.app$/, '')} is not open.`)
+  host().launcher?.hide()
+  if (!(await quitApps([app.pid]))) throw new Error(`${app.name} did not quit.`)
+}
+
 /**
  * Puts `text` on the clipboard and presses ⌘V in the app in front (the launcher's emoji). Without the Accessibility
  * permission the text stays on the clipboard and the answer says so.

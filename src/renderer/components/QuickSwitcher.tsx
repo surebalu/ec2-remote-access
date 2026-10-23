@@ -1,17 +1,24 @@
 import { workspaceSummary } from '@shared/workspaces'
-import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from 'react'
 import { matchesHost } from '@shared/hostSearch'
+import { readIntent, type Intent, type IntentContext } from '@shared/intent'
+import { DEFAULT_SERVICES } from '@shared/services'
+import { quickTask, type Project, type Task } from '@shared/tasks'
+import { itemsOf, newRecordId } from '@shared/records'
+import { RAIL_SECTIONS, SECTION_NAMES } from '@shared/keyCombos'
+import { applyRecords } from '../records'
 import { consoleHome, hostOf, spaceIdForProfile } from '@shared/browser'
 import type { BrowserState, Instance, WebSpace } from '@shared/types'
 import { formatCombo, type ShortcutTarget } from '@shared/keyCombos'
 import { DESKTOP_TOOLS, filteredInstances, isSession, routeOf, TOOL_NAMES, useStore, visibleInstances, type Tab, type ToolKind, type WebTabInfo } from '../store'
-import { hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openSshFor } from '../quickConnect'
+import { consoleHomeFor, hasBrowser, openAccountConsole, openDefaultFor, openFilesFor, openRdpFor, openSshFor } from '../quickConnect'
 import { runSnippet, snippetsFor } from './TerminalTab'
 import { openHostNote } from './HostActions'
 import { isMobile } from '../mobile'
 import { APP_THEMES } from '../appThemes'
 import { openKeyboardSettings, openRadial, sectionKeyLabel, terminalAction } from '../shortcuts'
 import Modal from './Modal'
+import MicButton from './MicButton'
 import { Icon } from './icons'
 import { Favicon, SpaceAvatar } from './browser/parts'
 import { metaFor } from '../colors'
@@ -213,30 +220,89 @@ function besideResults(anchor: Tab, query: string, hosts: Instance[]): Result[] 
 
 const isSessionKind = (t: Tab): boolean => t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp'
 
-/** "start web", "stop web", "forward db", "ssh web", "files web": a verb followed by a host query. */
-function hostVerbs(q: string, hosts: Instance[]): Result[] {
-  const m = /^(start|stop|forward|port|ssh|files|sftp)\s+(.+)$/i.exec(q.trim())
-  if (!m) return []
-  const verb = m[1].toLowerCase()
+async function power(i: Instance, action: 'start' | 'stop'): Promise<void> {
   const s = useStore.getState()
-  const matches = hosts.filter((i) => matchesHost(i, m[2])).slice(0, 8)
-  const power = async (i: Instance, action: 'start' | 'stop'): Promise<void> => {
-    if (!window.confirm(`${action === 'start' ? 'Start' : 'Stop'} ${i.name} (${i.instanceId}) in ${i.profile}?`)) return
-    try {
-      await window.api.invoke(action === 'start' ? 'ec2:start' : 'ec2:stop', i.key)
-      s.toast('success', `${action === 'start' ? 'Starting' : 'Stopping'} ${i.name}. Rescan in a minute.`)
-    } catch (e) {
-      s.toast('error', (e as Error).message)
-    }
+  if (!window.confirm(`${action === 'start' ? 'Start' : 'Stop'} ${i.name} (${i.instanceId}) in ${i.profile}?`)) return
+  try {
+    await window.api.invoke(action === 'start' ? 'ec2:start' : 'ec2:stop', i.key)
+    s.toast('success', `${action === 'start' ? 'Starting' : 'Stopping'} ${i.name}. Rescan in a minute.`)
+  } catch (e) {
+    s.toast('error', (e as Error).message)
   }
-  return matches.flatMap((i): Result[] => {
-    const sub = `${i.profile} · ${i.region} · ${i.state}`
-    if (verb === 'start' && !i.manual && i.state === 'stopped') return [{ id: `start:${i.key}`, key: i.key, title: `Start ${i.name}`, subtitle: sub, icon: Icon.play, hint: 'Start', action: () => void power(i, 'start') }]
-    if (verb === 'stop' && !i.manual && i.state === 'running') return [{ id: `stop:${i.key}`, key: i.key, title: `Stop ${i.name}`, subtitle: sub, icon: Icon.x, hint: 'Stop…', action: () => void power(i, 'stop') }]
-    if ((verb === 'forward' || verb === 'port') && !i.manual && i.ssmOnline && i.state === 'running') return [{ id: `fwd:${i.key}`, key: i.key, title: `Forward a port on ${i.name}…`, subtitle: sub, icon: Icon.plug, hint: 'Forward', action: () => s.set({ portForwardFor: { key: i.key } }) }]
-    if (verb === 'ssh' && i.platform !== 'windows') return [{ id: `ssh:${i.key}`, key: i.key, title: `SSH to ${i.name}`, subtitle: sub, icon: Icon.terminal, hint: 'SSH', action: () => openSshFor(i.key) }]
-    if ((verb === 'files' || verb === 'sftp') && i.platform !== 'windows') return [{ id: `files:${i.key}`, key: i.key, title: `Files on ${i.name}`, subtitle: sub, icon: Icon.folder, hint: 'Files', action: () => openFilesFor(i.key) }]
-    return []
+}
+
+/** What the switcher does with a sentence (src/shared/intent.ts); the launcher handles the Mac's own (apps, windows). */
+const SWITCHER_INTENTS = new Set<Intent['kind']>(['connect', 'files', 'power', 'forward', 'service', 'run', 'details', 'url', 'site', 'console', 'section', 'today', 'ask', 'search', 'capture', 'task'])
+const INTENT_ICONS: Partial<Record<Intent['kind'], IconFn>> = {
+  files: Icon.folder, power: Icon.power, forward: Icon.plug, service: Icon.layers, run: Icon.broadcast, details: Icon.server, url: Icon.globe, site: Icon.globe,
+  console: Icon.cloud, section: Icon.grid, today: Icon.note, ask: Icon.claude, search: Icon.search, capture: Icon.note, task: Icon.tasks
+}
+const INTENT_TYPES: Partial<Record<Intent['kind'], string>> = {
+  connect: 'Host', files: 'Host', power: 'Host', forward: 'Host', service: 'Host', run: 'Host', details: 'Host', url: 'Web Page', site: 'Browser Tab',
+  console: 'AWS Console', section: 'Section', today: 'Note', ask: 'AI', search: 'Web Search', capture: 'Note', task: 'Task'
+}
+
+function runIntent(it: Intent, instances: Instance[]): void {
+  const s = useStore.getState()
+  const fail = (e: Error): void => s.toast('error', e.message)
+  const inst = 'host' in it ? instances.find((i) => i.key === it.host.key) : undefined
+  switch (it.kind) {
+    case 'connect':
+      if (it.via === 'ssh') openSshFor(it.host.key)
+      else if (it.via === 'rdp') void openRdpFor(it.host.key)
+      else if (inst && ['ssm', 'direct'].includes(routeOf(inst, s.settings).route)) openDefaultFor(it.host.key)
+      else s.revealHost(it.host.key)
+      return
+    case 'files': return openFilesFor(it.host.key)
+    case 'power': if (inst) void power(inst, it.action); return
+    case 'forward': return s.set({ portForwardFor: { key: it.host.key, remotePort: it.port } })
+    case 'service': return s.set({ servicesFor: { targets: [{ key: it.host.key }], title: it.host.name } })
+    case 'run': return s.set({ runCommandFor: { keys: [it.host.key], command: it.command || undefined } })
+    case 'details': return s.revealHost(it.host.key)
+    case 'url':
+      if (it.external || !hasBrowser()) void window.api.invoke('shell:open', it.url)
+      else s.openBrowser({ url: it.url, space: it.space?.id })
+      return
+    case 'site': return s.openBrowser({ tab: it.site.id })
+    case 'console': return it.account ? openAccountConsole(it.account.profile, consoleHomeFor(it.account.profile)) : s.openBrowser()
+    case 'section':
+      if (it.section === 'hosts') s.setActive('hosts')
+      else if (it.section === 'overview') s.showGrid(true)
+      else s.openTool(it.section as ToolKind)
+      return
+    case 'today': void window.api.invoke('notes:daily').then((p) => s.openNotes(p), fail); return
+    case 'ask': return s.askAssistant(it.to, it.text)
+    case 'search': {
+      const url = `https://www.google.com/search?q=${encodeURIComponent(it.text)}`
+      if (hasBrowser()) s.openBrowser({ url })
+      else void window.api.invoke('shell:open', url)
+      return
+    }
+    case 'capture': void window.api.invoke('notes:capture', it.text, it.task).then((p) => s.toast('success', `Added to ${p.split('/').pop()}`), fail); return
+    case 'task':
+      void window.api.invoke('records:load', 'tasks').then(async (doc) => {
+        const made = quickTask(it.text, itemsOf<Project>(doc, 'project'), itemsOf<Task>(doc, 'task'), Date.now(), () => newRecordId())
+        if (!made) return
+        await applyRecords('tasks', made.ops)
+        s.toast('success', `Task added: ${made.task.title}`)
+      }).catch(fail)
+      return
+    default: return
+  }
+}
+
+/** The rows a sentence reads as: "ssh to 3dspace1 in qa", "open mainspringenergy.com", "remind me to …". */
+function intentResults(query: string, ctx: IntentContext, instances: Instance[]): Result[] {
+  return readIntent(query, ctx).filter((m) => SWITCHER_INTENTS.has(m.intent.kind)).slice(0, 6).map((m, n): Result => {
+    const it = m.intent
+    const host = 'host' in it ? it.host : undefined
+    const icon: IconFn = it.kind === 'connect' ? (it.via === 'rdp' || (it.via === 'any' && it.host.platform === 'windows') ? Icon.monitor : Icon.terminal)
+      : it.kind === 'ask' && it.to === 'chatgpt' ? Icon.chatgpt : INTENT_ICONS[it.kind] ?? Icon.launcher
+    const url = it.kind === 'url' ? it.url : it.kind === 'site' ? it.site.url : ''
+    return {
+      id: `do:${n}:${m.title}`, title: m.title, subtitle: m.subtitle ?? '', key: host?.key, icon, image: url ? <Favicon url={url} size={16} /> : undefined,
+      hint: m.title.replace(/…$/, ''), type: INTENT_TYPES[it.kind], action: () => runIntent(it, instances)
+    }
   })
 }
 
@@ -266,6 +332,14 @@ export default function QuickSwitcher(): ReactElement {
   }
   const sites = s.webTabs ?? savedWebTabs(saved, spaceName)
   const spaces = s.webSpaces ?? savedSpaces(saved, s.profiles, s.settings)
+  const intentCtx: IntentContext = useMemo(() => ({
+    hosts: visible.map((i) => ({ key: i.key, name: i.name, platform: i.platform, profile: i.profile, account: i.manual ? (i.profile === 'servers' ? 'Server' : i.profile) : s.settings?.accountMeta?.[i.profile]?.label ?? i.profile, region: i.manual ? undefined : i.region, state: i.manual ? 'running' : i.state, privateIp: i.privateIp, publicIp: i.publicIp, instanceId: i.manual ? undefined : i.instanceId, tags: Object.values(i.tags ?? {}) })),
+    sites: sites.map((t) => ({ id: t.id, title: t.title, url: t.url, space: t.space })),
+    spaces: spaces.map((x) => ({ id: x.id, name: x.name })),
+    services: s.settings?.serviceCatalog?.length ? s.settings.serviceCatalog : DEFAULT_SERVICES,
+    accounts: s.profiles.filter((p) => p.enabled).map((p) => ({ profile: p.name, label: s.settings?.accountMeta?.[p.name]?.label ?? p.name })),
+    sections: RAIL_SECTIONS.map((sec) => ({ id: sec, name: SECTION_NAMES[sec] }))
+  }), [visible, sites, spaces, s.settings, s.profiles]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cmdResults: Result[] = commands()
     .filter((c) => !q || fuzzy(`${c.title} ${c.keywords ?? ''}`, q))
@@ -294,7 +368,7 @@ export default function QuickSwitcher(): ReactElement {
     // Sites whose Browser tab is not open here (a detached Browser, or the Browser closed since): still listed.
     const orphanSites = tabs.some((t) => t.kind === 'browser') ? [] : siteGroups(siteHits, spaces, q).map((x) => ({ ...x, nested: x.nested === 2 ? 1 as const : undefined }))
     results = [
-      ...hostVerbs(query, visible),
+      ...intentResults(query, intentCtx, visible),
       ...tabResults,
       ...orphanSites,
       ...hosts.map((i) => {
@@ -329,7 +403,7 @@ export default function QuickSwitcher(): ReactElement {
     ...(current.more ?? []).map((a) => ({ ...a, run: () => { close(); a.run() } }))
   ] : []
   const hasBrowserTab = results.some((r) => r.id.startsWith('tab:') && results[results.indexOf(r) + 1]?.id.startsWith('space:'))
-  const groupOf = (r: Result): string => r.id.startsWith('cmd:') ? 'Commands' : r.id.startsWith('tool:') ? 'Tools'
+  const groupOf = (r: Result): string => r.id.startsWith('do:') ? 'Do This' : r.id.startsWith('cmd:') ? 'Commands' : r.id.startsWith('tool:') ? 'Tools'
     : /^(start|stop|fwd|ssh|files):/.test(r.id) ? 'Actions' : r.id.startsWith('tab:') ? 'Open Tabs'
       : /^(space|site):/.test(r.id) ? (hasBrowserTab ? 'Open Tabs' : 'Browser') : beside ? 'Hosts' : 'Hosts'
   const typeOf = (r: Result): string => r.type ?? (r.id.startsWith('tool:') ? 'Tool' : r.id.startsWith('space:') ? 'Space' : r.id.startsWith('site:') ? 'Site' : r.id.startsWith('tab:') ? 'Tab' : /^(start|stop|fwd|ssh|files):/.test(r.id) ? 'Action' : 'Host')
@@ -341,7 +415,7 @@ export default function QuickSwitcher(): ReactElement {
       <div className="launcher-search">
         <span className="launcher-logo" aria-hidden="true">{commandMode ? '>' : beside ? <Icon.split /> : <>&gt;_</>}</span>
         <input ref={inputRef} autoFocus spellCheck={false} aria-label="Find a host or open session" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={results.length ? `${listId}-${index}` : undefined}
-          placeholder={beside ? 'A host, an open tab or a tool to show beside it…' : commandMode ? 'Search commands and tools…' : 'Find a host, IP, account, tag, session or site…'} value={query} onChange={(e) => setQuery(e.target.value)}
+          placeholder={beside ? 'A host, an open tab or a tool to show beside it…' : commandMode ? 'Search commands and tools…' : 'Find a host, session or site, or say what to do: “ssh to 3dspace1”…'} value={query} onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             const plain = !e.metaKey && !e.ctrlKey && !e.altKey
             if (panel !== null) {
@@ -365,6 +439,7 @@ export default function QuickSwitcher(): ReactElement {
             if (e.key === 'Enter' && plain) { e.preventDefault(); activate(index, e.shiftKey) }
             if (e.key === 'Backspace' && query === '>') { e.preventDefault(); setQuery('') }
           }} />
+        <MicButton className="launcher-mic" target={() => inputRef.current} />
         {!beside && (
           <button type="button" className="launcher-quickai" title={commandMode ? 'Back to hosts and sessions' : 'Commands and tools (type >)'} onMouseDown={(e) => e.preventDefault()} onClick={toggleMode}>
             {commandMode ? 'Hosts & Sessions' : 'Commands'} <kbd className="launcher-cap">{commandMode ? '⌫' : '>'}</kbd>

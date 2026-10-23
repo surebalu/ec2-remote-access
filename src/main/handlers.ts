@@ -40,7 +40,7 @@ import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } fr
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
-import { downloads, killProcess, networkInfo, pasteText, processes, quitAllApps, speedStatus, startSpeedTest } from './macTools'
+import { downloads, killProcess, networkInfo, pasteText, processes, quitAllApps, quitApp, speedStatus, startSpeedTest } from './macTools'
 import { control, controlPath, controlStatus, NO_HELPER } from './macControl'
 import type { MacCalendar, MacEvent } from '@shared/calendar'
 import { aiReport, installersReport, junkReport, packageReceipts, systemCards } from './storage/cleanup'
@@ -305,12 +305,19 @@ export const handlers: Handlers = {
   'launcher:downloads': () => downloads(),
   'launcher:quitAll': () => quitAllApps(),
   'launcher:paste': (text) => pasteText(String(text ?? '')),
+  'launcher:quitApp': (path) => quitApp(String(path ?? '')),
   'wm:status': async () => ({ ...(await controlStatus()), keys: host().mac?.hotkeys() ?? [] }),
   'wm:layout': async (id) => {
     const mac = host().mac
     if (!mac) throw new Error('Window layouts need the Mac app.')
     host().launcher?.hide()
     await mac.layout(String(id))
+  },
+  'wm:layoutApp': async (path, id) => {
+    const mac = host().mac
+    if (!mac) throw new Error('Window layouts need the Mac app.')
+    host().launcher?.hide()
+    await mac.layoutApp(String(path), String(id))
   },
   'wm:askAccess': async () => !!(await control<boolean>('askAccessibility', {}, 15_000)),
   'wm:openPrivacy': async (pane) => host().mac?.openPrivacy(pane === 'calendars' ? 'calendars' : 'accessibility'),

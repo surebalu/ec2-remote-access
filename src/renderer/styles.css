@@ -1866,6 +1866,11 @@ html.launcher-page, html.launcher-page body { background: transparent; }
 .launcher-clear { display: inline-flex; padding: 4px; border-radius: 50%; color: var(--muted); }
 .launcher-clear:hover { background: var(--l-hover); color: var(--text); }
 .launcher-clear svg { width: 12px; height: 12px; }
+.launcher-mic { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; color: var(--muted); }
+.launcher-mic:hover { background: var(--l-hover); color: var(--text); }
+.launcher-mic svg { width: 16px; height: 16px; }
+.launcher-mic.on, .launcher-mic[aria-pressed='true'] { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); animation: launcher-listen 1.4s ease-in-out infinite; }
+@keyframes launcher-listen { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--err) 14%, transparent); } }
 .launcher-quickai { display: inline-flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 7px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .launcher-quickai:hover { background: var(--l-hover); color: var(--text); }
 .launcher-cap { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--text) 16%, transparent); border-radius: 5px; background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text-2); font: 500 11px/1 var(--ui-font); }

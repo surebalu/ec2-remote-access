@@ -345,6 +345,8 @@ export interface IpcApi {
   'launcher:downloads': () => Promise<DownloadItem[]>
   /** Asks every open app but Finder and this one to quit, after saying which; how many accepted. */
   'launcher:quitAll': () => Promise<number>
+  /** Asks one app (by its bundle path) to quit, as its Quit menu item would. */
+  'launcher:quitApp': (path: string) => Promise<void>
   /** Puts text on the clipboard and pastes it into the app in front (needs Accessibility; else it is only copied). */
   'launcher:paste': (text: string) => Promise<'pasted' | 'copied'>
   /**
@@ -354,6 +356,8 @@ export interface IpcApi {
   'wm:status': () => Promise<{ helper: boolean; accessibility: boolean; calendar: string; keys: { id: string; combo: string; registered: boolean }[] }>
   /** Moves the window in front to a layout (src/shared/windowLayouts.ts). */
   'wm:layout': (id: string) => Promise<void>
+  /** Opens (or brings forward) an app, then moves its window to a layout: "put slack on the right third". */
+  'wm:layoutApp': (path: string, id: string) => Promise<void>
   /** macOS's question for the Accessibility permission (from a click); whether it is on now. */
   'wm:askAccess': () => Promise<boolean>
   'wm:openPrivacy': (pane: 'accessibility' | 'calendars') => Promise<void>
