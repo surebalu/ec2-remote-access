@@ -207,6 +207,11 @@ const SVC_ALIGNED = `(() => {
   }
 })()`
 const ALL_ALIGNED = { inside: true, buttons: true, units: true, states: true, groupButton: true, sideways: true }
+// Health's server rows: the buttons (Services, SSH, info) stay right of Up for and inside the row.
+const SRV_CLEAR = `[...document.querySelectorAll('.hl-srv:not(.off)')].every((r) => {
+  const up = r.querySelector('[data-label="Up for"] .hl-srv-num'), acts = [...r.querySelector('.hl-srv-actions').children].map((c) => c.getBoundingClientRect())
+  return !up || !acts.length || (Math.min(...acts.map((a) => a.left)) >= up.getBoundingClientRect().right + 4 && Math.max(...acts.map((a) => a.right)) <= r.getBoundingClientRect().right)
+})`
 // Tools in windows of their own (main/toolWindows.ts): which are out.
 let toolsOut = []
 // Settings → Data: the data folder's state as main/dataFolder.ts reports it.
@@ -1010,6 +1015,14 @@ app.whenReady().then(async () => {
     const clickHex = (sel) => js(`(() => { const g = document.querySelector('${sel}'); g.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true })); g.dispatchEvent(new MouseEvent('click', { bubbles: true })) })()`)
     await clickHex('.hl-hive.http .hl-hex[data-ip="10.9.0.12"]')
     await until(`!!document.querySelector('.hl-srv.lit[data-ip="10.9.0.12"]') && !document.querySelector('.hl-hex-tip')`)
+    assert.ok(await js(`document.querySelectorAll('.hl-srv-actions .hl-btn').length > 0`), 'server rows have Services and SSH buttons')
+    assert.equal(await js(SRV_CLEAR), true, 'server row buttons clear of Up for (wide)')
+    win.setSize(1080, 900)
+    await new Promise((r) => setTimeout(r, 300))
+    assert.equal(await js(SRV_CLEAR), true, 'server row buttons clear of Up for (narrower: icons only)')
+    assert.equal(await js(`getComputedStyle(document.querySelector('.hl-srv-actions .hl-btn-label')).display`), 'none', 'labels fold away when narrower')
+    win.setSize(1400, 900)
+    await new Promise((r) => setTimeout(r, 300))
     await clickHex('.hl-hive.alb .hl-hex.lvl-crit')
     await until(`document.querySelector('.hl').dataset.flash === 'services'`)
     // Lighting up one status from the legend dims the rest of that comb.

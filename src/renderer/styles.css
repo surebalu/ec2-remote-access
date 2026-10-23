@@ -2191,7 +2191,14 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
 .hl-row-num span { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
 .hl-storage-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(90px, 1fr) minmax(120px, auto); gap: 18px; }
 .hl-storage-row.lvl-warn .hl-row-num strong, .hl-storage-row.lvl-crit .hl-row-num strong { color: var(--lvl); }
-.hl-servers { --srv-cols: minmax(190px, 2.2fr) repeat(3, minmax(84px, 1fr)) minmax(56px, .55fr) minmax(56px, .55fr) 108px; }
+.hl-servers { --srv-cols: minmax(190px, 2.2fr) repeat(3, minmax(84px, 1fr)) minmax(56px, .55fr) minmax(64px, .55fr) 190px; }
+/* Services, SSH and the info button need 190 px; with less room their labels go (the tooltips say what they do) rather
+   than the buttons spilling over Up for, which they did in a 108 px column. */
+@container (max-width: 1060px) {
+  .hl-servers { --srv-cols: minmax(170px, 2.2fr) repeat(3, minmax(76px, 1fr)) minmax(52px, .55fr) minmax(64px, .55fr) 104px; }
+  .hl-srv-actions .hl-btn-label { display: none; }
+  .hl-srv-actions .hl-btn.sm { padding: 3px 7px; }
+}
 .hl-srv-head { display: grid; grid-template-columns: var(--srv-cols); gap: 14px; padding: 6px 14px 8px; color: var(--muted); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .hl-srv { display: grid; grid-template-columns: var(--srv-cols); gap: 14px; }
 .hl-srv.off { opacity: .6; }
@@ -2343,6 +2350,7 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
   .hl-srv-wide { grid-column: 1 / -1; }
   .hl-srv-cell::before { content: attr(data-label); color: var(--muted); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
   .hl-srv-actions { grid-column: 1 / -1; justify-content: flex-start; opacity: 1; }
+  .hl-srv-actions .hl-btn-label { display: inline; }
   .hl-storage-row { grid-template-columns: minmax(0, 1fr) auto; }
   .hl-storage-row .hl-bar { grid-column: 1 / -1; grid-row: 2; }
   .hl-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
