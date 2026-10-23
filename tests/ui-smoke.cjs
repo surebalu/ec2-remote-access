@@ -4,6 +4,8 @@ const http = require('node:http')
 const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
+// An error that escapes is printed and fails the run; Electron's own handler would leave a dialog on the desktop.
+process.on('uncaughtException', (e) => { console.error(e); app.exit(1) })
 const assert = require('node:assert/strict')
 const workspacePreview = process.argv.includes('--workspace-preview')
 const output = mkdtempSync(join(tmpdir(), 'ec2ra-ui-'))
@@ -184,6 +186,17 @@ let voiceRefusal = null
 const voiceSend = (run, ev) => { if ((!run.cancelled || ev.kind === 'end') && !run.sender.isDestroyed()) run.sender.send('voice:event', { id: run.id, ...ev }) }
 // Whiteboards main has saved (boards:*), and the images added to notes.
 const boardsSaved = {}
+// Tasks, Calendar and Links documents (main/records.ts), Anybox's library on "this Mac", a page preview and an iCal link.
+const recordDocs = {}
+const anyboxFixture = [
+  { kind: 'link', url: 'https://grafana.example.com/d/prod', title: 'Grafana — production', description: 'Dashboards', folder: ['Work', 'Monitoring'], tags: ['ops', 'prod'], starred: true, addedAt: 1760000000000, note: 'the main board' },
+  { kind: 'link', url: 'https://docs.aws.amazon.com/', title: 'AWS documentation', folder: ['Work'], tags: ['aws'], addedAt: 1760000100000, keyword: 'awsdocs' },
+  { kind: 'link', url: 'https://news.ycombinator.com/', title: 'Hacker News', tags: ['reading'], addedAt: 1760000200000 },
+  { kind: 'note', title: 'Wifi at the office', text: 'guest / network', folder: ['Work'], addedAt: 1760000300000 }
+]
+const pad2 = (n) => String(n).padStart(2, '0')
+const icsDay = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`
+const FIXTURE_ICS = ['BEGIN:VCALENDAR', 'X-WR-CALNAME:Team', 'BEGIN:VEVENT', 'UID:team-1', `DTSTART;VALUE=DATE:${icsDay(new Date())}`, `DTEND;VALUE=DATE:${icsDay(new Date(Date.now() + 86400000))}`, 'SUMMARY:Team offsite', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n')
 const noteImages = []
 const shells = new Map()
 const termOut = (sh, data) => { if (!sh.sender.isDestroyed()) sh.sender.send('term:event', { id: sh.id, type: 'data', data }) }
@@ -344,6 +357,15 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     // A remote desktop that stays "connecting": the viewer is on the page, which is all the keyboard check needs.
     case 'rdp:prepare': return new Promise(() => undefined)
     case 'rdp:release': return
+    case 'records:load': return structuredClone(recordDocs[args[0]] ?? { rev: 0, items: {} })
+    case 'records:apply': {
+      const d = (recordDocs[args[0]] ??= { rev: 0, items: {} })
+      for (const o of args[1]) { if (o.op === 'delete') delete d.items[o.id]; else d.items[o.item.id] = structuredClone(o.item) }
+      return ++d.rev
+    }
+    case 'links:anybox': return { links: structuredClone(anyboxFixture), skippedFiles: 2, source: '/fixture/Anybox.sqlite' }
+    case 'links:preview': return { title: 'Fixture page title', description: 'A page about fixtures.' }
+    case 'calendar:feed': return FIXTURE_ICS
     case 'boards:list': return Object.values(boardsSaved).map((b) => ({ id: b.id, name: b.name, updatedAt: b.updatedAt, items: b.items.length })).sort((a, b) => b.updatedAt - a.updatedAt)
     case 'boards:load': return boardsSaved[args[0]] ? structuredClone(boardsSaved[args[0]]) : null
     case 'boards:save': boardsSaved[args[0].id] = structuredClone(args[0]); return
@@ -638,6 +660,95 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('#dev-input').value`), '', 'closing a tool tab discards its transient input')
     await key('w', { metaKey: true })
     await click('Hosts')
+    // Tasks: the quick-add box reads dates, a new project, tags and priority; completing keeps the row until the
+    // view changes; the editor; Upcoming and the Logbook.
+    const nav = (label) => js(`(() => { const b = [...document.querySelectorAll('.plan-nav')].find((x) => x.getClientRects().length && x.querySelector('.plan-nav-label')?.textContent === ${JSON.stringify(label)}); if (!b) throw new Error('Missing list: ' + ${JSON.stringify(label)}); b.click() })()`)
+    const submit = (form, input, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(input)}); el.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })); })()`).then(() => js(`document.querySelector(${JSON.stringify(form)}).requestSubmit()`))
+    await js(`document.querySelector('.app-rail [aria-label="Tasks"]').click()`)
+    await until(`!!document.querySelector('.plan.tasks')`)
+    await nav('Today')
+    await setInput('.tasks-add-input', 'Review PR tomorrow 3pm #Platform @code p1')
+    await until(`[...document.querySelectorAll('.tasks-add-found .plan-chip')].map((c) => c.textContent).join(' ') === 'tomorrow 3pm #Platform @code P1'`)
+    await js(`document.querySelector('.tasks-add').requestSubmit()`)
+    await until(`[...document.querySelectorAll('.plan-nav-label')].some((l) => l.textContent === 'Platform')`)
+    await submit('.tasks-add', '.tasks-add-input', 'Water the plants')
+    await submit('.tasks-add', '.tasks-add-input', 'Renew the certificate today !1 @ops')
+    await until(`document.querySelectorAll('.task-row').length === 2`)
+    assert.deepEqual(await js(`[...document.querySelectorAll('.task-row .task-title')].map((t) => t.textContent)`), ['Renew the certificate', 'Water the plants'], 'priority first')
+    await js(`[...document.querySelectorAll('.task-row')].find((r) => r.textContent.includes('Water')).querySelector('.task-check').click()`)
+    await until(`document.querySelector('.task-row.done')?.textContent.includes('Water')`)
+    await screenshot('tasks-today.png')
+    await nav('Upcoming')
+    await until(`[...document.querySelectorAll('.task-row')].some((r) => r.textContent.includes('Review PR') && r.textContent.includes('Tomorrow 3 PM') && r.textContent.includes('#code') && r.textContent.includes('Platform'))`)
+    await js(`[...document.querySelectorAll('.task-row')].find((r) => r.textContent.includes('Review PR')).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await until(`!!document.querySelector('.task-edit')`)
+    await js(`(() => { const t = document.querySelector('.task-edit-notes'); t.focus(); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, 'Check the migration'); t.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await screenshot('tasks-editor.png')
+    await click('Done')
+    await until(`!document.querySelector('.task-edit')`)
+    const taskSaved = () => Object.values(recordDocs.tasks.items).some((t) => t.title === 'Review PR' && t.notes === 'Check the migration' && t.priority === 1 && t.tags?.includes('code'))
+    for (let i = 0; i < 50 && !taskSaved(); i++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(taskSaved(), 'the editor saved the notes')
+    await nav('Logbook')
+    await until(`[...document.querySelectorAll('.task-row')].some((r) => r.textContent.includes('Water the plants'))`)
+    await nav('Today')
+    await until(`document.querySelectorAll('.task-row').length === 1`)
+    // Calendar: tasks on their days, an event from the quick-add box, the week view, and an iCal subscription.
+    await js(`document.querySelector('.app-rail [aria-label="Calendar"]').click()`)
+    await until(`!!document.querySelector('.plan.calendar .cal-month')`)
+    await until(`[...document.querySelectorAll('.cal-chip.task')].some((c) => c.textContent.includes('Renew the certificate'))`)
+    await submit('.cal-add', '.cal-add .tasks-add-input', 'Lunch with Sam today 12:30')
+    await until(`[...document.querySelectorAll('.cal-chip')].some((c) => c.textContent.includes('Lunch with Sam'))`)
+    assert.ok(Object.values(recordDocs.calendar.items).some((c) => c.type === 'calendar' && c.name === 'Personal'), 'the first event makes a Personal calendar')
+    await screenshot('calendar-month.png')
+    await click('Week')
+    await until(`[...document.querySelectorAll('.cal-block')].some((b) => b.textContent.includes('Lunch with Sam') && b.textContent.includes('12:30 PM – 1:30 PM'))`)
+    await screenshot('calendar-week.png')
+    await js(`[...document.querySelectorAll('.cal-block')].find((b) => b.textContent.includes('Lunch')).click()`)
+    await until(`document.querySelector('.cal-edit-title')?.value === 'Lunch with Sam'`)
+    await js(`(() => { const el = document.querySelector('.cal-edit input[aria-label="Location"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'Cafe'); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await click('Save')
+    await until(`[...document.querySelectorAll('.cal-block')].some((b) => b.textContent.includes('Cafe'))`)
+    await js(`[...document.querySelectorAll('.plan-nav')].find((b) => b.textContent.includes('Subscribe to a calendar')).click()`)
+    await setInput('.cal-edit input[aria-label="iCal link"]', 'webcal://calendar.example.com/team.ics')
+    await click('Check link')
+    await until(`document.querySelector('.cal-sub-ok')?.textContent.includes('Found 1 event')`)
+    await click('Subscribe')
+    await until(`[...document.querySelectorAll('.cal-allday-col .cal-chip')].some((c) => c.textContent.includes('Team offsite'))`)
+    await click('Month')
+    // Links: importing from Anybox (folders, tags, a note), search with a keyword, adding a link by its address.
+    await js(`document.querySelector('.app-rail [aria-label="Links"]').click()`)
+    await until(`!!document.querySelector('.links-welcome')`)
+    await click('Import from Anybox')
+    await until(`document.querySelector('.links-import')?.textContent.includes('4 new (3 links and 1 notes read)') && document.querySelector('.links-import').textContent.includes('2 new folders')`)
+    await js(`document.querySelector('.links-import .btn-primary').click()`)
+    await until(`document.querySelectorAll('.link-row').length === 4`)
+    assert.deepEqual(await js(`[...document.querySelectorAll('.plan.links .plan-nav .plan-nav-label')].map((l) => l.textContent).filter((t) => ['Work', 'Monitoring'].includes(t))`), ['Work', 'Monitoring'], 'nested folders from Anybox')
+    await screenshot('links.png')
+    await setInput('.links-search input', 'awsdocs')
+    await until(`document.querySelectorAll('.link-row').length === 1 && document.querySelector('.link-row').textContent.includes('AWS documentation')`)
+    await setInput('.links-search input', '')
+    await nav('Monitoring')
+    await until(`document.querySelectorAll('.link-row').length === 1`)
+    await js(`document.querySelector('.link-row').click()`)
+    await until(`!!document.querySelector('.link-detail') && document.querySelector('.link-detail').textContent.includes('Dashboards')`)
+    await screenshot('links-detail.png')
+    await nav('All Links')
+    await key('n', { metaKey: true })
+    await until(`document.activeElement?.getAttribute('aria-label') === 'New link or note'`)
+    await js(`(() => { const el = document.activeElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'example.org/fixture'); el.closest('form').requestSubmit() })()`)
+    await until(`[...document.querySelectorAll('.link-row')].some((r) => r.textContent.includes('Fixture page title') && r.textContent.includes('example.org'))`)
+    win.setSize(680, 760)
+    await new Promise((r) => setTimeout(r, 150))
+    await screenshot('links-narrow.png')
+    win.setSize(1400, 900)
+    // Close the three again (their data stays in the stub); the saved-work checks below expect no open tabs.
+    for (const tool of ['Links', 'Calendar', 'Tasks']) {
+      await js(`document.querySelector('.app-rail [aria-label="${tool}"]').click()`)
+      await key('w', { metaKey: true })
+      await until(`!document.querySelector('.plan.${tool.toLowerCase()}')`)
+    }
+    await click('Hosts')
     // Workspace modules: keyboard access, actionable failures, saved work, freshness and constrained layouts.
     const workspaceTab = (name) => js(`document.getElementById('workspace-tab-' + ${JSON.stringify(name)}).click()`)
     assert.equal(calls.filter((c) => c.channel === 'health:snapshot').length, 0, 'overview does not start platform polling')
@@ -650,7 +761,7 @@ app.whenReady().then(async () => {
     await key('ArrowRight')
     await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
     assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
-    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 9)
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 12)
     await screenshot('workspace-tools.png')
     await workspaceTab('saved-work')
     await until(`!!document.querySelector('[aria-label="Search saved work"]')`)
@@ -936,7 +1047,7 @@ app.whenReady().then(async () => {
     const keyUp = () => js(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true, cancelable: true }))`)
     await js(`document.dispatchEvent(new PointerEvent('pointermove', { clientX: 760, clientY: 470, bubbles: true }))`)
     await radialKey()
-    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 15`)
+    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 18`)
     assert.ok(await js(`document.querySelector('.radial-item.here').dataset.radial === 'hosts' && document.querySelector('.radial-center strong').textContent === 'Hosts'`), 'it starts on the section in front')
     assert.equal(await js(`document.activeElement === document.querySelector('.radial')`), true, 'the ring takes the keyboard')
     await new Promise((r) => setTimeout(r, 400))

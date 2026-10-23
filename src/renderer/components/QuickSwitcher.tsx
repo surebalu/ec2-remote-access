@@ -59,6 +59,9 @@ function commands(): Command[] {
     { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', hint: keyOf('browser'), icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
     { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', hint: keyOf('finder'), icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
     { id: 'health', title: 'Open health', keywords: '3dexperience platform status monitoring prometheus grafana metrics alerts', hint: keyOf('health'), icon: Icon.health, run: () => s.openTool('health') },
+    { id: 'tasks', title: 'Open tasks', keywords: 'todo to-do things todoist reminders today upcoming projects checklist', hint: keyOf('tasks'), icon: Icon.tasks, run: () => s.openTool('tasks') },
+    { id: 'calendar', title: 'Open calendar', keywords: 'events schedule agenda meetings month week ical', hint: keyOf('calendar'), icon: Icon.calendar, run: () => s.openTool('calendar') },
+    { id: 'links', title: 'Open links', keywords: 'bookmarks anybox saved pages urls reading list', hint: keyOf('links'), icon: Icon.bookmark, run: () => s.openTool('links') },
     { id: 'devtools', title: 'Open developer tools', keywords: 'json format minify base64 encode decode url jwt uuid timestamp hash sha256 utilities', icon: Icon.code, run: () => s.openTool('devtools') },
     { id: 'board', title: 'Open whiteboard', keywords: 'scratch pad draw sketch brainstorm presentify canvas', hint: keyOf('board'), icon: Icon.board, run: () => s.openBoard() },
     { id: 'claude', title: 'Open Claude', keywords: 'ai assistant chat anthropic llm ask', hint: keyOf('claude'), icon: Icon.claude, run: () => s.openTool('claude') },
@@ -117,7 +120,7 @@ function commands(): Command[] {
 
 const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
-const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code }
+const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark }
 const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
 
 /**

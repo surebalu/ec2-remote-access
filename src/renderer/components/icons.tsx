@@ -487,6 +487,15 @@ export const Icon = {
     </svg>
   ),
   /** A clock turning back: command history. */
+  tasks: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><circle cx="12" cy="12" r="9" fill="currentColor" fillOpacity=".08" /><path d="m8 12.3 2.7 2.7L16.5 9" /></svg>
+  ),
+  calendar: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="currentColor" fillOpacity=".08" /><path d="M3.5 10h17M8 3v4m8-4v4M8 14h2m3 0h3m-8 3h2" /></svg>
+  ),
+  bookmark: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4.5L5.5 21V4.5a1 1 0 0 1 1-1z" fill="currentColor" fillOpacity=".08" /></svg>
+  ),
   history: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4h4M12 8v4.2l2.8 1.8" />

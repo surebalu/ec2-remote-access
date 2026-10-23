@@ -64,8 +64,10 @@ export interface BrowserRequest {
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
-export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health' | 'devtools'
-export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools' }
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links'
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links' }
+/** Tools that are one tab with nothing in main to open or close: shown as they are, on every device. */
+const PLAIN_TOOLS: readonly ToolKind[] = ['health', 'devtools', 'tasks', 'calendar', 'links']
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
 export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'claude', 'chatgpt']
 const inElectron = /\bElectron\//.test(navigator.userAgent)
@@ -395,9 +397,9 @@ export const useStore = create<State>((set, get) => ({
     else if (kind === 'notes') s.openNotes()
     else if (kind === 'finder') s.openFinder()
     else if (kind === 'board') s.openBoard()
-    else if (kind === 'health' || kind === 'devtools') s.setActive(s.toolTab(kind))
+    else if (PLAIN_TOOLS.includes(kind)) s.setActive(s.toolTab(kind))
     else if (inElectron) s.setActive(s.toolTab(kind))
-    else void window.api.invoke('shell:open', WEB_APPS[kind].home)
+    else void window.api.invoke('shell:open', WEB_APPS[kind as WebAppKind].home)
   },
   webAppRequest: null,
   askAssistant: (kind, text) => {
@@ -525,7 +527,7 @@ export const useStore = create<State>((set, get) => ({
         } else if (context.kind === 'browser') tools.push({ id: t.id, kind: 'browser', browser: captureBrowser(context.browser, options.browserTabs) })
         else tools.push({ ...context, id: t.id })
       } else if (t.kind === 'notes') tools.push({ id: t.id, kind: 'notes', path: t.notesPath })
-      else tools.push({ id: t.id, kind: t.kind as 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' })
+      else tools.push({ id: t.id, kind: t.kind as 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' })
     }
     const cur = state.settings?.workspaces ?? []
     const existing = cur.find((w) => w.name.toLowerCase() === name.trim().toLowerCase())
@@ -993,7 +995,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'health' || tab?.kind === 'devtools' || (tab && isWebApp(tab.kind))) { /* nothing in main to close: they save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || (tab && (PLAIN_TOOLS.includes(tab.kind as ToolKind) || isWebApp(tab.kind)))) { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)
