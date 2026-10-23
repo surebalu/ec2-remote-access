@@ -361,8 +361,11 @@ html[data-sidebar="collapsed"] .titlebar .brand-name { display: none; }
 .host-details { width: 330px; flex-shrink: 0; border-color: var(--border); }
 .detail-value:hover { color: var(--accent); }
 .switcher-result { display: flex; width: 100%; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; }
-/* A site under the Browser's tab (the Browser's own tabs, to switch straight to one). */
-.switcher-result.nested { width: calc(100% - 22px); margin-left: 22px; }
+/* The Browser's spaces under its tab, and each space's sites under it (to switch straight to one). */
+.switcher-result.nested-1 { width: calc(100% - 20px); margin-left: 20px; }
+.switcher-result.nested-2 { width: calc(100% - 40px); margin-left: 40px; }
+.switcher-result.space { margin-top: 4px; }
+.switcher-result.space .font-medium { font-weight: 650; }
 .switcher-result.on { background: var(--accent-soft); border-color: var(--accent); }
 .switcher-result svg { flex-shrink: 0; color: var(--accent); }
 button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

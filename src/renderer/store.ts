@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { WebSpace } from '@shared/types'
 import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, WorkspaceTool, WorkspaceTerminal, WorkspaceBrowser, HostShell, PaneNode } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
@@ -215,6 +216,8 @@ interface State {
   browserRequest: (BrowserRequest & { nonce: number }) | null
   /** The Browser's tabs as it shows them now, for the quick switcher's sites (null while the Browser is not open here). */
   webTabs: WebTabInfo[] | null
+  /** The Browser's spaces in its own order (its own, then the AWS accounts'), which the quick switcher groups sites by. */
+  webSpaces: WebSpace[] | null
   /** Shows the Terminal tab (local shells; there is one), opening a new terminal tab when asked, for an AWS profile or a folder. */
   openTerminal: (req?: { profile?: string; cwd?: string; newTab?: boolean }) => void
   terminalRequest: { profile?: string; cwd?: string; newTab?: boolean; workspace?: { id: string; terminal: WorkspaceTerminal }; nonce: number } | null
@@ -521,6 +524,7 @@ export const useStore = create<State>((set, get) => ({
   openBoard: () => { if (!relayed('board', 'openBoard', [])) get().setActive(get().toolTab('board')) },
   browserRequest: null,
   webTabs: null,
+  webSpaces: null,
   openBrowser: (req) => {
     if (relayed('browser', 'openBrowser', [req])) return
     const id = get().toolTab('browser')
