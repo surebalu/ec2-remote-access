@@ -250,14 +250,15 @@ export function isAppShortcut(e: KeyboardEvent): boolean {
 }
 
 /** Returns true when the event was a shortcut and has been handled. */
-export function handleAppShortcut(e: KeyboardEvent): boolean {
+export function handleAppShortcut(e: KeyboardEvent, opts: { sections?: boolean } = {}): boolean {
   // A focused editor that used the key (formatting in Notes) keeps it.
   if (e.defaultPrevented) return false
   const st = useStore.getState()
   const inFront = st.gridView ? undefined : st.tabs.find((t) => t.id === st.activeTab)
   // A section's own shortcut (Settings → Keyboard; ⌃` for the Terminal…) from anywhere, except a key the tool in
   // front uses itself (⌘0 is the Browser's zoom while it is in front).
-  const section = e.repeat || modalOpen() ? null : sectionOfKey(e)
+  // A detached tool's window (ToolWindow.tsx) has no sections to switch to: there the keys go to its tool.
+  const section = opts.sections === false || e.repeat || modalOpen() ? null : sectionOfKey(e)
   if (section && !toolOwns(inFront?.kind, comboOfEvent(e))) {
     e.preventDefault()
     e.stopPropagation()

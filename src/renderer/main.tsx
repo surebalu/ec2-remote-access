@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import Launcher from './launcher/Launcher'
 import LinksPanel from './linksPanel/LinksPanel'
+import ToolWindow from './ToolWindow'
+import { toolWindowKind } from './store'
 import { createWsApi } from './wsApi'
 import './styles.css'
 
@@ -18,6 +20,6 @@ if (linksPanel) document.documentElement.classList.add('links-panel-page')
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {launcher ? <Launcher /> : linksPanel ? <LinksPanel /> : <App />}
+    {launcher ? <Launcher /> : linksPanel ? <LinksPanel /> : toolWindowKind ? <ToolWindow kind={toolWindowKind} /> : <App />}
   </React.StrictMode>
 )

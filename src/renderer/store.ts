@@ -65,12 +65,18 @@ export interface BrowserRequest {
 
 /** The built-in tools: one tab each, opened from the app rail. */
 export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links'
+export const TOOL_KINDS: readonly ToolKind[] = ['local', 'browser', 'notes', 'board', 'finder', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links']
 export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links' }
 /** Tools that are one tab with nothing in main to open or close: shown as they are, on every device. */
 const PLAIN_TOOLS: readonly ToolKind[] = ['health', 'devtools', 'tasks', 'calendar', 'links']
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
 export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'claude', 'chatgpt']
 const inElectron = /\bElectron\//.test(navigator.userAgent)
+/** This page is a detached tool's own window (main/toolWindows.ts loads it with ?tool=<kind>). */
+export const toolWindowKind = ((): ToolKind | null => {
+  const k = new URLSearchParams(location.search).get('tool')
+  return k && (TOOL_KINDS as readonly string[]).includes(k) ? (k as ToolKind) : null
+})()
 
 /** How many tabs the side-by-side view shows at once. */
 export const MAX_SPLIT = 6
@@ -168,6 +174,12 @@ interface State {
   askAssistant: (kind: WebAppKind, text: string) => void
   /** The latest page a chat tab is asked to load (nonce makes repeats distinct). */
   webAppRequest: { kind: WebAppKind; url: string; nonce: number } | null
+  /** Tools that have windows of their own (main/toolWindows.ts); their rail buttons bring those windows forward. */
+  detachedTools: ToolKind[]
+  /** Gives a tool a window of its own near a screen point, closing its tab here (the Terminal's shells end). */
+  detachTool: (kind: ToolKind, at?: { x: number; y: number }) => Promise<void>
+  /** In a tool's own window: settings, the look and the cached hosts, without the main window's sign-in checks and scans. */
+  initToolWindow: (kind: ToolKind) => Promise<void>
   /** What Links is asked to show (a view such as 'tag:aws', or an item), from the Links search panel's ⌘↵. */
   linksRequest: { view?: string; id?: string; nonce: number } | null
   showInLinks: (req: { view?: string; id?: string }) => void
@@ -303,6 +315,27 @@ function readPref(key: string): boolean {
   try { return localStorage.getItem(key) === '1' } catch { return false }
 }
 
+/**
+ * A tool that has a window of its own opens things there: the main window hands the call on (tools:relay) instead of
+ * opening a second copy of the tool here. Never in the tool's own window.
+ */
+function relayed(kind: ToolKind, method: string, args: unknown[]): boolean {
+  if (toolWindowKind || !useStore.getState().detachedTools.includes(kind)) return false
+  void window.api.invoke('tools:relay', kind, method, args).catch(() => undefined)
+  return true
+}
+/** The calls a tool's window carries out for the main window. */
+const RELAYED: Record<string, (s: State, args: unknown[]) => void> = {
+  openBrowser: (s, a) => s.openBrowser(a[0] as BrowserRequest | undefined),
+  openNotes: (s, a) => s.openNotes(typeof a[0] === 'string' ? a[0] : undefined),
+  openTerminal: (s, a) => s.openTerminal(a[0] as { profile?: string; cwd?: string; newTab?: boolean } | undefined),
+  openFinder: (s, a) => s.openFinder(typeof a[0] === 'string' ? a[0] : undefined),
+  openBoard: (s) => s.openBoard(),
+  openTool: (s, a) => { if ((TOOL_KINDS as readonly unknown[]).includes(a[0])) s.openTool(a[0] as ToolKind) },
+  showInLinks: (s, a) => s.showInLinks((a[0] ?? {}) as { view?: string; id?: string }),
+  askAssistant: (s, a) => { if (a[0] === 'claude' || a[0] === 'chatgpt') s.askAssistant(a[0], String(a[1] ?? '')) }
+}
+
 export const useStore = create<State>((set, get) => ({
   profiles: [],
   statuses: {},
@@ -394,6 +427,7 @@ export const useStore = create<State>((set, get) => ({
     return tab.id
   },
   openTool: (kind) => {
+    if (relayed(kind, 'openTool', [kind])) return
     const s = get()
     if (kind === 'local') s.openTerminal()
     else if (kind === 'browser') s.openBrowser()
@@ -405,12 +439,38 @@ export const useStore = create<State>((set, get) => ({
     else void window.api.invoke('shell:open', WEB_APPS[kind as WebAppKind].home)
   },
   webAppRequest: null,
+  detachedTools: [],
+  detachTool: async (kind, at) => {
+    const s = get()
+    const tabs = s.tabs.filter((t) => t.kind === kind)
+    if (kind === 'local' && tabs.length && !window.confirm('Move the Terminal to a window of its own? Its shells start again there, so commands running in them stop.')) return
+    for (const t of tabs) await get().closeTab(t.id)
+    await window.api.invoke('tools:detach', kind, at)
+  },
+  initToolWindow: async (kind) => {
+    const [settings, cached] = await Promise.all([window.api.invoke('settings:get'), window.api.invoke('inventory:cached')])
+    set({ settings })
+    applyUiFont(settings.uiFont)
+    applySectionZoom(settings.sectionZoom)
+    applyAppearance(settings.theme, settings.colorTheme)
+    if (cached) set({ instances: cached.instances, scanErrors: cached.errors, scannedAt: cached.scannedAt })
+    // What the main window hands on ("open this page in the Browser"), for this window's tool only.
+    window.api.on('tools:relay', ({ method, args }) => {
+      const fn = RELAYED[method]
+      if (fn) fn(get(), args)
+    })
+    window.api.on('ext:openTab', (d) => { if (kind === 'browser') get().openBrowser({ url: d.url, partition: d.partition, background: d.background }) })
+    await get().refreshProfiles()
+    get().setActive(get().toolTab(kind))
+  },
   linksRequest: null,
   showInLinks: (req) => {
+    if (relayed('links', 'showInLinks', [req])) return
     set({ linksRequest: { ...req, nonce: Date.now() + Math.random() } })
     get().openTool('links')
   },
   askAssistant: (kind, text) => {
+    if (relayed(kind, 'askAssistant', [kind, text])) return
     if (!inElectron) {
       void window.api.invoke('shell:open', askUrl(kind, text))
       return
@@ -428,24 +488,28 @@ export const useStore = create<State>((set, get) => ({
   }),
   terminalRequest: null,
   openTerminal: (req) => {
+    if (relayed('local', 'openTerminal', [req])) return
     const id = get().toolTab('local')
     if (req) set({ terminalRequest: { ...req, nonce: Date.now() + Math.random() } })
     get().setActive(id)
   },
   finderRequest: null,
   openFinder: (path) => {
+    if (relayed('finder', 'openFinder', [path])) return
     const id = get().toolTab('finder')
     if (path) set({ finderRequest: { path, nonce: Date.now() + Math.random() } })
     get().setActive(id)
   },
-  openBoard: () => get().setActive(get().toolTab('board')),
+  openBoard: () => { if (!relayed('board', 'openBoard', [])) get().setActive(get().toolTab('board')) },
   browserRequest: null,
   openBrowser: (req) => {
+    if (relayed('browser', 'openBrowser', [req])) return
     const id = get().toolTab('browser')
     if (req?.url || req?.profile || req?.space || req?.tab) set({ browserRequest: { ...req, nonce: Date.now() + Math.random() } })
     if (!req?.background) get().setActive(id)
   },
   openNotes: (path, opts) => {
+    if (relayed('notes', 'openNotes', [path])) return
     const id = get().toolTab('notes')
     if (path) get().updateTab(id, { notesPath: path })
     if (opts?.beside && opts.beside !== id && get().tabs.some((t) => t.id === opts.beside)) get().splitWith(opts.beside, id)
@@ -660,6 +724,11 @@ export const useStore = create<State>((set, get) => ({
     if (cached) set({ instances: cached.instances, scanErrors: cached.errors, scannedAt: cached.scannedAt })
     window.api.on('scan:progress', (p) => set((s) => ({ progress: { ...s.progress, [`${p.profile}/${p.region}`]: p } })))
     window.api.on('tunnels:changed', (tunnels) => set({ tunnels }))
+    if (inElectron) {
+      const tools = (kinds: string[]): ToolKind[] => kinds.filter((k): k is ToolKind => (TOOL_KINDS as readonly string[]).includes(k))
+      window.api.on('tools:detached', (kinds) => set({ detachedTools: tools(kinds) }))
+      void window.api.invoke('tools:list').then((kinds) => set({ detachedTools: tools(kinds) }), () => undefined)
+    }
     window.api.on('ext:openTab', (d) => get().openBrowser({ url: d.url, partition: d.partition, background: d.background }))
     window.api.on('profiles:status', (st) => {
       if (st.profile.startsWith('sso-session:')) {

@@ -78,6 +78,8 @@ export interface Host {
   launcher: LauncherHost | null
   /** The Links panels over any app and their keys (main/linksPanel.ts); null without a desktop (gateway). */
   linksPanel: LinksPanelHost | null
+  /** Tools in windows of their own (main/toolWindows.ts); null without a desktop (gateway). */
+  toolWindows: ToolWindowsHost | null
   /** Chrome extensions in the Browser (main/extensions.ts); null where there is no Browser (gateway). */
   extensions: ExtensionsHost | null
 }
@@ -107,6 +109,15 @@ export interface LauncherHost {
   quickLook(path: string): void
   /** Asks before something that cannot be undone, with the app brought forward so the question is not hidden. */
   confirm(message: string, detail: string, button: string): Promise<boolean>
+}
+
+/** What detached tools need from the Mac app. */
+export interface ToolWindowsHost {
+  detach(kind: string, at?: { x: number; y: number }): void
+  attach(kind: string): void
+  list(): string[]
+  /** Hands an opener call ("open this page in the Browser") to the tool's own window, and brings it forward. */
+  relay(kind: string, method: string, args: unknown[]): boolean
 }
 
 /** What the Links panels need from the Mac app. */

@@ -9,12 +9,15 @@ import { APP_THEMES, findAppTheme } from '../appThemes'
 import { endDockDrag, startDockDrag } from './SplitView'
 import { TOOL_GROUPS, TOOL_DESCRIPTIONS } from '../toolCatalog'
 import { LOOKS } from '../toolLooks'
+import { droppedOutside, TOOL_DRAG_TYPE } from '@shared/toolWindows'
 
 /**
  * The app's sections down the left edge: hosts, all sessions, the built-in tools and the chat assistants, with help,
  * theme and settings at the bottom. Remote sessions (SSH, RDP, Files) keep their tabs in the title bar; the tools live
  * here, each with a dot while it is open, so the title bar is only ever the sessions you are working in. Every section
- * can have a keyboard shortcut of its own (Settings → Keyboard, or right-click it).
+ * can have a keyboard shortcut of its own (Settings → Keyboard, or right-click it). In the Mac app a tool dragged out of
+ * the window (or Open in New Window) gets a window of its own (main/toolWindows.ts); its button then brings that window
+ * forward, and the window's icon dragged back onto the rail puts the tool back here.
  */
 export default function AppRail(): ReactElement {
   const tabs = useStore((s) => s.tabs)
@@ -27,6 +30,10 @@ export default function AppRail(): ReactElement {
   const launcherKey = useStore((s) => s.settings?.launcherKey ?? '')
   const [themeMenu, setThemeMenu] = useState<HTMLElement | null>(null)
   const [menu, setMenu] = useState<{ kind: RailSection; anchor: HTMLElement } | null>(null)
+  const detached = useStore((s) => s.detachedTools)
+  /** A detached tool's icon is being dragged over the rail, to be put back. */
+  const [attaching, setAttaching] = useState(false)
+  const canDetach = hasBrowser()
   const st = useStore.getState
   /** "Notes (⇧⌘N)": the section's own shortcut, when it has one. */
   const withKey = (title: string, section: RailSection, fallback = ''): string => {
@@ -41,11 +48,11 @@ export default function AppRail(): ReactElement {
   const isTool = (k: RailSection): k is ToolKind => k !== 'hosts' && k !== 'overview'
 
   /** Shortcuts are in each item's tooltip (`withKey`), not drawn under it. */
-  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; hue?: number; sat?: number }): ReactElement => (
+  const item = (o: { label: string; icon: ReactNode; on: boolean; title: string; onClick: () => void; aria?: string; dot?: boolean; badge?: number; disabled?: boolean; onContextMenu?: (el: HTMLElement) => void; dock?: ToolKind; detachable?: ToolKind; out?: boolean; hue?: number; sat?: number }): ReactElement => (
     <button
       key={o.label}
       type="button"
-      className={`rail-item no-drag ${o.on ? 'on' : ''} ${o.hue !== undefined ? 'rail-tinted' : ''}`}
+      className={`rail-item no-drag ${o.on ? 'on' : ''} ${o.hue !== undefined ? 'rail-tinted' : ''} ${o.out ? 'rail-out' : ''}`}
       style={o.hue !== undefined ? { '--tool-hue': o.hue, ...(o.sat !== undefined ? { '--tool-sat': `${o.sat}%` } : {}) } as CSSProperties : undefined}
       title={o.title}
       aria-label={o.aria ?? o.label}
@@ -53,15 +60,21 @@ export default function AppRail(): ReactElement {
       disabled={o.disabled}
       onClick={o.onClick}
       onContextMenu={(e) => { if (o.onContextMenu) { e.preventDefault(); o.onContextMenu(e.currentTarget) } }}
-      // A tool dragged onto the session area docks beside the pane it is dropped on.
-      draggable={!!o.dock}
-      onDragStart={o.dock ? (e) => startDockDrag(e, { tool: o.dock }) : undefined}
-      onDragEnd={o.dock ? endDockDrag : undefined}
+      // A tool dragged onto the session area docks beside the pane it is dropped on; let go outside the window, it gets
+      // a window of its own there. A drop nothing took (dropEffect 'none') with the pointer off the window is that.
+      draggable={!!o.dock || !!o.detachable}
+      onDragStart={o.dock ? (e) => startDockDrag(e, { tool: o.dock }) : o.detachable ? (e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', o.label) } : undefined}
+      onDragEnd={o.dock || o.detachable ? (e) => {
+        endDockDrag()
+        const at = { x: e.screenX, y: e.screenY }
+        if (o.detachable && e.dataTransfer.dropEffect === 'none' && droppedOutside(at, { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight })) void st().detachTool(o.detachable, at)
+      } : undefined}
     >
       <span className="rail-icon">
         {o.icon}
         {!!o.badge && <span className="rail-badge">{o.badge > 99 ? '99+' : o.badge}</span>}
-        {o.dot && !o.on && <span className="rail-open" aria-hidden="true" />}
+        {o.dot && !o.on && !o.out && <span className="rail-open" aria-hidden="true" />}
+        {o.out && <span className="rail-out-mark" aria-hidden="true"><Icon.openTab /></span>}
       </span>
       <span className="rail-label">{o.label}</span>
     </button>
@@ -69,17 +82,21 @@ export default function AppRail(): ReactElement {
 
   const tool = (kind: ToolKind, icon: ReactNode, title: string): ReactElement => {
     const tab = toolTab(kind)
+    const out = detached.includes(kind)
     return item({
       label: TOOL_NAMES[kind],
       icon,
       hue: LOOKS[kind].hue,
-      title: withKey(title, kind),
+      title: out ? `${TOOL_NAMES[kind]} is in its own window: click to bring it forward` : withKey(title, kind),
       on: front?.kind === kind,
       dot: !!tab,
+      out,
+      // A tool in its own window: openTool hands the call to that window, which comes forward.
       onClick: () => open(kind),
       onContextMenu: (el) => setMenu({ kind, anchor: el }),
       // A chat opened elsewhere (a browser on the gateway) has no tab to dock.
-      dock: hasBrowser() || (kind !== 'claude' && kind !== 'chatgpt') ? kind : undefined
+      dock: !out && (hasBrowser() || (kind !== 'claude' && kind !== 'chatgpt')) ? kind : undefined,
+      detachable: canDetach && !out ? kind : undefined
     })
   }
 
@@ -88,7 +105,17 @@ export default function AppRail(): ReactElement {
   const themeLabel = colored ? 'Theme' : theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark'
 
   return (
-    <nav className="app-rail" aria-label="App sections">
+    <nav className={`app-rail ${attaching ? 'attaching' : ''}`} aria-label="App sections"
+      // A detached tool's icon dragged back from its window puts the tool back here.
+      onDragOver={(e) => { if (e.dataTransfer.types.includes(TOOL_DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setAttaching(true) } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAttaching(false) }}
+      onDrop={(e) => {
+        const kind = e.dataTransfer.getData(TOOL_DRAG_TYPE)
+        setAttaching(false)
+        if (!kind) return
+        e.preventDefault()
+        void window.api.invoke('tools:attach', kind)
+      }}>
       {item({ label: 'Search', icon: <Icon.search />, hue: 220, sat: 14, on: false, title: 'Find hosts, tools and commands (⌘K)', onClick: () => st().openQuickSwitcher() })}
       {/* One list, in TOOL_GROUPS order, with no group labels or dividers (the user found them cluttered). */}
       <div className="rail-sections">
@@ -161,10 +188,12 @@ export default function AppRail(): ReactElement {
         const kind = menu.kind
         const tool = isTool(kind) ? kind : null
         const close = (fn: () => void) => (): void => { setMenu(null); fn() }
-        const docks = !!tool && (hasBrowser() || (tool !== 'claude' && tool !== 'chatgpt'))
+        const docks = !!tool && !detached.includes(tool) && (hasBrowser() || (tool !== 'claude' && tool !== 'chatgpt'))
         return (
           <Popover anchor={menu.anchor} width={230} onClose={() => setMenu(null)}>
-            {tool && <MenuItem onClick={close(() => open(tool))}>{toolTab(tool) ? 'Show' : 'Open'} {TOOL_NAMES[tool]}</MenuItem>}
+            {tool && <MenuItem onClick={close(() => open(tool))}>{toolTab(tool) || detached.includes(tool) ? 'Show' : 'Open'} {TOOL_NAMES[tool]}</MenuItem>}
+            {tool && canDetach && !detached.includes(tool) && <MenuItem onClick={close(() => void st().detachTool(tool))}>Open in New Window</MenuItem>}
+            {tool && detached.includes(tool) && <MenuItem onClick={close(() => void window.api.invoke('tools:attach', tool))}>Put Back in This Window</MenuItem>}
             {tool && docks && front && front.kind !== tool && (
               <MenuItem onClick={close(() => st().splitWith(front.id, st().toolTab(tool)))}>Beside {isSession(front) ? front.title : TOOL_NAMES[front.kind as ToolKind]}</MenuItem>
             )}
@@ -173,7 +202,7 @@ export default function AppRail(): ReactElement {
             <MenuItem onClick={close(openKeyboardSettings)} hint={sectionKeyLabel(kind, shortcuts) || (kind === 'hosts' ? '⌘1' : undefined)}>Keyboard shortcut…</MenuItem>
             {docks && <>
               <MenuSep />
-              <div className="muted px-3 pb-1.5 pt-0.5 text-[10.5px] leading-snug">Or drag it onto a session to put it beside that one.</div>
+              <div className="muted px-3 pb-1.5 pt-0.5 text-[10.5px] leading-snug">Or drag it onto a session to put it beside that one{canDetach ? ', or out of the window to give it a window of its own' : ''}.</div>
             </>}
           </Popover>
         )
