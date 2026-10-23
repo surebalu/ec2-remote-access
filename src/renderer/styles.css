@@ -2474,11 +2474,37 @@ i.sw.k-highwater { width: 14px; height: 0; border-top: 2px dashed var(--muted); 
 .svc-def { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr) auto; align-items: center; gap: 8px; }
 .svc-def-error { grid-column: 1 / -1; }
 @media (max-width: 760px) {
-  .svc-row { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .svc-unit, .svc-meta { grid-column: 2 / -1; }
-  .svc-step { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .svc-step code, .svc-step-msg { grid-column: 2 / -1; }
-  .svc-hist { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Named areas, not auto-placement: placed in order, the state pill fell into the dot's column and widened it, which
+     pushed every name to the right. Dot, name and state on the first line; the unit; uptime with the buttons. */
+  .svc-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'dot who pill' '. unit unit' '. meta acts'; column-gap: 10px; row-gap: 4px; padding: 10px 12px; }
+  .svc-row > .svc-dot { grid-area: dot; }
+  .svc-row > .svc-who { grid-area: who; }
+  .svc-row > .svc-pill { grid-area: pill; justify-self: end; }
+  .svc-row > .svc-unit { grid-area: unit; }
+  .svc-row > .svc-meta { grid-area: meta; align-self: center; }
+  .svc-row > .svc-acts { grid-area: acts; }
+  /* The icon, the title and Close on the first line; History and Read again under the title. */
+  .svc-head { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; padding: 12px 14px 10px; }
+  .svc-head > .min-w-0 { flex-basis: calc(100% - 92px); }
+  .svc-head > .btn { order: 2; }
+  .svc-head > .btn:first-of-type { margin-left: 42px; }
+  .svc-head > [aria-label='Close dialog'] { order: 1; margin-left: 0; }
+  .svc-head h2 { flex-wrap: wrap; row-gap: 3px; }
+  .svc-head h2 .muted { white-space: nowrap; }
+  .svc-body { padding: 4px 12px 14px; }
+  .svc-group-head { flex-wrap: wrap; }
+  /* A step and a history line the same way: auto-placed, the time fell into the dot's column. */
+  .svc-step { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'dot label time' '. unit unit' '. msg msg'; row-gap: 2px; }
+  .svc-step > .svc-step-dot { grid-area: dot; }
+  .svc-step > strong { grid-area: label; }
+  .svc-step > code { grid-area: unit; }
+  .svc-step > .svc-step-msg { grid-area: msg; }
+  .svc-step > .svc-step-time { grid-area: time; }
+  .svc-hist { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'what pill' 'when by'; row-gap: 3px; }
+  .svc-hist > .svc-hist-when { grid-area: when; }
+  .svc-hist > .svc-hist-what { grid-area: what; }
+  .svc-hist > .svc-pill { grid-area: pill; justify-self: end; }
+  .svc-hist > .svc-hist-by { grid-area: by; }
 }
 /* The memory honeycomb above the per-machine charts (MemoryGrid.tsx). */
 .hl-mem-combs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); align-items: start; gap: 12px; margin-bottom: 12px; }

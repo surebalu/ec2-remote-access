@@ -2117,6 +2117,25 @@ app.whenReady().then(async () => {
     await pshot('phone-host-page.png')
     await pjs(`document.querySelector('.m-hostpage .hp-back').click()`)
     await puntil(`!document.querySelector('.m-hostpage') && !!document.querySelector('.hl-hero')`)
+    // Services on a phone: each row's dot, name and state on one line, then the unit, then uptime with the buttons;
+    // the title, Close, History and Read again fit; nothing scrolls sideways.
+    await pjs(`[...document.querySelectorAll('.hl button')].find((b) => b.textContent.trim() === 'Control services').click()`)
+    await puntil(`document.querySelectorAll('.svc-row[data-unit]').length > 1`)
+    const svcRow = await pjs(`(() => {
+      const row = document.querySelector('.svc-row[data-unit]').getBoundingClientRect()
+      const r = (s) => document.querySelector('.svc-row[data-unit] ' + s).getBoundingClientRect()
+      const mid = (b) => (b.top + b.bottom) / 2
+      const dot = r('.svc-dot'), who = r('.svc-who'), name = r('.svc-host-link'), pill = r('.svc-pill'), unit = r('.svc-unit'), acts = r('.svc-acts')
+      return { nameIn: Math.round(who.left - row.left), pillLine: Math.abs(mid(pill) - mid(name)) < 8, dotLine: Math.abs(mid(dot) - mid(name)) < 8, unitBelow: unit.top >= who.bottom - 1, actsBelow: acts.top >= unit.bottom - 1, actsRight: row.right - acts.right < 20 }
+    })()`)
+    assert.ok(svcRow.nameIn < 44, `the name sits next to its dot, not pushed right (${svcRow.nameIn}px in)`)
+    assert.deepEqual([svcRow.dotLine, svcRow.pillLine, svcRow.unitBelow, svcRow.actsBelow, svcRow.actsRight], [true, true, true, true, true], 'dot, name and state on one line; unit; uptime and buttons')
+    assert.equal(await pjs(`(() => { const head = document.querySelector('.svc-head').getBoundingClientRect(); const close = document.querySelector('.svc-head [aria-label="Close dialog"]').getBoundingClientRect(); const title = document.querySelector('.svc-head h2').getBoundingClientRect(); return close.right <= head.right && Math.abs(close.top - title.top) < 12 })()`), true, 'Close sits on the title line')
+    assert.equal(await pjs(`(() => { const b = document.querySelector('.svc-body'); return b.scrollWidth <= b.clientWidth + 1 })()`), true, 'services fit the phone width')
+    assert.equal(await noSideScroll(), true)
+    await pshot('phone-services.png')
+    await pjs(`document.querySelector('.svc-head [aria-label="Close dialog"]').click()`)
+    await puntil(`!document.querySelector('.svc')`)
     await pjs(`document.querySelector('.hl').scrollTop = 0`)
     phone.setContentSize(1194, 834)
     await puntil(`innerWidth === 1194 && document.querySelector('.m-app').classList.contains('wide')`)
