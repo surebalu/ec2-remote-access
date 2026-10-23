@@ -10,9 +10,13 @@ import type { RecordItem, RecordOp } from './records'
 
 export interface LinkItem extends RecordItem {
   type: 'link'
-  /** A web link, or a note (text, no URL). */
-  kind: 'link' | 'note'
+  /** A web link, a note (text, no URL), or a file kept on the Mac (Anybox's documents and images, copied out). */
+  kind: 'link' | 'note' | 'file'
   url?: string
+  /** A file's absolute path on the Mac. */
+  path?: string
+  /** A file's size in bytes. */
+  size?: number
   title: string
   /** The page's own description. */
   description?: string
@@ -39,8 +43,10 @@ export interface LinkFolder extends RecordItem {
 
 /** A link or note as read from an import, before it has an id. */
 export interface ParsedLink {
-  kind: 'link' | 'note'
+  kind: 'link' | 'note' | 'file'
   url?: string
+  path?: string
+  size?: number
   title: string
   description?: string
   note?: string
@@ -59,7 +65,7 @@ export interface ParsedLinks { links: ParsedLink[]; format: string }
 /** Anybox's library on this Mac, read by main/anybox.ts. */
 export interface AnyboxLibrary { links: ParsedLink[]; skippedFiles: number; source: string }
 
-export type LinkView = 'all' | 'starred' | 'unsorted' | 'notes' | 'archived' | `folder:${string}` | `tag:${string}`
+export type LinkView = 'all' | 'starred' | 'unsorted' | 'notes' | 'files' | 'archived' | `folder:${string}` | `tag:${string}`
 
 // ----- urls -----
 
@@ -132,6 +138,7 @@ export function viewLinks(view: LinkView, links: LinkItem[], folders: LinkFolder
   if (view === 'starred') return live.filter((l) => l.starred)
   if (view === 'unsorted') return live.filter((l) => !l.folderId || !folders.some((f) => f.id === l.folderId))
   if (view === 'notes') return live.filter((l) => l.kind === 'note')
+  if (view === 'files') return live.filter((l) => l.kind === 'file')
   if (view.startsWith('folder:')) {
     const ids = folderAndBelow(view.slice(7), folders)
     return live.filter((l) => l.folderId && ids.has(l.folderId))
@@ -145,7 +152,7 @@ export function searchLinks(links: LinkItem[], query: string, folders: Map<strin
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return links
   const scored = links.map((l) => {
-    const hay = [l.title, l.url, l.description, l.note, l.text, l.keyword, ...(l.tags ?? []).map((t) => `#${t}`), ...folderPath(l.folderId, folders)].filter(Boolean).join(' \n').toLowerCase()
+    const hay = [l.title, l.url, l.path?.split('/').pop(), l.description, l.note, l.text, l.keyword, ...(l.tags ?? []).map((t) => `#${t}`), ...folderPath(l.folderId, folders)].filter(Boolean).join(' \n').toLowerCase()
     if (!words.every((w) => hay.includes(w))) return null
     // A keyword typed exactly comes first, then title matches.
     const score = (l.keyword && words.join(' ') === l.keyword.toLowerCase() ? 100 : 0) + words.filter((w) => l.title.toLowerCase().includes(w)).length
@@ -252,12 +259,14 @@ function fromObject(o: Record<string, unknown>, folderOf?: (o: Record<string, un
   // Pinboard keeps the title in "description" and the notes in "extended".
   const pinboard = 'href' in o && 'extended' in o
   const title = str(pinboard ? pick(o, 'description') : pick(o, 'title', 'name', 'linkTitle', 'link_title')) ?? url ?? (text ? text.split('\n')[0].slice(0, 80) : undefined)
-  if (!title || (!url && !text)) return null
-  const folderRaw = pick(o, 'folder', 'folderPath', 'collection', 'collectionTitle', 'category', 'path', 'folders', 'collections')
-  const folder = folderOf?.(o) ?? (Array.isArray(folderRaw) ? folderRaw.map(String).filter(Boolean) : typeof folderRaw === 'string' ? folderRaw.split(/\s*[/>]\s*/).filter(Boolean) : typeof folderRaw === 'object' && folderRaw ? [str(pick(folderRaw as Record<string, unknown>, 'name', 'title')) ?? ''].filter(Boolean) : undefined)
-  const kind: ParsedLink['kind'] = url ? 'link' : 'note'
+  if (!title || (!url && !text && !(o.kind === 'file' && str(o.path)))) return null
+  // A file this app exported (kind "file" with its path on the Mac).
+  const path = o.kind === 'file' ? str(o.path) : undefined
+  const folderRaw = path ? undefined : pick(o, 'folder', 'folderPath', 'collection', 'collectionTitle', 'category', 'path', 'folders', 'collections')
+  const folder = folderOf ? folderOf(o) : (Array.isArray(folderRaw) ? folderRaw.map(String).filter(Boolean) : typeof folderRaw === 'string' ? folderRaw.split(/\s*[/>]\s*/).filter(Boolean) : typeof folderRaw === 'object' && folderRaw ? [str(pick(folderRaw as Record<string, unknown>, 'name', 'title')) ?? ''].filter(Boolean) : undefined)
+  const kind: ParsedLink['kind'] = path ? 'file' : url ? 'link' : 'note'
   return {
-    kind, url, title, text: kind === 'note' ? text : undefined,
+    kind, url, title, text: kind === 'note' ? text : undefined, path, size: path && typeof o.size === 'number' ? o.size : undefined,
     description: str(pinboard ? undefined : pick(o, 'linkDescription', 'link_description', 'excerpt', 'summary', 'description')),
     note: str(pinboard ? pick(o, 'extended') : pick(o, 'comment', 'note', 'notes', 'annotation', 'memo')),
     folder: folder?.length ? folder : undefined,
@@ -392,10 +401,21 @@ export function planImport(existing: { links: LinkItem[]; folders: LinkFolder[] 
   }
   const byUrl = new Map(existing.links.filter((l) => l.url).map((l) => [normalizeUrl(l.url!), l]))
   const notes = new Set(existing.links.filter((l) => l.kind === 'note').map((l) => `${l.title}\u0000${l.text ?? ''}`))
+  const files = new Set(existing.links.filter((l) => l.kind === 'file' && l.path).map((l) => l.path!))
+  // Links added by this import: a later copy of the same address folds into it (one put per item).
+  const added = new Map<string, LinkItem>()
   for (const p of parsed) {
     if (p.kind === 'link' && p.url) {
       const key = normalizeUrl(p.url)
       const have = byUrl.get(key)
+      const mine = have ? added.get(have.id) : undefined
+      if (mine) {
+        const tags = [...new Set([...(mine.tags ?? []), ...(p.tags ?? [])])]
+        if (tags.length) mine.tags = tags
+        if (p.starred) mine.starred = true
+        plan.skipped++
+        continue
+      }
       if (have) {
         const tags = [...new Set([...(have.tags ?? []), ...(p.tags ?? [])])]
         const gains = tags.length > (have.tags?.length ?? 0) || (p.starred && !have.starred)
@@ -411,13 +431,16 @@ export function planImport(existing: { links: LinkItem[]; folders: LinkFolder[] 
       const key = `${p.title}\u0000${p.text ?? ''}`
       if (notes.has(key)) { plan.skipped++; continue }
       notes.add(key)
+    } else if (p.kind === 'file' && p.path) {
+      if (files.has(p.path)) { plan.skipped++; continue }
+      files.add(p.path)
     }
     const item: LinkItem = {
-      id: newId(), type: 'link', kind: p.kind, url: p.url, title: p.title.slice(0, 1000), description: p.description, note: p.note, text: p.text,
+      id: newId(), type: 'link', kind: p.kind, url: p.url, path: p.path, size: p.size, title: p.title.slice(0, 1000), description: p.description, note: p.note, text: p.text,
       folderId: folderFor(p.folder), tags: p.tags, starred: p.starred, archived: p.archived, keyword: p.keyword, addedAt: p.addedAt ?? now, updatedAt: now
     }
     for (const k of Object.keys(item) as (keyof LinkItem)[]) if (item[k] === undefined) delete item[k]
-    if (item.url) byUrl.set(normalizeUrl(item.url), item)
+    if (item.url) { byUrl.set(normalizeUrl(item.url), item); added.set(item.id, item) }
     plan.ops.push({ op: 'put', item })
     plan.added++
   }
@@ -437,7 +460,7 @@ export function exportLinksJson(links: LinkItem[], folders: LinkFolder[], now = 
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-/** The Netscape bookmarks file browsers and Anybox import: folders as nested lists. Notes (no address) are left out. */
+/** The Netscape bookmarks file browsers and Anybox import: folders as nested lists. Notes and files (no address) are left out. */
 export function exportLinksHtml(links: LinkItem[], folders: LinkFolder[]): string {
   const out = ['<!DOCTYPE NETSCAPE-Bookmark-file-1>', '<!-- This is an automatically generated file. -->', '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">', '<TITLE>Bookmarks</TITLE>', '<H1>Bookmarks</H1>', '<DL><p>']
   const withUrl = links.filter((l) => l.url)
@@ -470,7 +493,7 @@ const csvCell = (v: unknown): string => {
 
 export function exportLinksCsv(links: LinkItem[], folders: LinkFolder[]): string {
   const byId = new Map(folders.map((f) => [f.id, f]))
-  const rows = [['title', 'url', 'folder', 'tags', 'description', 'note', 'text', 'starred', 'archived', 'keyword', 'added']]
-  for (const l of links) rows.push([l.title, l.url ?? '', folderPath(l.folderId, byId).join('/'), (l.tags ?? []).join(','), l.description ?? '', l.note ?? '', l.text ?? '', l.starred ? 'true' : '', l.archived ? 'true' : '', l.keyword ?? '', new Date(l.addedAt).toISOString()])
+  const rows = [['title', 'url', 'folder', 'tags', 'description', 'note', 'text', 'starred', 'archived', 'keyword', 'added', 'file']]
+  for (const l of links) rows.push([l.title, l.url ?? '', folderPath(l.folderId, byId).join('/'), (l.tags ?? []).join(','), l.description ?? '', l.note ?? '', l.text ?? '', l.starred ? 'true' : '', l.archived ? 'true' : '', l.keyword ?? '', new Date(l.addedAt).toISOString(), l.path ?? ''])
   return `${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`
 }
