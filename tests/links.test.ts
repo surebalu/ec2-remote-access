@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderTree, normalizeUrl, parseCsv, parseLinksFile, planImport, searchLinks,
-  viewLinks, type LinkFolder, type LinkItem
+  asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderTree, hasTag, normalizeUrl, parseCsv, parseLinksFile, planImport, searchLinks,
+  tagTree, viewLinks, type LinkFolder, type LinkItem
 } from '../src/shared/links.ts'
 
 let n = 0
@@ -108,6 +108,15 @@ test('planning an import: folders reused, duplicates merged or skipped', () => {
   assert.deepEqual([docs.name, docs.parentId], ['Docs', work.id])
   const again = planImport({ links: [have, ...plan.ops.flatMap((o) => (o.op === 'put' && o.item.type === 'link' ? [o.item as LinkItem] : []))], folders: [work, docs] }, parseLinksFile(NETSCAPE).links, id, 6)
   assert.deepEqual([again.added, again.merged, again.skipped, again.folders], [0, 0, 3, 0], 'importing twice adds nothing')
+})
+
+test('nested tags: a tree, and a parent shows what is below it', () => {
+  assert.deepEqual(tagTree(['ops', 'aws/iam', 'aws', 'AWS/ec2/spot', 'reading']).map((t) => `${'-'.repeat(t.depth)}${t.name}${t.hasChildren ? '>' : ''}`),
+    ['aws>', '-iam', 'AWS>', '-ec2>', '--spot', 'ops', 'reading'])
+  assert.deepEqual(tagTree(['work/docs']).map((t) => [t.path, t.parent ?? null, t.hasChildren]), [['work', null, true], ['work/docs', 'work', false]], 'a prefix-only parent is a node')
+  assert.equal(hasTag({ tags: ['aws/iam'] }, 'aws'), true)
+  assert.equal(hasTag({ tags: ['awsome'] }, 'aws'), false)
+  assert.deepEqual(viewLinks('tag:aws', [link({ title: 'a', tags: ['aws/iam'] }), link({ title: 'b', tags: ['aws'] }), link({ title: 'c', tags: ['awsx'] })], []).map((l) => l.title), ['a', 'b'])
 })
 
 test('the same address twice in one file is one link, with both copies\' tags', () => {

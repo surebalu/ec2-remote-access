@@ -493,6 +493,12 @@ export const Icon = {
   calendar: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="currentColor" fillOpacity=".08" /><path d="M3.5 10h17M8 3v4m8-4v4M8 14h2m3 0h3m-8 3h2" /></svg>
   ),
+  expandAll: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="m7 9.5 5-5 5 5M7 14.5l5 5 5-5" /></svg>
+  ),
+  collapseAll: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="m7 4.5 5 5 5-5M7 19.5l5-5 5 5" /></svg>
+  ),
   bookmark: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}><path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4.5L5.5 21V4.5a1 1 0 0 1 1-1z" fill="currentColor" fillOpacity=".08" /></svg>
   ),

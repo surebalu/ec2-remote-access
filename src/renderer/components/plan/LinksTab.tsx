@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from 'react'
-import { allLinkTags, asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderAndBelow, folderPath, folderTree, parseLinksFile, planImport, searchLinks, sortLinks, viewLinks, type ImportPlan, type LinkFolder, type LinkItem, type LinkSort, type LinkView, type ParsedLink } from '@shared/links'
+import { allLinkTags, asUrl, domainOf, exportLinksCsv, exportLinksHtml, exportLinksJson, folderAndBelow, folderPath, folderTree, hasTag, tagTree, parseLinksFile, planImport, searchLinks, sortLinks, viewLinks, type ImportPlan, type LinkFolder, type LinkItem, type LinkSort, type LinkView, type ParsedLink } from '@shared/links'
 import { relativeDay, ymd } from '@shared/naturalDate'
 import { itemsOf, puts, type RecordOp } from '@shared/records'
 import { hasBrowser } from '../../quickConnect'
@@ -9,7 +9,7 @@ import { useStore, type Tab } from '../../store'
 import { Icon } from '../icons'
 import Modal from '../Modal'
 import Popover, { MenuItem } from '../Popover'
-import { downloadText, NavItem, newId, pickTextFile, typing, UndoBar, useLocal, useToday } from './parts'
+import { downloadText, NavItem, newId, pickTextFile, typing, UndoBar, useLocal, useLocalSet, useToday } from './parts'
 import './plan.css'
 
 /**
@@ -110,6 +110,29 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
     return c
   }, [links, folders])
   const folder = view.startsWith('folder:') ? folderById.get(view.slice(7)) : undefined
+  // The folder and tag trees: what is open is remembered; the way to the list on screen is always open.
+  const [openFolders, toggleFolder, setOpenFolders] = useLocalSet('links.openFolders')
+  const [openTags, toggleTag, setOpenTags] = useLocalSet('links.openTags')
+  const parents = useMemo(() => new Set(folders.map((f) => f.parentId).filter((x): x is string => !!x)), [folders])
+  const shownFolders = useMemo(() => {
+    const reveal = new Set<string>()
+    for (let f = folder?.parentId ? folderById.get(folder.parentId) : undefined, i = 0; f && i < 50; f = f.parentId ? folderById.get(f.parentId) : undefined, i++) reveal.add(f.id)
+    const isOpen = (id: string): boolean => openFolders.has(id) || reveal.has(id)
+    return tree.filter(({ folder: f }) => {
+      for (let p = f.parentId ? folderById.get(f.parentId) : undefined, i = 0; p && i < 50; p = p.parentId ? folderById.get(p.parentId) : undefined, i++) if (!isOpen(p.id)) return false
+      return true
+    }).map((x) => ({ ...x, open: isOpen(x.folder.id) }))
+  }, [tree, folderById, openFolders, folder])
+  const tagNodes = useMemo(() => tagTree(tags), [tags])
+  const shownTags = useMemo(() => {
+    const current = view.startsWith('tag:') ? view.slice(4) : ''
+    const isOpen = (path: string): boolean => openTags.has(path) || current.startsWith(`${path}/`)
+    return tagNodes.filter((n) => {
+      const parts = n.path.split('/')
+      for (let i = 1; i < parts.length; i++) if (!isOpen(parts.slice(0, i).join('/'))) return false
+      return true
+    }).map((n) => ({ ...n, open: isOpen(n.path) }))
+  }, [tagNodes, openTags, view])
   useEffect(() => { if (view.startsWith('folder:') && doc && !folder) setView('all') }, [view, doc, folder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A search looks through everything; otherwise the view, sorted.
@@ -234,9 +257,18 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
     <section className="plan links" aria-label="Links">
       <aside className="plan-side" aria-label="Link lists">
         {VIEWS.map((v) => <NavItem key={v.id} icon={v.icon()} label={v.label} count={counts[v.id]} on={!query && view === v.id} onClick={() => { setQuery(''); setView(v.id) }} />)}
-        <h4>Folders<button type="button" className="plan-add" aria-label="New folder" title="New folder" onClick={() => setNewFolder({})}><Icon.plus /></button></h4>
-        {tree.map(({ folder: f, depth }) => (
+        <h4>Folders
+          <span className="plan-head-actions">
+            {parents.size > 0 && <>
+              <button type="button" className="plan-add" aria-label="Expand all folders" title="Expand all" onClick={() => setOpenFolders([...parents])}><Icon.expandAll /></button>
+              <button type="button" className="plan-add" aria-label="Collapse all folders" title="Collapse all" onClick={() => setOpenFolders([])}><Icon.collapseAll /></button>
+            </>}
+            <button type="button" className="plan-add" aria-label="New folder" title="New folder" onClick={() => setNewFolder({})}><Icon.plus /></button>
+          </span>
+        </h4>
+        {shownFolders.map(({ folder: f, depth, open }) => (
           <NavItem key={f.id} icon={<Icon.folder />} label={f.name} depth={depth} count={counts[`folder:${f.id}`]} on={!query && view === `folder:${f.id}`}
+            tree={{ open, hasChildren: parents.has(f.id), onToggle: () => toggleFolder(f.id) }}
             onClick={() => { setQuery(''); setView(`folder:${f.id}`) }} onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'folder', anchor: e.currentTarget, folder: f }) }} />
         ))}
         {newFolder && (
@@ -255,8 +287,21 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
             }} />
         )}
         {!folders.length && !newFolder && <p className="plan-side-hint">Folders and tags come over when you import from Anybox.</p>}
-        {tags.length > 0 && <h4>Tags</h4>}
-        {tags.map((t) => <NavItem key={t} icon={<span className="plan-hash">#</span>} label={t} count={links.filter((l) => !l.archived && l.tags?.includes(t)).length} on={!query && view === `tag:${t}`} onClick={() => { setQuery(''); setView(`tag:${t}`) }} />)}
+        {tags.length > 0 && (
+          <h4>Tags
+            {tagNodes.some((n) => n.hasChildren) && (
+              <span className="plan-head-actions">
+                <button type="button" className="plan-add" aria-label="Expand all tags" title="Expand all" onClick={() => setOpenTags(tagNodes.filter((n) => n.hasChildren).map((n) => n.path))}><Icon.expandAll /></button>
+                <button type="button" className="plan-add" aria-label="Collapse all tags" title="Collapse all" onClick={() => setOpenTags([])}><Icon.collapseAll /></button>
+              </span>
+            )}
+          </h4>
+        )}
+        {shownTags.map((n) => (
+          <NavItem key={n.path} icon={<span className="plan-hash">#</span>} label={n.name} title={n.path} depth={n.depth} count={links.filter((l) => !l.archived && hasTag(l, n.path)).length}
+            on={!query && view === `tag:${n.path}`} tree={{ open: n.open, hasChildren: n.hasChildren, onToggle: () => toggleTag(n.path) }}
+            onClick={() => { setQuery(''); setView(`tag:${n.path}`) }} />
+        ))}
       </aside>
 
       <div className="plan-main" onDragOver={(e) => { if ([...e.dataTransfer.types].some((t) => t === 'text/uri-list' || t === 'text/plain')) e.preventDefault() }} onDrop={onDrop}>

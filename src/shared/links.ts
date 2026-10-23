@@ -143,8 +143,37 @@ export function viewLinks(view: LinkView, links: LinkItem[], folders: LinkFolder
     const ids = folderAndBelow(view.slice(7), folders)
     return live.filter((l) => l.folderId && ids.has(l.folderId))
   }
-  if (view.startsWith('tag:')) return live.filter((l) => l.tags?.includes(view.slice(4)))
+  if (view.startsWith('tag:')) return live.filter((l) => hasTag(l, view.slice(4)))
   return live
+}
+
+/** Whether an item has the tag or one below it ("aws" covers "aws/iam", as Anybox's nested tags do). */
+export const hasTag = (l: Pick<LinkItem, 'tags'>, path: string): boolean => !!l.tags?.some((t) => t === path || t.startsWith(`${path}/`))
+
+/**
+ * Tags as a tree by their "/" segments, depth-first and alphabetical: "aws" then "aws/iam". A parent that is only a
+ * prefix ("aws" when only "aws/iam" is used) is still a node, so its children have somewhere to hang.
+ */
+export function tagTree(tags: string[]): { path: string; name: string; depth: number; parent?: string; hasChildren: boolean }[] {
+  const paths = new Set<string>()
+  for (const t of tags) {
+    const parts = t.split('/').filter(Boolean)
+    for (let i = 1; i <= parts.length; i++) paths.add(parts.slice(0, i).join('/'))
+  }
+  // Segment by segment, ignoring case first, so a tag's children stay together ("aws", "aws/iam", then "AWS").
+  const byPath = (a: string, b: string): number => {
+    const A = a.split('/'), B = b.split('/')
+    for (let i = 0; i < Math.min(A.length, B.length); i++) {
+      const c = A[i].toLowerCase().localeCompare(B[i].toLowerCase()) || A[i].localeCompare(B[i])
+      if (c) return c
+    }
+    return A.length - B.length
+  }
+  const sorted = [...paths].sort(byPath)
+  return sorted.map((path) => {
+    const parts = path.split('/')
+    return { path, name: parts[parts.length - 1], depth: parts.length - 1, parent: parts.length > 1 ? parts.slice(0, -1).join('/') : undefined, hasChildren: sorted.some((p) => p.startsWith(`${path}/`)) }
+  })
 }
 
 /** Every word must be somewhere in it: title, address, description, comment, note text, tags, keyword or folder. */

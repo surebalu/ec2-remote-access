@@ -192,7 +192,7 @@ const recordDocs = {}
 let anyboxBlocked = true
 const anyboxFixture = [
   { kind: 'link', url: 'https://grafana.example.com/d/prod', title: 'Grafana — production', description: 'Dashboards', folder: ['Work', 'Monitoring'], tags: ['ops', 'prod'], starred: true, addedAt: 1760000000000, note: 'the main board' },
-  { kind: 'link', url: 'https://docs.aws.amazon.com/', title: 'AWS documentation', folder: ['Work'], tags: ['aws'], addedAt: 1760000100000, keyword: 'awsdocs' },
+  { kind: 'link', url: 'https://docs.aws.amazon.com/', title: 'AWS documentation', folder: ['Work'], tags: ['aws/docs'], addedAt: 1760000100000, keyword: 'awsdocs' },
   { kind: 'link', url: 'https://news.ycombinator.com/', title: 'Hacker News', tags: ['reading'], addedAt: 1760000200000 },
   { kind: 'note', title: 'Wifi at the office', text: 'guest / network', folder: ['Work'], addedAt: 1760000300000 },
   { kind: 'file', title: 'Architecture review.pdf', path: '/fixture/Links Files/Work/Architecture review.pdf', size: 1258291, folder: ['Work'], addedAt: 1760000400000 }
@@ -730,7 +730,23 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('.links-import')?.textContent.includes('5 new (3 links, 1 note, 1 file read)') && document.querySelector('.links-import').textContent.includes('2 new folders')`)
     await js(`document.querySelector('.links-import .btn-primary').click()`)
     await until(`document.querySelectorAll('.link-row').length === 5`)
-    assert.deepEqual(await js(`[...document.querySelectorAll('.plan.links .plan-nav .plan-nav-label')].map((l) => l.textContent).filter((t) => ['Work', 'Monitoring'].includes(t))`), ['Work', 'Monitoring'], 'nested folders from Anybox')
+    // Folders and nested tags fold: Work's Monitoring shows once Work is opened; Expand all and Collapse all.
+    const sideHas = (label) => `[...document.querySelectorAll('.plan.links .plan-nav .plan-nav-label')].some((l) => l.textContent === ${JSON.stringify(label)})`
+    assert.equal(await js(sideHas('Work')), true)
+    assert.equal(await js(sideHas('Monitoring')), false, 'folded at first')
+    await js(`[...document.querySelectorAll('.plan.links .plan-nav')].find((b) => b.querySelector('.plan-nav-label')?.textContent === 'Work').querySelector('.plan-chev').click()`)
+    await until(sideHas('Monitoring'))
+    await js(`document.querySelector('.plan.links [aria-label="Collapse all folders"]').click()`)
+    await until(`!${sideHas('Monitoring')}`)
+    await js(`document.querySelector('.plan.links [aria-label="Expand all folders"]').click()`)
+    await until(sideHas('Monitoring'))
+    assert.equal(await js(sideHas('docs')), false, 'the nested tag is folded under aws')
+    await nav('aws')
+    await until(`document.querySelectorAll('.link-row').length === 1 && document.querySelector('.link-row').textContent.includes('AWS documentation')`)
+    await js(`document.querySelector('.plan.links [aria-label="Expand all tags"]').click()`)
+    await until(sideHas('docs'))
+    await screenshot('links-tree.png')
+    await nav('All Links')
     await screenshot('links.png')
     await setInput('.links-search input', 'awsdocs')
     await until(`document.querySelectorAll('.link-row').length === 1 && document.querySelector('.link-row').textContent.includes('AWS documentation')`)
