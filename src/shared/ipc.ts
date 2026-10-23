@@ -19,7 +19,7 @@ import type {
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, DataStatus, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
 import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
-import type { DownloadItem, NetworkInfo, ProcessInfo, SpeedResult } from './macTools'
+import type { DownloadItem, NetworkInfo, ProcessInfo, SpeedRun } from './macTools'
 import type { MacCalendar, MacEvent } from './calendar'
 
 /** Request/response channels (ipcRenderer.invoke) */
@@ -337,8 +337,10 @@ export interface IpcApi {
   'launcher:kill': (pid: number, force: boolean) => Promise<void>
   /** This Mac's public and local addresses, router and DNS servers (My IP). */
   'launcher:network': () => Promise<NetworkInfo>
-  /** macOS's networkQuality: download, upload and responsiveness, in about twenty seconds. */
-  'launcher:speedTest': () => Promise<SpeedResult>
+  /** Starts macOS's networkQuality (about twenty seconds), or joins the test running; read it with launcher:speedStatus. */
+  'launcher:speedTest': () => Promise<{ id: string }>
+  /** The speed test's readings so far and, once it ends, its result. */
+  'launcher:speedStatus': () => Promise<SpeedRun | null>
   /** The Downloads folder, newest arrival first. */
   'launcher:downloads': () => Promise<DownloadItem[]>
   /** Asks every open app but Finder and this one to quit, after saying which; how many accepted. */

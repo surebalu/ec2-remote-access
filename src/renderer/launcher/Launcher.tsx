@@ -81,6 +81,23 @@ const baseName = (p: string): string => p.replace(/\/+$/, '').split('/').pop() ?
 /** Emoji per row in the grid (launcher-cells in styles.css lays out the same number). */
 const GRID_COLUMNS = 8
 
+/** What a result is, on the right of its row as Raycast labels them (Application, Command…), from its id. */
+const ROW_TYPES: [RegExp, string][] = [
+  [/^app:/, 'Application'], [/^file:/, 'File'], [/^host:/, 'Host'], [/^note:/, 'Note'], [/^web:(google|open)$/, 'Web Search'], [/^web:tab:/, 'Browser Tab'],
+  [/^(web|jira):/, 'Web Page'], [/^quicklink:/, 'Quicklink'], [/^section:/, 'Section'], [/^window:/, 'Window'], [/^(cmd|tool|mac):/, 'Command'],
+  [/^console:/, 'AWS Console'], [/^workspace:/, 'Workspace'], [/^forward:/, 'Port Forward'], [/^snippet:/, 'Snippet'], [/^aws-terminal:/, 'Terminal'],
+  [/^(calc|convert)$/, 'Calculator'], [/^ask:/, 'AI']
+]
+const rowType = (r: Row): string => r.type ?? ROW_TYPES.find(([re]) => re.test(r.id))?.[1] ?? ''
+
+/** A combination as separate key caps, as Raycast draws them: ⌘ K, ⇧ ⌘ C, ↩. */
+function keyCaps(combo: string): string[] {
+  if (combo === 'enter') return ['↩']
+  const shown = formatCombo(combo)
+  const mods = shown.match(/^[⌃⌥⇧⌘]*/)?.[0] ?? ''
+  return [...mods, shown.slice(mods.length)].filter(Boolean)
+}
+
 /** The best of the title's and the keywords' match, plus how often and lately it was used. */
 function rankRows(rows: Row[], q: string, usage: LauncherUsage, now: number): { rows: Row[]; best: number } {
   const scored = rows
@@ -199,7 +216,7 @@ export default function Launcher(): ReactElement {
   const appRow = (a: LauncherApp): Row => {
     const id = `app:${a.path}`
     return {
-      id, title: a.name, subtitle: displayPath(parentOf(a.path), data.home), icon: <Icon.openTab />, iconPath: a.path, accessory: 'Application', detail: { kind: 'path', path: a.path },
+      id, title: a.name, subtitle: displayPath(parentOf(a.path), data.home), icon: <Icon.openTab />, iconPath: a.path, detail: { kind: 'path', path: a.path },
       actions: [
         { title: 'Open', key: 'enter', run: openPath(id, a.path) },
         { title: 'Show in Finder', key: 'cmd+enter', run: reveal(a.path) },
@@ -213,7 +230,7 @@ export default function Launcher(): ReactElement {
     const id = `file:${f.path}`
     const dir = f.type === 'dir' ? f.path : parentOf(f.path)
     return {
-      id, title: f.name, subtitle: displayPath(parentOf(f.path), data.home), icon: f.type === 'dir' ? <Icon.folder /> : <Icon.note />, iconPath: f.path, detail: { kind: 'path', path: f.path },
+      id, title: f.name, subtitle: displayPath(parentOf(f.path), data.home), icon: f.type === 'dir' ? <Icon.folder /> : <Icon.note />, iconPath: f.path, detail: { kind: 'path', path: f.path }, type: f.type === 'dir' ? 'Folder' : 'File',
       actions: [
         { title: 'Open', key: 'enter', run: openPath(id, f.path) },
         { title: 'Show in Finder', key: 'cmd+enter', run: reveal(f.path) },
@@ -266,7 +283,7 @@ export default function Launcher(): ReactElement {
 
   const webRow = (o: { id: string; title: string; url: string; space: string; tab?: string; favicon?: string; pinned?: boolean; open?: boolean }): Row => ({
     id: o.id, title: o.title || hostOf(o.url), subtitle: `${spaceName(o.space)} · ${hostOf(o.url)}`, keywords: o.url,
-    icon: <Favicon src={o.favicon} url={o.url} size={18} />, accessory: o.pinned ? <Icon.star className="launcher-pin" /> : o.open ? <span className="launcher-state">Open tab</span> : undefined,
+    icon: <Favicon src={o.favicon} url={o.url} size={18} />, accessory: o.pinned ? <Icon.star className="launcher-pin" /> : undefined, type: o.open ? 'Browser Tab' : o.pinned ? 'Favorite' : undefined,
     detail: { kind: 'web', url: o.url, space: o.space, favicon: o.favicon },
     actions: [
       { title: `Open in ${spaceName(o.space)}`, key: 'enter', run: inApp(o.id, { kind: 'browse', url: o.url, space: o.space, tab: o.tab }) },
@@ -461,7 +478,7 @@ export default function Launcher(): ReactElement {
         .filter((r): r is Row => !!r)
       const favorites = (settings?.favorites ?? []).map((k) => byId.get(`host:${k}`)).filter((r): r is Row => !!r && !recent.includes(r)).slice(0, 5)
       return [
-        { title: 'Recent', rows: recent },
+        { title: 'Suggestions', rows: recent },
         { title: 'Quicklinks', rows: links.filter((l) => !recent.some((r) => r.id === `quicklink:${l.id}`)).slice(0, 6).map((l) => quicklinkRow(l)) },
         { title: 'Favorite Hosts', rows: favorites },
         { title: 'EC2 Remote Access', rows: appRows.slice(0, RAIL_SECTIONS.length + 2) }
@@ -539,6 +556,10 @@ export default function Launcher(): ReactElement {
   const shownGroups = mode ? modeView.groups : groups
   const rows = useMemo(() => shownGroups.flatMap((g) => g.rows), [shownGroups])
   const current = rows[Math.min(sel, rows.length - 1)]
+  const custom = mode ? modeView.custom : undefined
+  /** What ↵, the other keys and ⌘K act on: the custom view's actions (Speed Test), else the selected row's. */
+  const actions = custom ? custom.actions : current?.actions ?? []
+  const showDetail = !!mode && !!modeView.detail && !custom
   useEffect(() => setSel(0), [query])
 
   // The icons for the apps and files on screen (an app's own; for a file, the app that opens it).
@@ -551,7 +572,7 @@ export default function Launcher(): ReactElement {
   }, [rows]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The side pane's thumbnail and details for the chosen file or app, a moment after the selection settles.
-  const previewPath = current?.detail?.kind === 'path' ? current.detail.path : ''
+  const previewPath = showDetail && current?.detail?.kind === 'path' ? current.detail.path : ''
   useEffect(() => {
     if (!previewPath || previews[previewPath] !== undefined) return
     const t = setTimeout(() => {
@@ -573,7 +594,6 @@ export default function Launcher(): ReactElement {
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
     const ev = e.nativeEvent
-    const actions = current?.actions ?? []
     const move = (step: number, length: number, set: (fn: (n: number) => number) => void): void => {
       e.preventDefault()
       if (length) set((n) => (n + step + length) % length)
@@ -582,6 +602,11 @@ export default function Launcher(): ReactElement {
     const up = e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')
     const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
     if (panel === null && mode && plain && e.key === 'Backspace' && !q) { e.preventDefault(); return leaveMode() }
+    // ⇥ asks Claude, as Raycast's Quick AI: what is typed, or Claude itself.
+    if (panel === null && !mode && plain && e.key === 'Tab') {
+      e.preventDefault()
+      return query ? inApp('ask:claude', { kind: 'ask', app: 'claude', text: query })() : inApp('section:claude', { kind: 'section', section: 'claude' })()
+    }
     // The emoji grid: arrows move across and down it, as in Raycast (the field's caret gives up ← → there).
     if (panel === null && modeView.grid && plain && rows.length) {
       const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' ? -GRID_COLUMNS : e.key === 'ArrowDown' ? GRID_COLUMNS : 0
@@ -620,28 +645,36 @@ export default function Launcher(): ReactElement {
   }
 
   let index = -1
-  const keyLabel = (k: string): string => (k === 'enter' ? '↩' : formatCombo(k))
   return (
     <div className="launcher-frame" onMouseDown={(e) => { if (e.target === e.currentTarget) hide() }}>
-      <div className="launcher" role="dialog" aria-label="Launcher">
+      <div className={`launcher ${mode ? `in-mode mode-${mode}` : ''} ${custom ? 'custom' : ''}`} role="dialog" aria-label="Launcher">
         <div className="launcher-search">
           {mode
-            ? <button type="button" className="launcher-mode" title="Back to search (⌫ or Esc)" onMouseDown={(e) => e.preventDefault()} onClick={leaveMode}><Icon.back />{MODES[mode].title}</button>
-            : <Icon.search className="launcher-search-icon" />}
+            ? <button type="button" className="launcher-back" aria-label="Back" title="Back to search (Esc)" onMouseDown={(e) => e.preventDefault()} onClick={leaveMode}><Icon.back /></button>
+            : <span className="launcher-logo" aria-hidden="true">&gt;_</span>}
           <input
             ref={input}
             autoFocus
             spellCheck={false}
+            className={custom ? 'launcher-input-hidden' : ''}
             aria-label={mode ? MODES[mode].title : 'Search apps, files, hosts and commands'}
-            placeholder={mode ? MODES[mode].placeholder : 'Search apps, files, hosts, notes…'}
+            placeholder={mode ? MODES[mode].placeholder : 'Search for apps, files, hosts and commands…'}
             value={q}
+            readOnly={!!custom}
             onChange={(e) => { setQ(e.target.value); setPanel(null) }}
             onKeyDown={onKeyDown}
           />
-          {q && <button type="button" className="launcher-clear" aria-label="Clear" onMouseDown={(e) => e.preventDefault()} onClick={() => setQ('')}><Icon.x /></button>}
+          {q && !custom && <button type="button" className="launcher-clear" aria-label="Clear" onMouseDown={(e) => e.preventDefault()} onClick={() => setQ('')}><Icon.x /></button>}
+          {!mode && (
+            <button type="button" className="launcher-quickai" title="Ask Claude what is typed (⇥)" onMouseDown={(e) => e.preventDefault()}
+              onClick={() => (query ? inApp('ask:claude', { kind: 'ask', app: 'claude', text: query })() : inApp('section:claude', { kind: 'section', section: 'claude' })())}>
+              Ask Claude <kbd className="launcher-cap">⇥</kbd>
+            </button>
+          )}
         </div>
         {notice && <div className={`launcher-notice ${notice.tone}`} role="status">{notice.tone === 'ok' ? <Icon.check /> : <Icon.alert />}{notice.text}</div>}
         <div className="launcher-body">
+          {custom ? <div className="launcher-custom">{custom.body}</div> : <>
           <div className={`launcher-list ${modeView.grid && mode ? 'grid' : ''}`} ref={list}>
             {mode && modeView.grid ? shownGroups.map((g) => (
               <div key={g.title} role="group" aria-label={g.title}>
@@ -680,6 +713,7 @@ export default function Launcher(): ReactElement {
                         {r.subtitle && <span className="launcher-sub">{r.subtitle}</span>}
                       </span>
                       {r.accessory && <span className="launcher-acc">{r.accessory}</span>}
+                      {rowType(r) && <span className="launcher-type">{rowType(r)}</span>}
                     </div>
                   )
                 })}
@@ -687,18 +721,27 @@ export default function Launcher(): ReactElement {
             ))}
             {!rows.length && <div className="launcher-empty">{mode ? modeView.empty ?? 'Nothing here.' : 'Loading…'}</div>}
           </div>
-          <aside className="launcher-detail" aria-label="Details">
-            {current && <DetailPane row={current} preview={previewPath ? previews[previewPath] : undefined} icon={current.iconPath ? icons[current.iconPath] : ''} home={data.home} accountLabel={accountLabel} spaceName={spaceName} />}
-          </aside>
+          {showDetail && (
+            <aside className="launcher-detail" aria-label="Details">
+              {current && <DetailPane row={current} preview={previewPath ? previews[previewPath] : undefined} icon={current.iconPath ? icons[current.iconPath] : ''} home={data.home} accountLabel={accountLabel} spaceName={spaceName} />}
+            </aside>
+          )}
+          </>}
         </div>
-        <div className="launcher-foot">
-          <span className="brand-mark launcher-mark">&gt;_</span>
+        {/* Raycast's floating bar: the command (or the launcher's menu) on the left, the main action and Actions on the right. */}
+        <div className="launcher-bar">
+          {mode && modeView.command
+            ? <button type="button" className="launcher-pill launcher-command" onMouseDown={(e) => e.preventDefault()} onClick={modeView.command.run ?? leaveMode} title={modeView.command.run ? modeView.command.title : 'Back to search'}>{modeView.command.icon}<span>{modeView.command.title}</span></button>
+            : <button type="button" className="launcher-pill launcher-menu" aria-label="Launcher settings" title="Launcher settings: its key, quicklinks, window keys" onMouseDown={(e) => e.preventDefault()} onClick={inApp('cmd:launcher-settings', { kind: 'settings', section: 'keyboard' })}><Icon.list /></button>}
           <span className="flex-1" />
-          {current?.actions.slice(0, 3).filter((a) => a.key).map((a) => (
-            <button key={a.title} type="button" className="launcher-hint" onMouseDown={(e) => e.preventDefault()} onClick={() => run(a)}>{a.title} <kbd className="kbd">{keyLabel(a.key!)}</kbd></button>
-          ))}
-          {current && current.actions.length > 1 && (
-            <button type="button" className="launcher-hint" onMouseDown={(e) => e.preventDefault()} onClick={() => setPanel(panel === null ? 0 : null)}>Actions <kbd className="kbd">⌘K</kbd></button>
+          {actions[0] && (
+            <div className="launcher-pill launcher-actionbar">
+              <button type="button" className="launcher-primary" onMouseDown={(e) => e.preventDefault()} onClick={() => run(actions[0])}>{actions[0].title} <kbd className="launcher-cap">↩</kbd></button>
+              {actions.length > 1 && <>
+                <span className="launcher-pill-sep" />
+                <button type="button" className="launcher-hint" onMouseDown={(e) => e.preventDefault()} onClick={() => setPanel(panel === null ? 0 : null)}>Actions <kbd className="launcher-cap">⌘</kbd><kbd className="launcher-cap">K</kbd></button>
+              </>}
+            </div>
           )}
         </div>
         {form && (
@@ -717,13 +760,13 @@ export default function Launcher(): ReactElement {
               }, (e: Error) => setFormError(e.message))
             }} />
         )}
-        {panel !== null && current && (
+        {panel !== null && actions.length > 0 && (
           <div className="launcher-actions" role="menu" aria-label="Actions">
-            <div className="launcher-actions-title">{current.title}</div>
-            {current.actions.map((a, n) => (
+            <div className="launcher-actions-title">{custom && mode ? MODES[mode].title : current?.title}</div>
+            {actions.map((a, n) => (
               <div key={a.title} role="menuitem" className={`launcher-action ${n === panel ? 'on' : ''}`} onMouseMove={() => setPanel(n)} onMouseDown={(e) => e.preventDefault()} onClick={() => run(a)}>
                 <span>{a.title}</span>
-                {a.key && <kbd className="kbd">{keyLabel(a.key)}</kbd>}
+                {a.key && <span className="launcher-caps">{keyCaps(a.key).map((k) => <kbd key={k} className="launcher-cap">{k}</kbd>)}</span>}
               </div>
             ))}
           </div>

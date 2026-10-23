@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { buildEmojiList, emojiTitle, noteRecentEmoji, searchEmoji, type EmojiEntry } from '@shared/emoji'
-import { formatBits, rpmWord, type DownloadItem, type NetworkInfo, type ProcessInfo, type SpeedResult } from '@shared/macTools'
+import { formatBits, rpmWord, type DownloadItem, type NetworkInfo, type ProcessInfo, type SpeedRun } from '@shared/macTools'
 import { bytes, type DiskInfo } from '@shared/storage'
 import type { MonitorSample } from '@shared/macApps'
 import { displayPath, formatDate, parentOf } from '@shared/finder'
 import { matchScore } from '@shared/launcher'
 import { Icon } from '../components/icons'
 import { copy, copyFile, hide, inApp, openPath, quickLook, reveal, used } from './actions'
-import type { Group, LauncherMode, Row } from './rows'
+import type { Action, Group, LauncherMode, Row } from './rows'
+import SpeedTest from './SpeedTest'
 
 /**
  * The launcher's modes: a command that opens a list of its own in the launcher, as Raycast's do (Search Emoji, Kill
@@ -39,6 +40,12 @@ export interface ModeView {
   grid?: boolean
   /** What to say when there are no rows yet. */
   empty?: string
+  /** A view of its own in place of the list (Speed Test), and what ↵ and ⌘K do there. */
+  custom?: { body: ReactNode; actions: Action[] }
+  /** The pill at the bottom left, as Raycast shows the command it is in: its icon and name, and what a click does. */
+  command?: { title: string; icon: ReactNode; run?: () => void }
+  /** The selected row's details on the right (Downloads: a preview of the file). */
+  detail?: boolean
 }
 
 const ago = (t: number, now: number): string => {
@@ -180,49 +187,53 @@ function useNetwork(on: boolean, query: string, ctx: ModeContext): Group[] {
 
 // ----- Speed Test -----
 
-function useSpeed(on: boolean): Group[] {
-  const [run, setRun] = useState<{ started: number; result?: SpeedResult; error?: string } | null>(null)
-  const [, tick] = useState(0)
-  const start = (): void => {
-    const started = Date.now()
-    setRun({ started })
-    window.api.invoke('launcher:speedTest').then((result) => setRun((r) => (r?.started === started ? { started, result } : r)), (e: Error) => setRun((r) => (r?.started === started ? { started, error: e.message } : r)))
-  }
+function useSpeed(on: boolean): { groups: Group[]; custom?: ModeView['custom']; command: ModeView['command'] } {
+  const [run, setRun] = useState<SpeedRun | null>(null)
+  const [detailed, setDetailed] = useState(false)
+  const [bump, setBump] = useState(0)
+  // Start (or join) a test, then read it four times a second until it ends.
   useEffect(() => {
-    if (!on) { setRun(null); return }
-    used('tool:speed')
-    start()
-  }, [on]) // eslint-disable-line react-hooks/exhaustive-deps
-  const running = on && !!run && !run.result && !run.error
-  useEffect(() => {
-    if (!running) return
-    const t = setInterval(() => tick((n) => n + 1), 500)
-    return () => clearInterval(t)
-  }, [running])
-  if (!on || !run) return []
-  const again = { title: 'Test Again', key: 'cmd+r', run: start }
-  if (run.error) return [{ title: 'Speed Test', rows: [{ id: 'speed:error', title: 'The test did not finish', subtitle: run.error, icon: <Icon.alert />, actions: [{ ...again, key: 'enter' }] }] }]
-  if (!run.result) {
-    const secs = Math.round((Date.now() - run.started) / 1000)
-    return [{ title: 'Speed Test', rows: [{
-      id: 'speed:running', title: `Testing download and upload… ${secs} s`, subtitle: 'macOS’s networkQuality, against Apple’s servers; about twenty seconds', icon: <Icon.gauge className="launcher-spin" />,
-      detail: { kind: 'facts', title: 'Testing…', big: <Icon.gauge className="launcher-spin" />, facts: [['Elapsed', `${secs} s`]], note: 'Download and upload run at the same time, then the delay under load (responsiveness) is worked out.' },
-      actions: []
-    }] }]
+    if (!on) { setRun(null); setDetailed(false); return }
+    let stop = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = (): void => {
+      window.api.invoke('launcher:speedStatus').then((r) => {
+        if (stop) return
+        setRun(r ? { ...r, samples: [...r.samples] } : null)
+        if (!r?.ended) timer = setTimeout(poll, 250)
+      }, () => { if (!stop) timer = setTimeout(poll, 1000) })
+    }
+    window.api.invoke('launcher:speedTest').then(poll, (e: Error) => { if (!stop) setRun({ id: '', started: Date.now(), samples: [], live: false, error: e.message, ended: Date.now() }) })
+    return () => { stop = true; clearTimeout(timer) }
+  }, [on, bump])
+  const again = (): void => { used('tool:speed'); setDetailed(false); setBump((n) => n + 1) }
+  const command = { title: 'Test Internet Speed', icon: <span className="launcher-emoji-sm">🚀</span>, run: again }
+  if (!on) return { groups: [], command }
+  const r = run?.result
+  const summary = r ? `Download ${formatBits(r.download)}, upload ${formatBits(r.upload)}, ping ${r.idleMs} ms, responsiveness ${r.rpm} RPM (${r.rating || rpmWord(r.rpm)})` : ''
+  const copyResult = { title: 'Copy Result', key: 'shift+cmd+c', run: copy(summary) }
+  const testAgain = { title: 'Test Again', key: 'cmd+r', run: again }
+  if (!detailed) {
+    return {
+      groups: [], command,
+      custom: { body: <SpeedTest run={run} />, actions: [{ title: 'Show Detailed List', key: 'enter', run: () => setDetailed(true) }, testAgain, ...(r ? [copyResult] : [])] }
+    }
   }
-  const r = run.result
-  const summary = `Download ${formatBits(r.download)}, upload ${formatBits(r.upload)}, responsiveness ${r.rpm} RPM (${rpmWord(r.rpm)}), idle latency ${r.idleMs} ms`
-  const fact = (id: string, title: string, value: string, sub: string, icon: ReactNode): Row => ({
-    id: `speed:${id}`, title: value, subtitle: title, icon,
-    detail: { kind: 'facts', title, big: <span className="launcher-big-text">{value}</span>, facts: [['Download', formatBits(r.download)], ['Upload', formatBits(r.upload)], ['Responsiveness', `${r.rpm} RPM · ${rpmWord(r.rpm)}`], ['Idle latency', `${r.idleMs} ms`], ['Interface', r.interface], ['Server', r.server]], note: sub },
-    actions: [{ title: 'Copy Result', key: 'enter', run: copy(summary) }, again]
-  })
-  return [{ title: 'Speed Test', rows: [
-    fact('down', 'Download', formatBits(r.download), 'How fast this Mac receives.', <Icon.arrowDown />),
-    fact('up', 'Upload', formatBits(r.upload), 'How fast this Mac sends.', <Icon.arrowUp />),
-    fact('rpm', 'Responsiveness', `${r.rpm} RPM · ${rpmWord(r.rpm)}`, 'Round trips a minute while the line is busy: how snappy calls, SSH and RDP stay under load.', <Icon.activity />),
-    fact('idle', 'Idle latency', `${r.idleMs} ms`, 'One round trip with nothing else going on.', <Icon.gauge />)
-  ] }]
+  const back = { title: 'Show Gauges', key: 'cmd+enter', run: () => setDetailed(false) }
+  if (!r) return { groups: [{ title: 'Speed Test', rows: [{ id: 'speed:running', title: run?.error ? 'The test did not finish' : 'Testing…', subtitle: run?.error ?? 'The result comes when networkQuality ends', icon: <Icon.gauge />, actions: [back, testAgain] }] }], command }
+  const fact = (id: string, title: string, value: string, icon: ReactNode): Row => ({ id: `speed:${id}`, title: value, subtitle: title, icon, actions: [{ title: 'Copy Result', key: 'enter', run: copy(summary) }, back, testAgain] })
+  return {
+    command,
+    groups: [{ title: 'Result', rows: [
+      fact('down', 'Download', formatBits(r.download), <Icon.arrowDown />),
+      fact('up', 'Upload', formatBits(r.upload), <Icon.arrowUp />),
+      fact('ping', 'Ping (idle latency)', `${r.idleMs} ms`, <Icon.gauge />),
+      fact('rpm', 'Responsiveness', `${r.rpm} RPM · ${r.rating || rpmWord(r.rpm)}`, <Icon.activity />),
+      ...(r.isp ? [fact('isp', 'ISP', r.isp, <Icon.globe />)] : []),
+      ...(r.externalIp ? [fact('ext', 'External IP', r.externalIp, <Icon.globe />)] : []),
+      ...(r.internalIp ? [fact('int', 'Internal IP', r.internalIp, <Icon.plug />)] : [])
+    ] }]
+  }
 }
 
 // ----- System Monitor -----
@@ -335,17 +346,18 @@ export function useModeView(mode: LauncherMode | null, query: string, ctx: ModeC
   const procs = useProcesses(mode === 'processes', query, ctx)
   const net = useNetwork(mode === 'network', query, ctx)
   const speed = useSpeed(mode === 'speed')
+  const back = (title: string, icon: ReactNode): ModeView['command'] => ({ title, icon })
   const monitor = useMonitor(mode === 'monitor', query)
   const downloads = useDownloads(mode === 'downloads', query, ctx)
   const capture = useCapture(mode === 'capture', query, ctx)
   switch (mode) {
-    case 'emoji': return { groups: emoji, grid: true, empty: emojiList ? 'No emoji has that name.' : 'Loading emoji…' }
-    case 'processes': return { groups: procs, empty: 'Reading processes…' }
-    case 'network': return { groups: net, empty: 'Reading addresses…' }
-    case 'speed': return { groups: speed, empty: 'Starting…' }
-    case 'monitor': return { groups: monitor, empty: 'Reading…' }
-    case 'downloads': return { groups: downloads, empty: query ? 'No download has that name.' : 'Reading Downloads…' }
-    case 'capture': return { groups: capture }
+    case 'emoji': return { groups: emoji, grid: true, empty: emojiList ? 'No emoji has that name.' : 'Loading emoji…', command: back('Search Emoji', <span className="launcher-emoji-sm">😀</span>) }
+    case 'processes': return { groups: procs, empty: 'Reading processes…', command: back('Kill Process', <Icon.x />) }
+    case 'network': return { groups: net, empty: 'Reading addresses…', command: back('My IP Address', <Icon.globe />) }
+    case 'speed': return { ...speed, empty: 'Starting…' }
+    case 'monitor': return { groups: monitor, empty: 'Reading…', command: back('System Monitor', <Icon.activity />) }
+    case 'downloads': return { groups: downloads, empty: query ? 'No download has that name.' : 'Reading Downloads…', detail: true, command: back('Downloads', <Icon.download />) }
+    case 'capture': return { groups: capture, command: back('Capture to Today’s Note', <Icon.noteAdd />) }
     default: return { groups: [] }
   }
 }

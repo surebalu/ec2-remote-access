@@ -703,7 +703,9 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return channel === 'launcher:paste' ? 'pasted' : channel === 'notes:capture' ? 'Daily/2026-10-23.md' : channel === 'launcher:quitAll' ? 2 : undefined
     }
     case 'launcher:network': return { addresses: [{ label: 'Public IPv4', address: '203.0.113.7', note: 'How websites and AWS security groups see this Mac' }, { label: 'Wi-Fi (en0)', address: '192.168.0.20', note: '192.168.0.20/24' }, { label: 'Tailscale', address: '100.101.7.3' }, { label: 'Router', address: '192.168.0.1' }] }
-    case 'launcher:speedTest': return { download: 412_345_678, upload: 23_456_789, rpm: 1234, idleMs: 18, interface: 'en0', server: 'fixture' }
+    case 'launcher:speedTest': return { id: 'fixture-speed' }
+    case 'launcher:speedStatus': return { id: 'fixture-speed', started: now, ended: now + 20_000, live: true, samples: Array.from({ length: 30 }, (_, i) => ({ t: i * 250, down: 412.3 * Math.min(1, (i + 3) / 12), up: 23.4 * Math.min(1, (i + 2) / 14), rpm: i > 8 ? 1234 : 0 })),
+      result: { download: 412_345_678, upload: 23_456_789, rpm: 1234, idleMs: 18, rating: 'High', workingMs: 48.6, interface: 'en0', server: 'fixture', isp: 'Frontier Communications', location: 'Austin, Texas, US', externalIp: '203.0.113.7', internalIp: '192.168.0.20' } }
     case 'launcher:downloads': return [
       { name: 'invoice-october.pdf', path: '/Users/fixture/Downloads/invoice-october.pdf', size: 245_000, dir: false, added: now - 3600_000 },
       { name: 'ubuntu-24.04.iso', path: '/Users/fixture/Downloads/ubuntu-24.04.iso', size: 6.1e9, dir: false, added: now - 3 * 86400_000 }
@@ -2947,7 +2949,7 @@ app.whenReady().then(async () => {
 
     // The launcher's own window: apps by initials, a sum, hosts by name or IP, the app's sections, Spotlight files,
     // the actions menu, Ask Claude, and Esc.
-    const lwin = new BrowserWindow({ show: false, width: 700, height: 446, frame: false, transparent: true, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    const lwin = new BrowserWindow({ show: false, width: 780, height: 505, frame: false, transparent: true, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
     lwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
     const ljs = (code) => lwin.webContents.executeJavaScript(code)
     const luntil = async (code, what = code) => {
@@ -3013,7 +3015,7 @@ app.whenReady().then(async () => {
     assert.ok(await ljs(`[...document.querySelectorAll('[role="group"][aria-label="Notes"] .launcher-title')].some((t) => t.textContent === 'Runbook')`), 'a note by name')
     for (let n = 0; n < 12 && (await ljs(picked)) !== 'Runbook.pdf'; n++) await lkey('ArrowDown')
     // The side pane: the file's kind, folder, size and dates, as in FileMinutes; ⌘Y is Quick Look.
-    await luntil(`document.querySelector('.launcher-detail')?.textContent.includes('PDF document') && document.querySelector('.launcher-detail').textContent.includes('~/Documents') && document.querySelector('.launcher-detail').textContent.includes('1.2 MB')`, 'file details')
+    await luntil(`document.querySelector('.launcher-item.on .launcher-type')?.textContent === 'File' && !document.querySelector('.launcher-detail')`, 'a file, labelled as one, in one column as in Raycast')
     assert.equal(await ljs(`document.querySelector('.launcher-item.on .launcher-sub')?.textContent`), '~/Documents', 'the folder under the name')
     await lshot('launcher-files.png')
     await lkey('y', { metaKey: true, code: 'KeyY' })
@@ -3057,15 +3059,15 @@ app.whenReady().then(async () => {
     await done('Esc on an empty field puts it away', () => launcherDone.filter((d) => d[0] === 'launcher:hide').length > hides)
     // Opened since: Visual Studio Code is a recent item now.
     lwin.webContents.send('launcher:shown', { at: Date.now() })
-    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Recent"] .launcher-title')].some((t) => t.textContent === 'Visual Studio Code')`, 'recent items')
+    await luntil(`[...document.querySelectorAll('[role="group"][aria-label="Suggestions"] .launcher-title')].some((t) => t.textContent === 'Visual Studio Code')`, 'recent items')
     // Raycast's commands: a window layout (Accessibility asked for first), the emoji grid typed into the app in front,
     // Kill Process, My IP, Speed Test, Downloads, Capture to today's note and Quit All Apps.
     const commandRow = (title) => `[...document.querySelectorAll('[role="group"][aria-label="Commands"] .launcher-item')].find((r) => r.querySelector('.launcher-title').textContent === ${JSON.stringify(title)})`
     await ltype('left half')
-    await luntil(`${picked} === 'Left Half' && document.querySelector('.launcher-foot').textContent.includes('Allow Window Control')`, 'a window layout, asking for Accessibility first')
+    await luntil(`${picked} === 'Left Half' && document.querySelector('.launcher-bar').textContent.includes('Allow Window Control')`, 'a window layout, asking for Accessibility first')
     await lkey('Enter')
     await done('Allow asks macOS', (d) => d[0] === 'wm:askAccess')
-    await luntil(`document.querySelector('.launcher-foot').textContent.includes('Move the Window')`, 'then it moves windows')
+    await luntil(`document.querySelector('.launcher-bar').textContent.includes('Move the Window')`, 'then it moves windows')
     await lshot('launcher-window.png')
     await lkey('Enter')
     await done('↩ moves the window in front', (d) => d[0] === 'wm:layout' && d[1] === 'left-half')
@@ -3074,19 +3076,19 @@ app.whenReady().then(async () => {
     await ltype('emoji')
     await luntil(`${picked} === 'Search Emoji'`, 'the emoji command')
     await lkey('Enter')
-    await luntil(`document.querySelector('.launcher-mode')?.textContent === 'Emoji' && document.querySelectorAll('.launcher-cell').length > 100`, 'the emoji grid')
+    await luntil(`document.querySelector('.launcher-command > span:last-child')?.textContent === 'Search Emoji' && !!document.querySelector('.launcher-back') && document.querySelectorAll('.launcher-cell').length > 100`, 'the emoji grid')
     await ltype('rocket')
-    await luntil(`document.querySelector('.launcher-cell.on')?.getAttribute('aria-label') === 'Rocket' && document.querySelector('.launcher-emoji-big')?.textContent === '🚀'`, 'an emoji by name')
+    await luntil(`document.querySelector('.launcher-cell.on')?.getAttribute('aria-label') === 'Rocket' && document.querySelector('.launcher-cell.on').textContent === '🚀'`, 'an emoji by name')
     await lshot('launcher-emoji.png')
     await lkey('Enter')
     await done('↩ types it into the app in front', (d) => d[0] === 'launcher:paste' && d[1] === '🚀')
     await ltype('')
     await lkey('Backspace')
-    await luntil(`!document.querySelector('.launcher-mode')`, '⌫ on an empty field goes back to search')
+    await luntil(`!document.querySelector('.launcher-back')`, '⌫ on an empty field goes back to search')
     await ltype('kill process')
     await luntil(`${picked} === 'Kill Process'`, 'kill process')
     await lkey('Enter')
-    await luntil(`${picked} === 'Runaway' && document.querySelector('.launcher-mode')?.textContent === 'Kill Process'`, 'the busiest process first')
+    await luntil(`${picked} === 'Runaway' && document.querySelector('.launcher-command > span:last-child')?.textContent === 'Kill Process'`, 'the busiest process first')
     await lshot('launcher-kill.png')
     await lkey('Enter')
     await done('↩ asks it to quit', (d) => d[0] === 'launcher:kill' && d[1] === 4242 && d[2] === false)
@@ -3097,7 +3099,7 @@ app.whenReady().then(async () => {
     await done('⌘↩ force quits', (d) => d[0] === 'launcher:kill' && d[1] === 501 && d[2] === true)
     await lkey('Escape')
     await lkey('Escape')
-    await luntil(`!document.querySelector('.launcher-mode') && document.querySelector('.launcher-search input').value === ''`, 'Esc clears, then goes back')
+    await luntil(`!document.querySelector('.launcher-back') && document.querySelector('.launcher-search input').value === ''`, 'Esc clears, then goes back')
     await ltype('my ip')
     await luntil(`${picked} === 'My IP Address'`, 'my ip')
     await lkey('Enter')
@@ -3109,7 +3111,11 @@ app.whenReady().then(async () => {
     await ltype('speed test')
     await luntil(`${picked} === 'Speed Test'`, 'speed test')
     await lkey('Enter')
-    await luntil(`${picked} === '412 Mbps' && [...document.querySelectorAll('.launcher-title')].some((t) => t.textContent === '1234 RPM · High')`, 'the result')
+    await luntil(`document.querySelector('.sp-status')?.textContent === 'Finished' && document.querySelector('.sp-gauge.down svg').getAttribute('aria-label') === 'Download: 412.35 Mbps' && document.querySelector('.sp-side').textContent.includes('Frontier Communications')`, 'the gauges, as in Raycast')
+    assert.equal(await ljs(`document.querySelectorAll('.sp-chip.ok').length`), 10, 'fast enough for every call and stream')
+    await lshot('launcher-speed.png')
+    await lkey('Enter')
+    await luntil(`${picked} === '412 Mbps' && [...document.querySelectorAll('.launcher-title')].some((t) => t.textContent === '1234 RPM · High')`, '↩ shows the detailed list')
     await lkey('Escape')
     await ltype('downloads')
     await luntil(`!!${commandRow('Downloads')}`, 'the downloads command')
@@ -3122,7 +3128,7 @@ app.whenReady().then(async () => {
     await ltype('capture')
     await luntil(`!!${commandRow('Capture to Today’s Note')}`, 'the capture command')
     await ljs(`${commandRow('Capture to Today’s Note')}.click()`)
-    await luntil(`document.querySelector('.launcher-mode')?.textContent === 'Capture'`, 'capture mode')
+    await luntil(`document.querySelector('.launcher-command > span:last-child')?.textContent === 'Capture to Today’s Note'`, 'capture mode')
     await ltype('call Sam about the release')
     await luntil(`${picked} === 'Add “call Sam about the release”'`, 'what will be added')
     await lkey('Enter')

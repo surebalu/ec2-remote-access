@@ -52,3 +52,30 @@ test('Quit All Apps leaves Finder and this app', () => {
   assert.deepEqual(plan.apps, [{ pid: 12, name: 'Slack' }])
   assert.deepEqual(plan.kept, ['Finder', 'EC2 Remote Access', 'Safari'])
 })
+
+// What networkQuality wrote under a pseudo-terminal on this Mac (live lines over each other, then the summary).
+const TTY = '\x04\b\b\r\x1b[2K\rDownlink: 18.602 Mbps, 0 RPM - Uplink: 0.000 Mbps, 0 RPM\r\x1b[2K\rDownlink: 357.749 Mbps, 0 RPM - Uplink: 73.016 Mbps, 0 RPM\r\x1b[2K\rDownlink: 1124.724 Mbps, 1613 RPM - Uplink: 342.614 Mbps, 1613 RPM\r\x1b[2K==== Verbose Results ====\r\n   Test Endpoint: usewr1-edge-bx-026.aaplimg.com\r\n   Interface: en13\r\n==== SUMMARY ====\r\nUplink capacity: 342.614 Mbps\r\nDownlink capacity: 1.098 Gbps\r\nResponsiveness: High (37.196 milliseconds | 1613 RPM)\r\nIdle Latency: 25.824 milliseconds | 2323 RPM\r\n'
+
+test('networkQuality’s live lines and summary', async () => {
+  const { parseSpeedProgress, parseSpeedSummary, capacityBps } = await import('../src/shared/macTools.ts')
+  assert.deepEqual(parseSpeedProgress(TTY), [{ down: 18.602, up: 0, rpm: 0 }, { down: 357.749, up: 73.016, rpm: 0 }, { down: 1124.724, up: 342.614, rpm: 1613 }])
+  const r = parseSpeedSummary(TTY)!
+  assert.deepEqual([r.download, r.upload, r.rpm, r.idleMs, r.rating, r.workingMs, r.interface, r.server], [1_098_000_000, 342_614_000, 1613, 25.8, 'High', 37.2, 'en13', 'usewr1-edge-bx-026.aaplimg.com'])
+  assert.equal(parseSpeedSummary('Downlink: 1 Mbps, 0 RPM - Uplink: 1 Mbps, 0 RPM'), null, 'no summary yet')
+  assert.equal(capacityBps('850.5 Kbps'), 850_500)
+})
+
+test('the gauge’s scale and what a speed is good for', async () => {
+  const { gaugeFraction, speedCapabilities, ispName } = await import('../src/shared/macTools.ts')
+  assert.equal(gaugeFraction(0), 0)
+  assert.equal(gaugeFraction(1), 1 / 7)
+  assert.equal(gaugeFraction(100), 5 / 7)
+  assert.ok(Math.abs(gaugeFraction(300) - (5 + 0.5) / 7) < 1e-9)
+  assert.equal(gaugeFraction(1568), 1)
+  const fast = speedCapabilities(1.5e9, 1.4e9)
+  assert.ok([...fast.voice, ...fast.video, ...fast.streaming].every((x) => x.ok))
+  const slow = speedCapabilities(4e6, 1.2e6)
+  assert.deepEqual(slow.video.map((x) => x.ok), [true, false, false, false])
+  assert.deepEqual(slow.streaming.map((x) => x.ok), [true, false, false, false])
+  assert.equal(ispName('AS5650 Frontier Communications of America, Inc.'), 'Frontier Communications of America')
+})
