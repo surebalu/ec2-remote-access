@@ -90,9 +90,8 @@ export default function AppRail(): ReactElement {
   return (
     <nav className="app-rail" aria-label="App sections">
       {item({ label: 'Search', icon: <Icon.search />, on: false, title: 'Find hosts, tools and commands (⌘K)', onClick: () => st().openQuickSwitcher() })}
+      {/* One list, in TOOL_GROUPS order, with no group labels or dividers (the user found them cluttered). */}
       <div className="rail-sections">
-      <div className="rail-group" role="group" aria-label="Operate">
-      <span className="rail-group-label">Operate</span>
       {item({ label: 'Hosts', icon: <Icon.server />, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
       {item({
         label: 'Overview',
@@ -105,12 +104,7 @@ export default function AppRail(): ReactElement {
         onClick: () => st().showGrid(!gridView || !!gridHost),
         onContextMenu: (el) => setMenu({ kind: 'overview', anchor: el })
       })}
-      {tool('health', <Icon.health />, TOOL_DESCRIPTIONS.health)}
-      </div>
-      {TOOL_GROUPS.filter((g) => g.id !== 'operate').map((group) => <div key={group.id} className="rail-group" role="group" aria-label={group.label}>
-        <span className="rail-group-label">{group.label}</span>
-        {group.tools.filter((kind) => hasBrowser() || !['local', 'finder'].includes(kind)).map((kind) => tool(kind, LOOKS[kind].icon(), TOOL_DESCRIPTIONS[kind]))}
-      </div>)}
+      {TOOL_GROUPS.flatMap((g) => g.tools).filter((kind) => hasBrowser() || !['local', 'finder'].includes(kind)).map((kind) => tool(kind, LOOKS[kind].icon(), TOOL_DESCRIPTIONS[kind]))}
       </div>
       <div className="rail-utilities">
       {hasBrowser() && item({
