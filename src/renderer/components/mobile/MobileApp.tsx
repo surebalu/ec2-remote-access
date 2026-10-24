@@ -4,6 +4,8 @@ import { TOOL_DESCRIPTIONS } from '../../toolCatalog'
 import { nativeApp, postNative, setLayoutPreference, trackVisualViewport, WIDE_QUERY } from '../../mobile'
 import { consoleHomeFor, openConsoleOnDevice } from '../../quickConnect'
 import { metaFor, initials } from '../../colors'
+import { useBox } from '../../box'
+import { agoLabel } from '@shared/dataFolder'
 import { SessionPanes } from '../TerminalTabs'
 import AuthBanner from '../AuthBanner'
 import { Icon } from '../icons'
@@ -266,6 +268,7 @@ function MobileMore(): ReactElement {
           </button>
         ))}
       </div>
+      <BoxCard />
       <h3 className="m-group-title">Appearance</h3>
       <div className="m-segment" role="radiogroup" aria-label="Theme">
         {(['system', 'light', 'dark'] as const).map((t) => (
@@ -328,5 +331,29 @@ function MobileMore(): ReactElement {
       </div>
       <p className="m-footnote muted">Sessions run on the computer hosting EC2 Remote Access. AWS credentials never leave it; this device sends keystrokes and shows the screen.</p>
     </div>
+  )
+}
+
+/**
+ * Box sync for the computer this phone or iPad is paired with: its state and Sync now, or the sign-in (a link opened
+ * by the tap itself; the iOS app hands it to Safari, and Box sends the answer back to the gateway's /box/callback).
+ */
+function BoxCard(): ReactElement | null {
+  const { st, link, note, sync } = useBox()
+  if (!st?.available) return null
+  const row = (title: string, meta: string): ReactElement => (
+    <><span className="m-host-os"><Icon.cloud /></span><span className="min-w-0 flex-1 text-left"><span className="m-host-name">{title}</span><span className="m-host-meta">{meta}</span></span></>
+  )
+  return (
+    <>
+      <h3 className="m-group-title">Box</h3>
+      <div className="m-card-list">
+        {st.signedIn
+          ? <button className="m-host" disabled={st.syncing} onClick={sync}>{row(st.syncing ? 'Syncing with Box…' : 'Sync with Box now', st.lastError ?? `${st.lastSync ? `Synced ${agoLabel(st.lastSync)}` : 'Not synced yet'}${st.user ? ` · ${st.user.login}` : ''}`)}</button>
+          : link
+            ? <a className="m-host" href={link} target="_blank" rel="noopener noreferrer">{row('Sign in to Box', 'Tasks, Calendar, Links and whiteboards on every computer')}</a>
+            : <div className="m-host">{row('Box', note ?? 'Preparing the sign-in…')}</div>}
+      </div>
+    </>
   )
 }

@@ -40,6 +40,11 @@ export interface GatewayOptions {
    * machine's owner turned it on there: the Mac's Settings → Phone access, or the gateway's --allow-terminals.
    */
   allowTerminals?: () => boolean
+  /**
+   * Box's answer after a sign-in started from a page here (main/box.ts boxCallback): the page to show. Box redirects
+   * the browser without the gateway's token; the sign-in's own state is what proves the answer is ours.
+   */
+  boxCallback?: (query: URLSearchParams) => Promise<string>
 }
 
 export interface Gateway {
@@ -76,7 +81,7 @@ const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) =
  * is said there. Shells on this machine (term:*) are refused too unless `allowTerminals` says otherwise.
  */
 export function desktopOnly(channel: string): boolean {
-  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'browser:paneTargets', 'browser:frontPage', 'data:pickFolder', 'data:setFolder', 'data:copyLinkFiles', 'data:reveal', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal', 'app:emojiPanel', 'app:pointer', 'local:open', 'local:quickLook', 'maccal:ask', 'maccal:settings'].includes(channel) || channel.startsWith('finder:') || channel.startsWith('storage:') || channel.startsWith('launcher:') || channel.startsWith('wm:') || channel.startsWith('cad:') || channel.startsWith('setup:') || channel.startsWith('linksPanel:') || channel.startsWith('tools:') || channel.startsWith('ext:')
+  return channel.startsWith('web:') || channel.startsWith('voice:') || ['browser:fill', 'browser:logins', 'browser:openDownload', 'browser:cancelDownload', 'browser:share', 'browser:paneTargets', 'browser:frontPage', 'data:pickFolder', 'data:setFolder', 'data:copyLinkFiles', 'data:reveal', 'phone:configure', 'phone:rotateToken', 'phone:terminals', 'app:reveal', 'app:emojiPanel', 'app:pointer', 'local:open', 'local:quickLook', 'maccal:ask', 'maccal:settings'].includes(channel) || channel.startsWith('finder:') || channel.startsWith('storage:') || channel.startsWith('launcher:') || channel.startsWith('wm:') || channel.startsWith('cad:') || channel.startsWith('setup:') || channel === 'links:openFile' || channel.startsWith('linksPanel:') || channel.startsWith('tools:') || channel.startsWith('ext:')
 }
 
 export function createGatewayServer(opts: GatewayOptions): Gateway {
@@ -138,6 +143,11 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname === '/auth') { res.writeHead(url.searchParams.get('token') === opts.token ? 204 : 401, { 'cache-control': 'no-store' }).end(); return }
+    if (url.pathname === '/box/callback' && opts.boxCallback) {
+      const page = await opts.boxCallback(url.searchParams)
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page)
+      return
+    }
     if (url.pathname === '/health') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, clients: clients.size })); return }
     if (!opts.staticDir) { res.writeHead(404).end(); return }
     let rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '')

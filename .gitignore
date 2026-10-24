@@ -11,3 +11,5 @@ build/native/
 .claude/worktrees/
 # The organization’s AWS sign-in baked into a build (scripts/make-company-config.mjs).
 build/company.json
+# The Box app's client id and secret (src/main/box.ts): shipped in builds, never committed.
+build/box.json

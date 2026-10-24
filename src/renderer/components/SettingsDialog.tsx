@@ -5,6 +5,7 @@ import { agoLabel } from '@shared/dataFolder'
 import { DEFAULT_SERVICES, isUnitName, type ServiceDef } from '@shared/services'
 import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, SHORTCUT_TARGETS, sectionKeys, TARGET_NAMES, type RailSection, type ShortcutTarget } from '@shared/keyCombos'
 import { CAN_DICTATE, voice } from '../voice'
+import { useBox } from '../box'
 import { useStore } from '../store'
 import Modal from './Modal'
 import { ACCENTS, metaFor } from '../colors'
@@ -222,6 +223,50 @@ const isGlobal = (t: KeyTarget | null): t is GlobalTarget => !!t && Object.hasOw
  * Tasks, Calendar, Links and the whiteboards are merged into whenever it can be reached. Applies at once, outside the
  * Settings draft (Save leaves dataDir alone).
  */
+/** Box as the shared copy (renderer/box.ts, main/boxSync.ts); hidden in a build without a Box app. */
+function BoxSettings(): ReactElement | null {
+  const { st, link, note, waiting, signIn, signOut, sync } = useBox()
+  const [, setTick] = useState(0)
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30_000); return () => clearInterval(t) }, [])
+  if (!st?.available) return null
+  const what = 'Tasks, Calendar, Links with their files, whiteboards and CAD reviews'
+  if (!st.signedIn) {
+    return (
+      <Group title="Box">
+        <Row label={<span className="flex items-center gap-2"><Icon.cloud className="set-key-icon" />Box</span>}
+          hint={waiting ? 'Waiting for you to allow the app in the browser…' : `Keep ${what} in your Box, in the folder “Remote Access Tool”, on every computer that signs in (the Raspberry Pi too). This computer keeps its own copy and syncs a moment after each change; nothing needs Box Drive.`}>
+          {IN_ELECTRON
+            ? <button className="btn btn-primary" onClick={signIn}>{waiting ? 'Open Box again' : 'Sign in to Box…'}</button>
+            : link ? <a className="btn btn-primary" href={link} target="_blank" rel="noopener noreferrer">Sign in to Box…</a> : <span className="muted text-[12px]">{note ?? 'Preparing…'}</span>}
+        </Row>
+      </Group>
+    )
+  }
+  const state: ReactNode = st.syncing ? 'Syncing…'
+    : st.lastError ? <span className="set-key-error">{st.lastError}</span>
+      : st.lastSync ? `In step: synced ${agoLabel(st.lastSync)}. Syncs a moment after each change and every minute.`
+        : 'Not synced yet.'
+  return (
+    <Group title="Box">
+      <Row label={<span className="flex items-center gap-2"><Icon.cloud className="set-key-icon" />Box</span>}
+        hint={<>Signed in{st.user ? <> as <b>{st.user.name}</b> ({st.user.login})</> : ''}. {what} sync with <span className="mono">{st.folder?.name ?? 'Remote Access Tool'}</span> in your Box.</>}>
+        <div className="flex items-center gap-2">
+          {st.folder && <button className="btn btn-ghost" onClick={() => void window.api.invoke('shell:open', `https://app.box.com/folder/${st.folder!.id}`)}>Open in Box</button>}
+          <button className="btn btn-ghost" onClick={signOut}>Sign out</button>
+        </div>
+      </Row>
+      <Row label="State" hint={state}>
+        <button className="btn" disabled={st.syncing} onClick={sync}>Sync now</button>
+      </Row>
+      {st.files && (
+        <Row label="Links files" hint={st.files.done < st.files.total
+          ? `Sending to Box: ${st.files.done} of ${st.files.total}…`
+          : `Sent ${st.files.total - st.files.tooLarge} to Box; other computers download one when it is opened.${st.files.tooLarge ? ` ${st.files.tooLarge} larger than 50 MB stay on this Mac.` : ''}`} />
+      )}
+    </Group>
+  )
+}
+
 function DataSettings(): ReactElement {
   const [st, setSt] = useState<DataStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -282,6 +327,7 @@ function DataSettings(): ReactElement {
         )}
         {error && <div className="set-row"><span className="set-key-error">{error}</span></div>}
       </Group>
+      <BoxSettings />
       {IN_ELECTRON && (
         <Group title="Move to another Mac">
           <Row label="Export setup" hint="Your settings (favorites, host settings, servers, workspaces, labels, shortcuts, appearance) and your IAM Identity Center profiles, in one file. Never passwords or access keys.">

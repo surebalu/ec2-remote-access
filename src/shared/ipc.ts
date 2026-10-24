@@ -1,3 +1,4 @@
+import type { BoxStatus } from './box'
 import type { CompanySetup, SetupPreview } from './setup'
 import type { ExtensionInfo } from './extensions'
 import type { AnyboxLibrary } from './links'
@@ -198,6 +199,17 @@ export interface IpcApi {
   /** Makes `dir` the data folder after checking it can be written ('' stops using one), then syncs. */
   'data:setFolder': (dir: string) => Promise<DataStatus>
   'data:sync': () => Promise<DataStatus>
+  /** Box as the shared copy (main/boxSync.ts): signed in or not, as whom, the last sync. */
+  'box:status': () => Promise<BoxStatus>
+  /**
+   * Starts a Box sign-in. The Mac app opens the browser itself (opened: true) and waits on its loopback address; on
+   * the gateway the page opens `url` (it passes its own origin, where Box sends the answer: /box/callback).
+   */
+  'box:signIn': (origin?: string) => Promise<{ url: string; opened: boolean }>
+  'box:signOut': () => Promise<BoxStatus>
+  'box:sync': () => Promise<BoxStatus>
+  /** Opens a Links file: on this computer, else downloaded from its copy in Box. */
+  'links:openFile': (id: string) => Promise<void>
   /** Copies the Links files into the data folder and points the links at the copies (in the background). */
   'data:copyLinkFiles': () => Promise<DataStatus>
   /** Shows one of the places in Finder ('folder' is the data folder). */
@@ -468,6 +480,7 @@ export interface IpcEvents {
   /** A Tasks, Calendar or Links document changed (from any device): reload it if this revision is newer. */
   'records:changed': { kind: RecordKind; rev: number }
   'data:status': DataStatus
+  'box:status': BoxStatus
   'profiles:status': ProfileStatus
   'instances:updated': Instance[]
   'phone:changed': PhoneAccessStatus

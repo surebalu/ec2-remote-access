@@ -347,9 +347,9 @@ function FindPanel({ links, folders }: { links: LinkItem[]; folders: LinkFolder[
     }
     const l = e.item
     if (how === 'reveal' || l.kind === 'note' || (!l.url && !l.path)) { command({ kind: 'links', id: l.id }); return }
-    if (l.kind === 'file' && l.path) {
+    if (l.kind === 'file' && (l.path || l.box)) {
       used(l)
-      void window.api.invoke('local:open', l.path).then(hide, (err: Error) => setFlash(err.message))
+      void window.api.invoke('links:openFile', l.id).then(hide, (err: Error) => setFlash(err.message))
       return
     }
     used(l)

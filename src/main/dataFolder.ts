@@ -73,7 +73,7 @@ export function dataStatus(): DataStatus {
 }
 
 /** Where the Links file items are: their common folder, else the default one. */
-function linkFilesRoot(): string {
+export function linkFilesRoot(): string {
   let paths: string[] = []
   try { paths = itemsOf<LinkItem>(loadRecords('links'), 'link').flatMap((l) => (l.kind === 'file' && l.path ? [l.path] : [])) } catch { /* unreadable: the default */ }
   if (!paths.length) return LINK_FILES

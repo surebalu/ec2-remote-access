@@ -19,6 +19,9 @@ if (!ssmPlugin) console.warn('  • build/native/ssm-<arch> is missing: packagin
 // never committed; with it the first run offers to sign in and set up the accounts. Without it the build is generic.
 const company = 'build/company.json'
 if (existsSync(company)) console.log(`  • including ${company} (first-run AWS sign-in)`)
+// The Box app for Settings → Data → Box (src/main/box.ts): its client id and secret, never committed.
+const boxApp = 'build/box.json'
+if (existsSync(boxApp)) console.log(`  • including ${boxApp} (Box sync)`)
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -38,7 +41,8 @@ module.exports = {
     ...(existsSync(dictationHelper) ? [{ from: dictationHelper, to: 'dictation/ec2ra-dictate' }] : []),
     ...(existsSync(controlHelper) ? [{ from: controlHelper, to: 'control/ec2ra-control' }] : []),
     ...(ssmPlugin ? [{ from: 'build/native/ssm-${arch}', to: 'ssm' }] : []),
-    ...(existsSync(company) ? [{ from: company, to: 'company.json' }] : [])
+    ...(existsSync(company) ? [{ from: company, to: 'company.json' }] : []),
+    ...(existsSync(boxApp) ? [{ from: boxApp, to: 'box.json' }] : [])
   ],
   afterPack: 'build/afterPack.cjs',
   afterSign: 'build/afterSign.cjs',
