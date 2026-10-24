@@ -61,6 +61,9 @@ export class CadScene {
   private measureMarker: THREE.Mesh | null = null
   private flight: { from: CadView; to: CadView; t0: number } | null = null
   private down: { x: number; y: number } | null = null
+  /** Fingers on the canvas: a pinch or two-finger pan is never a tap, even when one finger barely moved. */
+  private readonly touching = new Set<number>()
+  private gesture = false
   private running = false
   private readonly ro: ResizeObserver
   private readonly lineMaterial = new THREE.LineBasicMaterial({ color: 0x1b1f27, transparent: true, opacity: 0.5 })
@@ -100,6 +103,7 @@ export class CadScene {
     const dom = this.renderer.domElement
     dom.addEventListener('pointerdown', this.onDown)
     dom.addEventListener('pointerup', this.onUp)
+    dom.addEventListener('pointercancel', this.onCancel)
     this.ro = new ResizeObserver(() => this.resize())
     this.ro.observe(container)
   }
@@ -117,6 +121,7 @@ export class CadScene {
     this.ro.disconnect()
     this.renderer.domElement.removeEventListener('pointerdown', this.onDown)
     this.renderer.domElement.removeEventListener('pointerup', this.onUp)
+    this.renderer.domElement.removeEventListener('pointercancel', this.onCancel)
     this.setModel(null)
     this.controls.dispose()
     this.renderer.dispose()
@@ -439,6 +444,8 @@ export class CadScene {
   }
 
   private readonly onDown = (e: PointerEvent): void => {
+    this.touching.add(e.pointerId)
+    if (this.touching.size > 1) this.gesture = true
     this.down = { x: e.clientX, y: e.clientY }
     if (this.tool !== 'orbit') {
       // Measuring and pinning click on the model; the view still turns with a drag.
@@ -446,11 +453,22 @@ export class CadScene {
     }
   }
 
+  private readonly onCancel = (e: PointerEvent): void => {
+    this.touching.delete(e.pointerId)
+    if (!this.touching.size) this.gesture = false
+    this.down = null
+  }
+
   private readonly onUp = (e: PointerEvent): void => {
     const d = this.down
     this.down = null
-    if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || e.button !== 0) return
-    const hit = this.pick(e.clientX, e.clientY)
+    this.touching.delete(e.pointerId)
+    const gesture = this.gesture
+    if (!this.touching.size) this.gesture = false
+    // A finger wobbles more than a mouse, and is wider than a corner.
+    const touch = e.pointerType === 'touch' || e.pointerType === 'pen'
+    if (!d || gesture || Math.hypot(e.clientX - d.x, e.clientY - d.y) > (touch ? 10 : 4) || e.button !== 0) return
+    const hit = this.pick(e.clientX, e.clientY, touch ? 24 : 10)
     if (this.tool === 'orbit') { this.events.onSelect(hit); return }
     if (!hit) return
     if (this.tool === 'pin') { this.events.onPin(hit); return }
@@ -466,8 +484,8 @@ export class CadScene {
     this.events.onMeasure(v3(a), v3(p), a.distanceTo(p))
   }
 
-  /** What is under the pointer: the nearest visible, uncut surface, snapped to a corner within 10 px when measuring. */
-  pick(clientX: number, clientY: number): PickHit | null {
+  /** What is under the pointer: the nearest visible, uncut surface, snapped to a corner within `snap` px when measuring. */
+  pick(clientX: number, clientY: number, snap = 10): PickHit | null {
     if (!this.model) return null
     const rect = this.renderer.domElement.getBoundingClientRect()
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
@@ -480,7 +498,7 @@ export class CadScene {
     if (this.tool === 'measure' && hit.face) {
       const mesh = hit.object as THREE.Mesh
       const pos = mesh.geometry.getAttribute('position')
-      let best = 10
+      let best = snap
       for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
         const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld)
         const s = v.clone().project(this.camera)

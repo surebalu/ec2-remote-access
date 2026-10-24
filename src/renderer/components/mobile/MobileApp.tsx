@@ -15,8 +15,8 @@ import Sheet, { SheetItem } from './Sheet'
 type View = 'hosts' | 'sessions' | 'more'
 
 const dotFor = (st: Tab['status']): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'tasks' ? <Icon.tasks /> : t.kind === 'calendar' ? <Icon.calendar /> : t.kind === 'links' ? <Icon.bookmark /> : t.kind === 'health' ? <Icon.health /> : <Icon.terminal />)
-const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : t.kind === 'devtools' ? 'Dev tools' : t.kind === 'tasks' ? 'Tasks' : t.kind === 'calendar' ? 'Calendar' : t.kind === 'links' ? 'Links' : t.kind === 'health' ? 'Health' : 'Terminal')
+const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'tasks' ? <Icon.tasks /> : t.kind === 'calendar' ? <Icon.calendar /> : t.kind === 'links' ? <Icon.bookmark /> : t.kind === 'health' ? <Icon.health /> : t.kind === 'cad' ? <Icon.cube /> : <Icon.terminal />)
+const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : t.kind === 'devtools' ? 'Dev tools' : t.kind === 'tasks' ? 'Tasks' : t.kind === 'calendar' ? 'Calendar' : t.kind === 'links' ? 'Links' : t.kind === 'health' ? 'Health' : t.kind === 'cad' ? 'CAD' : 'Terminal')
 
 const LIST_HIDDEN_KEY = 'ui.mobileListHidden'
 
@@ -260,7 +260,7 @@ function MobileMore(): ReactElement {
       )}
       <h3 className="m-group-title">Tools</h3>
       <div className="m-card-list">
-        {([['tasks', Icon.tasks], ['calendar', Icon.calendar], ['links', Icon.bookmark], ['devtools', Icon.code]] as const).map(([kind, Ico]) => (
+        {([['tasks', Icon.tasks], ['calendar', Icon.calendar], ['links', Icon.bookmark], ['cad', Icon.cube], ['devtools', Icon.code]] as const).map(([kind, Ico]) => (
           <button key={kind} className="m-host" onClick={() => s.openTool(kind)}>
             <span className="m-host-os"><Ico /></span><span className="min-w-0 flex-1 text-left"><span className="m-host-name">{TOOL_NAMES[kind]}</span><span className="m-host-meta">{TOOL_DESCRIPTIONS[kind]}</span></span>
           </button>

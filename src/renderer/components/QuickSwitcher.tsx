@@ -78,7 +78,7 @@ function commands(): Command[] {
     { id: 'browser', title: 'Open browser', keywords: 'web arc tabs internet', hint: keyOf('browser'), icon: Icon.globe, run: () => s.openBrowser(), when: hasBrowser() },
     { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', hint: keyOf('finder'), icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
     { id: 'storage', title: 'Open Storage', keywords: 'disk space clean cleaner junk caches large files duplicates trash strata free up mac', hint: keyOf('storage'), icon: Icon.storage, run: () => s.openTool('storage'), when: hasBrowser() },
-    { id: 'cad', title: 'Open the CAD viewer', keywords: 'step stp iges cad 3d model part assembly solidworks review viewer', hint: keyOf('cad'), icon: Icon.cube, run: () => s.openCad(), when: hasBrowser() },
+    { id: 'cad', title: 'Open the CAD viewer', keywords: 'step stp iges cad 3d model part assembly solidworks review viewer', hint: keyOf('cad'), icon: Icon.cube, run: () => s.openCad() },
     { id: 'health', title: 'Open health', keywords: '3dexperience platform status monitoring prometheus grafana metrics alerts', hint: keyOf('health'), icon: Icon.health, run: () => s.openTool('health') },
     { id: 'tasks', title: 'Open tasks', keywords: 'todo to-do things todoist reminders today upcoming projects checklist', hint: keyOf('tasks'), icon: Icon.tasks, run: () => s.openTool('tasks') },
     { id: 'calendar', title: 'Open calendar', keywords: 'events schedule agenda meetings month week ical', hint: keyOf('calendar'), icon: Icon.calendar, run: () => s.openTool('calendar') },

@@ -85,9 +85,9 @@ export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser
 /** Tools that are one tab with nothing in main to open or close: shown as they are, on every device. */
 const PLAIN_TOOLS: readonly ToolKind[] = ['health', 'devtools', 'tasks', 'calendar', 'links']
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
-export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'storage', 'cad', 'claude', 'chatgpt']
+export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'storage', 'claude', 'chatgpt']
 /** Tools about this Mac itself (its shells, files and disk): not shown at all off the Mac app. */
-export const MAC_TOOLS: readonly ToolKind[] = ['local', 'finder', 'storage', 'cad']
+export const MAC_TOOLS: readonly ToolKind[] = ['local', 'finder', 'storage']
 const inElectron = /\bElectron\//.test(navigator.userAgent)
 /** This page is a detached tool's own window (main/toolWindows.ts loads it with ?tool=<kind>). */
 export const toolWindowKind = ((): ToolKind | null => {

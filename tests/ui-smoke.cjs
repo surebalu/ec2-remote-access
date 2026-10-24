@@ -2313,6 +2313,64 @@ app.whenReady().then(async () => {
     assert.equal(await pjs(`(() => { const r = document.querySelector('.board-toolbar').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight })()`), true, 'iPad: whiteboard toolbar on screen')
     assert.equal(await noSideScroll(), true, 'iPad whiteboard: no sideways scrolling')
     await pshot('ipad-whiteboard.png')
+    // CAD on an iPad and a phone: the file is chosen on the device and read in the page (never cad:*, which the
+    // gateway refuses), hashed there, cached in IndexedDB; on a phone the parts and the review are sheets.
+    // The input's click is stubbed: a real one would put a file chooser on the desktop.
+    const cadCallsBefore = calls.filter((c) => c.channel.startsWith('cad:')).length
+    const cubeBytes = readFileSync(cadFiles.cube)
+    const plong = async (code, what) => { for (let n = 0; n < 600; n++) { if (await pjs(code)) return; await new Promise((r) => setTimeout(r, 50)) } throw new Error(`Timed out (phone CAD): ${what}`) }
+    const feedCube = () => pjs(`(() => { const b = Uint8Array.from(atob(${JSON.stringify(cubeBytes.toString('base64'))}), (c) => c.charCodeAt(0)); const dt = new DataTransfer(); dt.items.add(new File([b], 'cube.stp')); const i = document.querySelector('.cad-file-input'); i.files = dt.files; i.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await ptap('More')
+    await ptap('CAD')
+    await puntil(`!!document.querySelector('.cad .cad-start') && !!document.querySelector('.cad-file-input')`)
+    assert.match(await pjs(`document.querySelector('.cad-drop p').textContent`), /Choose one/, 'off the Mac the file is chosen on the device')
+    await pjs(`window.__picks = 0; document.querySelector('.cad-file-input').click = () => { window.__picks++ }; 0`)
+    await pjs(`document.querySelector('.cad-drop .btn-primary').click()`)
+    assert.equal(await pjs(`window.__picks`), 1, 'Open… opens the device\'s file chooser')
+    await feedCube()
+    await plong(`document.querySelector('.cad-head-file b')?.textContent === 'cube.stp' && !document.querySelector('.cad-loading') && !!document.querySelector('.cad-review')`, 'the cube read on the device')
+    const deviceReview = Object.values(recordDocs.reviews.items).find((i) => i.type === 'cadfile')
+    assert.equal(deviceReview.id, createHash('sha256').update(cubeBytes).digest('hex'), 'the device finds the same review the Mac would: by SHA-256')
+    assert.equal(deviceReview.path, '', 'a file chosen on a device has no path')
+    await pshot('ipad-cad.png')
+    // The iPad keeps its list beside the tab, so the review sits beside the model (not a sheet), one panel at a time.
+    assert.equal(await pjs(`!!document.querySelector('.cad-review') && !document.querySelector('.cad-sheet') && document.querySelector('.cad-stage').getBoundingClientRect().width > 400`), true, 'iPad landscape: the review beside the model')
+    // Opened again, the model comes from the device's own cache.
+    await puntil(`indexedDB.databases().then((ds) => ds.some((d) => d.name === 'cad-cache'))`)
+    await puntil(`new Promise((r) => { const q = indexedDB.open('cad-cache'); q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains('glb')) { d.close(); r(false); return } const c = d.transaction('glb').objectStore('glb').count(); c.onsuccess = () => { d.close(); r(c.result === 1) } }; q.onerror = () => r(false) })`)
+    await feedCube()
+    await puntil(`!document.querySelector('.cad-loading') && !!document.querySelector('.cad-review')`)
+    await pjs(`[...document.querySelectorAll('.cad-tabs button')].find((b) => b.textContent.startsWith('Info')).click()`)
+    await puntil(`document.querySelector('.cad-info')?.textContent.includes('from the cache') && !document.querySelector('.cad-info-actions')`)
+    // A phone: the model takes the tab; Review slides up as a sheet and Done puts it away.
+    phone.setContentSize(430, 932)
+    await puntil(`innerWidth === 430 && document.querySelector('.cad').classList.contains('compact') && !document.querySelector('.cad-tree') && !document.querySelector('.cad-review')`)
+    assert.equal(await noSideScroll(), true, 'phone CAD: no sideways scrolling')
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.cad-toolbar').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight })()`), true, 'phone: the CAD toolbar is on screen')
+    await pshot('phone-cad.png')
+    await pjs(`document.querySelector('.cad-head .cad-icon-btn[title="Review"]').click()`)
+    await puntil(`!!document.querySelector('.cad-sheet .cad-review')`)
+    await pshot('phone-cad-review.png')
+    await pjs(`[...document.querySelectorAll('.cad-sheet-bar button')].find((b) => b.textContent === 'Done').click()`)
+    await puntil(`!document.querySelector('.cad-sheet')`)
+    // A comment pinned with a tap; the sheet stays down so the pin is in view.
+    await pjs(`document.querySelector('.cad-toolbar button[title^="Pin a comment"]').click()`)
+    await puntil(`document.querySelector('.cad-stage').classList.contains('tool-pin') && document.querySelector('.cad-tool-hint button')?.textContent === 'Done'`)
+    const phoneMid = await pjs(`(() => { const r = document.querySelector('.cad-canvas').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
+    phone.webContents.focus()
+    phone.webContents.sendInputEvent({ type: 'mouseMove', x: phoneMid.x, y: phoneMid.y - 30 })
+    phone.webContents.sendInputEvent({ type: 'mouseDown', x: phoneMid.x, y: phoneMid.y - 30, button: 'left', clickCount: 1 })
+    phone.webContents.sendInputEvent({ type: 'mouseUp', x: phoneMid.x, y: phoneMid.y - 30, button: 'left', clickCount: 1 })
+    await puntil(`!!document.querySelector('.cad-composer textarea')`)
+    assert.equal(await pjs(`(() => { const r = document.querySelector('.cad-composer').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth })()`), true, 'phone: the comment box fits the screen')
+    await pjs(`(() => { const el = document.querySelector('.cad-composer textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'Check this face on site'); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await pjs(`[...document.querySelectorAll('.cad-composer button')].find((b) => b.textContent === 'Pin').click()`)
+    await puntil(`!!document.querySelector('.cad-pin[data-pin="1"]') && !document.querySelector('.cad-sheet')`)
+    await pshot('phone-cad-pin.png')
+    assert.equal(calls.filter((c) => c.channel.startsWith('cad:')).length, cadCallsBefore, 'nothing from a device asks for cad:*')
+    // The Mac's own pass below starts from no reviews.
+    delete recordDocs.reviews
+    phone.setContentSize(1194, 834)
 
     // Signing in from a phone: the approval happens in Safari, iOS suspends the page and drops its socket, and the
     // "signed in" push is sent to nobody. The dialog must still finish by asking the computer what token it holds.

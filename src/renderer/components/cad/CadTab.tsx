@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type * as THREE from 'three'
 import {
-  CAD_EXTENSIONS, formatDims, formatLength, isCadFile, newChecklist, nextPin, reviewReport, verdictLabel,
+  CAD_EXTENSIONS, cadFormat, formatDims, formatLength, isCadFile, newChecklist, nextPin, reviewReport, verdictLabel,
   type CadFileRecord, type CadFormat, type CadIssueRecord, type CadMeasureRecord, type CadNoteRecord, type CadView
 } from '@shared/cad'
 import { ymd } from '@shared/naturalDate'
 import { itemsOf, newRecordId, type RecordDoc, type RecordOp } from '@shared/records'
+import { sha256Hex } from '@shared/sha256'
 import { applyRecords, useRecords } from '../../records'
 import { isDarkMode, useStore, type Tab } from '../../store'
 import { setTabKeys } from '../../shortcuts'
 import { downloadText } from '../plan/parts'
 import { Icon } from '../icons'
 import { loadModel } from './cadLoad'
+import { ON_MAC } from './cadCache'
 import { CadScene, EDGE_TRIANGLE_LIMIT, type CadTool, type PickHit, type SectionAxis, type StandardView, type UpAxis } from './cadScene'
 import CadTree from './CadTree'
 import CadReview, { type ReviewTab } from './CadReview'
@@ -25,7 +27,9 @@ import './cad.css'
  * picture of the pinned model. Reviews follow the file's content (cad.ts), so they come back whenever it is opened.
  */
 
+/** `path` is '' for a file picked on an iPhone or iPad: the page gets its bytes, never where it lives. */
 interface OpenFile { name: string; path: string; size: number; mtime: number; sha256: string; format: CadFormat }
+type ReadFile = OpenFile & { bytes: Uint8Array }
 interface Recent { path: string; name: string; at: number }
 
 const RECENT = 'cad.recent'
@@ -36,6 +40,13 @@ const VIEWS: { id: StandardView; label: string; key: string }[] = [
   { id: 'iso', label: 'Iso', key: '1' }, { id: 'front', label: 'Front', key: '2' }, { id: 'top', label: 'Top', key: '3' }, { id: 'right', label: 'Right', key: '4' },
   { id: 'back', label: 'Back', key: '5' }, { id: 'bottom', label: 'Bottom', key: '6' }, { id: 'left', label: 'Left', key: '7' }
 ]
+/** A phone's Safari gives a page far less memory than the Mac app has. */
+const DEVICE_MAX = 400 * 1024 * 1024
+const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+const dataBlob = (url: string): Blob => {
+  const [head, b64] = url.split(',')
+  return new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: head.slice(5).split(';')[0] })
+}
 const typing = (t: EventTarget | null): boolean => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 const cssVar = (name: string, fallback: string): string => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
 
@@ -45,6 +56,7 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
   const themeKey = useStore((s) => `${s.settings?.theme ?? ''}:${s.settings?.colorTheme ?? ''}`)
   const stageRef = useRef<HTMLDivElement>(null)
   const sectionRef = useRef<HTMLElement>(null)
+  const pickRef = useRef<HTMLInputElement>(null)
   const sceneRef = useRef<CadScene | null>(null)
   const cubeRef = useRef<HTMLDivElement>(null)
   const pinEls = useRef(new Map<string, HTMLElement>())
@@ -67,6 +79,9 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
   const [panels, setPanels] = useState<{ tree: boolean; review: boolean }>(() => local('cad.panels', { tree: true, review: true }))
   // Beside another pane there is room for one side panel: the one opened last.
   const [narrow, setNarrow] = useState(false)
+  // A phone: the model takes the screen and the parts or the review slide up over it as a sheet.
+  const [compact, setCompact] = useState(false)
+  const [sheet, setSheet] = useState<'tree' | 'review' | null>(null)
   const [lastPanel, setLastPanel] = useState<'tree' | 'review'>('review')
   const [reviewTab, setReviewTab] = useState<ReviewTab>('comments')
   const [composer, setComposer] = useState<{ hit: PickHit; view: CadView } | null>(null)
@@ -142,13 +157,23 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
   useEffect(() => { sceneRef.current?.setTool(tool) }, [tool])
 
   // ----- opening a file -----
-  const open = async (path: string): Promise<void> => {
+  /** The Mac app: a file on this Mac by its path, read in main. */
+  const open = (path: string): Promise<void> => load(() => window.api.invoke('cad:read', path))
+  /** Anywhere else: a file picked or dropped on this device, read here. */
+  const openPicked = (picked: File): Promise<void> => load(async () => {
+    const format = cadFormat(picked.name)
+    if (!format) throw new Error(`${picked.name} is not a CAD file the viewer reads (${CAD_EXTENSIONS.slice(0, 8).join(', ')}…).`)
+    if (picked.size > DEVICE_MAX) throw new Error(`${picked.name} is ${Math.round(picked.size / 1024 / 1024)} MB, more than this device can open. Open it in the Mac app.`)
+    const bytes = new Uint8Array(await picked.arrayBuffer())
+    return { name: picked.name, path: '', size: picked.size, mtime: picked.lastModified, sha256: await sha256Hex(bytes), format, bytes }
+  })
+  const load = async (read: () => Promise<ReadFile>): Promise<void> => {
     const n = ++loadSeq.current
     setError(null)
     setComposer(null)
     setLoading('Opening…')
     try {
-      const f = await window.api.invoke('cad:read', path)
+      const f = await read()
       if (n !== loadSeq.current) return
       setLoading(`Reading ${f.name}…`)
       const model = await loadModel(f, (t) => { if (n === loadSeq.current) setLoading(t) })
@@ -169,9 +194,11 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
       const meta: OpenFile = { name: f.name, path: f.path, size: f.size, mtime: f.mtime, sha256: f.sha256, format: f.format }
       setFile(meta)
       if (up !== 'y') scene.setUp(up)
-      const next = [{ path: f.path, name: f.name, at: Date.now() }, ...readRecent().filter((r) => r.path !== f.path)].slice(0, 15)
-      keep(RECENT, next)
-      setRecent(next)
+      if (f.path) {
+        const next = [{ path: f.path, name: f.name, at: Date.now() }, ...readRecent().filter((r) => r.path !== f.path)].slice(0, 15)
+        keep(RECENT, next)
+        setRecent(next)
+      }
       await recordOpen(meta)
       // A small picture for the list of reviewed files, once the model is on screen.
       setTimeout(() => { if (n === loadSeq.current) void saveThumb(meta) }, 900)
@@ -187,7 +214,7 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
     const had = fresh.items[f.sha256] as CadFileRecord | undefined
     const now = Date.now()
     const item: CadFileRecord = had?.type === 'cadfile'
-      ? { ...had, name: f.name, path: f.path, size: f.size, openedAt: now, updatedAt: now }
+      ? { ...had, name: f.name, path: f.path || had.path, size: f.size, openedAt: now, updatedAt: now }
       : { id: f.sha256, type: 'cadfile', name: f.name, path: f.path, size: f.size, format: f.format, checklist: newChecklist(), verdict: 'open', openedAt: now, updatedAt: now }
     await applyRecords('reviews', [{ op: 'put', item }])
   }
@@ -207,9 +234,17 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
     if (cur?.type === 'cadfile') await applyRecords('reviews', [{ op: 'put', item: { ...cur, thumb, updatedAt: Date.now() } as CadFileRecord }])
   }
 
+  // Off the Mac the file input is clicked in the tap itself (no await before it), or iOS ignores it.
   const pick = async (): Promise<void> => {
+    if (!ON_MAC) { pickRef.current?.click(); return }
     const path = await window.api.invoke('cad:pick').catch(() => null)
     if (path) void open(path)
+  }
+  /** A review from the list: on the Mac by its path; on a phone or iPad the file is chosen again (its hash finds the review). */
+  const reopen = (r: { path: string; name: string }): void => {
+    if (ON_MAC && r.path) { void open(r.path); return }
+    toast('info', `Choose ${r.name} to open its review.`)
+    void pick()
   }
 
   useEffect(() => {
@@ -227,13 +262,14 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
   const toggleWire = (): void => { const on = !wire; sceneRef.current?.setWireframe(on); setWire(on) }
   const setUpAxis = (u: UpAxis): void => { setUp(u); keep('cad.up', u); sceneRef.current?.setUp(u) }
   const setPanel = (k: 'tree' | 'review', on: boolean): void => {
+    if (compact) { setSheet(on ? k : null); return }
     if (on) setLastPanel(k)
     setPanels((p) => { const next = { ...p, [k]: on }; keep('cad.panels', next); return next })
   }
   useEffect(() => {
     const el = sectionRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setNarrow(el.clientWidth < 900))
+    const ro = new ResizeObserver(() => { setNarrow(el.clientWidth < 900); setCompact(el.clientWidth < 640) })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
@@ -273,7 +309,8 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
     setComposer(null)
     setDraft('')
     setReviewTab('comments')
-    setPanel('review', true)
+    // On a phone the sheet would cover the model just pinned.
+    if (!compact) setPanel('review', true)
   }
   const goTo = (n: CadNoteRecord): void => {
     setActivePin(n.id)
@@ -334,8 +371,8 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
   const copyPicture = async (): Promise<void> => {
     setMenu(null)
     try {
-      const blob = await (await fetch(await reportImage())).blob()
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      // Safari takes a clipboard item only while the tap lasts, so the picture goes in as a promise.
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': reportImage().then(dataBlob) })])
       toast('success', 'Picture copied')
     } catch (e) {
       toast('error', `Could not copy the picture: ${(e as Error).message}`)
@@ -348,6 +385,7 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
     const f = e.dataTransfer.files[0]
     if (!f) return
     e.preventDefault()
+    if (!ON_MAC) { void openPicked(f); return }
     const path = window.api.pathForFile?.(f)
     if (path && isCadFile(path)) void open(path)
     else toast('error', `${f.name} is not a CAD file the viewer reads (${CAD_EXTENSIONS.slice(0, 8).join(', ')}…).`)
@@ -356,14 +394,20 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
   const visibleNotes = notes.filter((n) => n.anchor.kind === 'point')
   const hasTree = panels.tree && !!root
   const hasReview = panels.review && !!fileRec
-  const showTree = hasTree && !(narrow && hasReview && lastPanel === 'review')
-  const showReview = hasReview && !(narrow && showTree)
+  const showTree = compact ? sheet === 'tree' && !!root : hasTree && !(narrow && hasReview && lastPanel === 'review')
+  const showReview = compact ? sheet === 'review' && !!fileRec : hasReview && !(narrow && showTree)
+  const asSheet = (k: 'tree' | 'review', title: string, node: ReactElement): ReactElement => (compact
+    ? <div className="cad-sheet" role="dialog" aria-label={title}>
+      <div className="cad-sheet-bar"><b>{title}</b><span className="flex-1" /><button type="button" className="btn btn-sm" onClick={() => setPanel(k, false)}>Done</button></div>
+      {node}
+    </div>
+    : node)
   const panelButton = (k: 'tree' | 'review', shown: boolean): (() => void) => () => setPanel(k, !shown)
   const info = file && stats ? (
     <div className="cad-info">
       <dl>
         <dt>File</dt><dd title={file.path}>{file.name}</dd>
-        <dt>Folder</dt><dd className="mono">{file.path.replace(/\/[^/]+$/, '').replace(/^\/Users\/[^/]+/, '~')}</dd>
+        {file.path && <><dt>Folder</dt><dd className="mono">{file.path.replace(/\/[^/]+$/, '').replace(/^\/Users\/[^/]+/, '~')}</dd></>}
         <dt>Format</dt><dd>{file.format.toUpperCase()}{stats.fromCache ? ' · from the cache' : ''}</dd>
         <dt>Size on disk</dt><dd>{(file.size / 1024 / 1024).toFixed(2)} MB</dd>
         <dt>Model size</dt><dd>{formatDims(stats.size)}</dd>
@@ -374,15 +418,17 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
       </dl>
       {stats.unitsNote && <p className="cad-hint">{stats.unitsNote}</p>}
       {stats.triangles > EDGE_TRIANGLE_LIMIT && <p className="cad-hint">A large model: edge lines start off (E turns them on).</p>}
-      <div className="cad-info-actions">
-        <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('local:reveal', file.path)}>Show in Finder</button>
-        <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('clipboard:write', file.path)}>Copy path</button>
-      </div>
+      {ON_MAC && file.path && (
+        <div className="cad-info-actions">
+          <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('local:reveal', file.path)}>Show in Finder</button>
+          <button type="button" className="btn btn-sm" onClick={() => void window.api.invoke('clipboard:write', file.path)}>Copy path</button>
+        </div>
+      )}
     </div>
   ) : null
 
   return (
-    <section ref={sectionRef} className={`cad ${file ? 'has-file' : ''} ${narrow ? 'narrow' : ''} ${showTree ? '' : 'no-tree'} ${showReview ? '' : 'no-review'}`} aria-label="CAD viewer"
+    <section ref={sectionRef} className={`cad ${file ? 'has-file' : ''} ${narrow ? 'narrow' : ''} ${compact ? 'compact' : ''} ${showTree && !compact ? '' : 'no-tree'} ${showReview && !compact ? '' : 'no-review'}`} aria-label="CAD viewer"
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true) } }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
       <header className="cad-head">
         <Icon.cube className="cad-head-icon" />
@@ -416,7 +462,7 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
       </header>
 
       <div className="cad-body">
-        {showTree && root && (
+        {showTree && root && asSheet('tree', 'Parts',
           <CadTree root={root} version={treeVersion} selected={selected}
             onSelect={(o) => { sceneRef.current?.highlight(o); setSelected(o) }}
             onToggle={(o, on) => { sceneRef.current?.setVisible(o, on); setTreeVersion((v) => v + 1) }}
@@ -504,14 +550,21 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
             </div>
           )}
 
-          {tool !== 'orbit' && root && <div className="cad-tool-hint">{tool === 'measure' ? 'Click two points; a corner within reach snaps. Esc stops.' : 'Click the model where the comment goes. Esc stops.'}</div>}
+          {tool !== 'orbit' && root && (
+            <div className="cad-tool-hint">
+              <span>{COARSE
+                ? (tool === 'measure' ? 'Tap two points; a corner nearby snaps.' : 'Tap the model where the comment goes.')
+                : (tool === 'measure' ? 'Click two points; a corner within reach snaps. Esc stops.' : 'Click the model where the comment goes. Esc stops.')}</span>
+              <button type="button" onClick={() => setTool('orbit')}>Done</button>
+            </div>
+          )}
 
           {!file && !loading && (
             <div className="cad-start">
               <div className={`cad-drop ${dragging ? 'over' : ''}`}>
                 <Icon.cube className="cad-drop-icon" />
                 <h2>Open a STEP file</h2>
-                <p>STEP, IGES, B-rep, STL, glTF, OBJ or 3MF. Drop it here, or open it from Finder or the launcher.</p>
+                <p>STEP, IGES, B-rep, STL, glTF, OBJ or 3MF. {ON_MAC ? 'Drop it here, or open it from Finder or the launcher.' : COARSE ? 'Choose one from Files.' : 'Choose one, or drop it here.'}</p>
                 <button type="button" className="btn btn-primary" onClick={() => void pick()}>Open…</button>
               </div>
               {reviewed.length > 0 && (
@@ -520,9 +573,9 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
                   <ul>
                     {reviewed.map((r) => (
                       <li key={r.id}>
-                        <button type="button" onClick={() => void open(r.path)} title={r.path}>
+                        <button type="button" onClick={() => reopen(r)} title={r.path || r.name}>
                           {r.thumb ? <img src={r.thumb} alt="" /> : <span className="cad-thumb-blank"><Icon.cube /></span>}
-                          <span className="cad-recent-text"><b>{r.name}</b><span>{r.path.replace(/\/[^/]+$/, '').replace(/^\/Users\/[^/]+/, '~')}</span></span>
+                          <span className="cad-recent-text"><b>{r.name}</b><span>{r.path ? r.path.replace(/\/[^/]+$/, '').replace(/^\/Users\/[^/]+/, '~') : `${r.format.toUpperCase()} · ${(r.size / 1024 / 1024).toFixed(1)} MB`}</span></span>
                           <span className="cad-chip verdict" data-verdict={r.verdict}>{verdictLabel(r.verdict)}</span>
                         </button>
                       </li>
@@ -551,9 +604,13 @@ export default function CadTab({ tab, active }: { tab: Tab; active: boolean }): 
             </div>
           )}
           {dragging && file && <div className="cad-drop-over">Drop to open</div>}
+          {!ON_MAC && (
+            <input ref={pickRef} type="file" className="cad-file-input" tabIndex={-1} aria-label="Choose a CAD file"
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void openPicked(f) }} />
+          )}
         </main>
 
-        {showReview && fileRec && (
+        {showReview && fileRec && asSheet('review', 'Review',
           <CadReview file={fileRec} notes={notes} issues={issues} measures={measures} tab={reviewTab} onTab={setReviewTab} activePin={activePin} onGoTo={goTo} info={info} />
         )}
       </div>
