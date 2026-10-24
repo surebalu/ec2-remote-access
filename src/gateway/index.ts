@@ -20,7 +20,7 @@ import { closePlmHealth } from '../main/plmHealth'
 import { closeDbLocks } from '../main/dbLocks'
 import { flushDataFolder, updateDataFolder } from '../main/dataFolder'
 import { boxCallback } from '../main/box'
-import { flushBoxSync, updateBoxSync } from '../main/boxSync'
+import { flushBoxSync, linkFileLocal, updateBoxSync } from '../main/boxSync'
 import { releaseAllRdp } from '../main/rdp/sessions'
 import { ensureProxy, stopProxy } from '../main/rdp/cleanpath'
 import { createGatewayHost } from './host'
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
 
   // Shells on this machine for paired devices: only when whoever runs the gateway says so (scripts/deploy-pi.sh ALLOW_TERMINALS=1).
   const allowTerminals = process.argv.includes('--allow-terminals') || process.env.EC2RA_ALLOW_TERMINALS === '1'
-  const gateway = createGatewayServer({ handlers, token, staticDir, rdpTarget: ensureProxy, log, allowTerminals: () => allowTerminals, boxCallback })
+  const gateway = createGatewayServer({ handlers, token, staticDir, rdpTarget: ensureProxy, log, allowTerminals: () => allowTerminals, boxCallback, linkFile: linkFileLocal })
   setHost(createGatewayHost(dataDir, gateway.broadcast, log))
 
   if (!existsSync(join(staticDir, 'index.html'))) log(`[gateway] warning: no built UI at ${staticDir}; run \`pnpm build\` first (API only until then)`)

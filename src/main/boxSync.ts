@@ -219,14 +219,19 @@ async function uploadLinkFiles(): Promise<void> {
   }
 }
 
-/** Opens a Links file: from its place on this computer, else its copy in Box (downloaded once, kept in the app's data). */
-export async function openLinkFile(id: string): Promise<void> {
+const linkName = (l: LinkItem): string => basename(l.path ?? l.title).replace(/[\\/]/g, '_') || 'file'
+
+/**
+ * A Links file as a path on this computer: its own place, else its copy in Box, downloaded once into the app's data.
+ * null when there is neither (on another computer, not in Box yet, or Box signed out). Opened here (openLinkFile) and
+ * served to a phone or iPad paired with this computer (the gateway's /links/file).
+ */
+export async function linkFileLocal(id: string): Promise<{ path: string; name: string } | null> {
   const l = loadRecords('links').items[id] as LinkItem | undefined
-  if (!l || l.type !== 'link' || l.kind !== 'file') throw new Error('That link is not a file.')
-  if (l.path && existsSync(l.path)) { await host().openPath(l.path); return }
-  const name = basename(l.path ?? l.title).replace(/[\\/]/g, '_') || 'file'
-  if (!l.box) throw new Error(`${name} is on another computer and not in Box yet; it is sent there from the computer that has it.`)
-  if (!boxSignedIn()) throw new Error(`${name} is in Box: sign in to Box (Settings → Data) to open it here.`)
+  if (!l || l.type !== 'link' || l.kind !== 'file') return null
+  if (l.path && existsSync(l.path)) return { path: l.path, name: basename(l.path) }
+  if (!l.box || !boxSignedIn()) return null
+  const name = linkName(l)
   const dest = join(host().userDataDir(), 'box-files', l.box.id, name)
   if (!existsSync(dest)) {
     const bytes = await download(l.box.id)
@@ -234,7 +239,17 @@ export async function openLinkFile(id: string): Promise<void> {
     writeFileSync(`${dest}.tmp`, bytes)
     renameSync(`${dest}.tmp`, dest)
   }
-  await host().openPath(dest)
+  return { path: dest, name }
+}
+
+/** Opens a Links file in its app on this computer, or says why it cannot. */
+export async function openLinkFile(id: string): Promise<void> {
+  const l = loadRecords('links').items[id] as LinkItem | undefined
+  if (!l || l.type !== 'link' || l.kind !== 'file') throw new Error('That link is not a file.')
+  const file = await linkFileLocal(id)
+  if (file) { await host().openPath(file.path); return }
+  if (!l.box) throw new Error(`${linkName(l)} is on another computer and not in Box yet; it is sent there from the computer that has it.`)
+  throw new Error(`${linkName(l)} is in Box: sign in to Box (Settings → Data) to open it here.`)
 }
 
 // ----- each Mac's setup -----

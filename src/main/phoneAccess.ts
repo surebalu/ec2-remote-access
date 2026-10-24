@@ -14,6 +14,7 @@ import { host } from './host'
 import { ensureProxy } from './rdp/cleanpath'
 import { getSettings, setSettings } from './store'
 import { serveDisable, serveEnable, tailscaleInfo, type TailscaleInfo } from './tailscale'
+import { linkFileLocal } from './boxSync'
 
 let gateway: Gateway | null = null
 let bound: { host: string; port: number } | null = null
@@ -117,6 +118,8 @@ export async function startPhoneAccess(): Promise<PhoneAccessStatus> {
     handlers, token: phoneToken(), staticDir: join(__dirname, '../renderer'), rdpTarget: ensureProxy,
     onClientsChanged: (list) => { clients = list; host().broadcast('phone:changed', phoneStatus()) },
     allowTerminals: () => getSettings().phoneTerminals === true,
+    // Phones paired with this Mac open Links files from it (or from Box's copy).
+    linkFile: linkFileLocal,
     log: (l) => console.log(l)
   })
   try {

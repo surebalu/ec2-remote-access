@@ -275,3 +275,42 @@ test('with terminals allowed, a page gets its own shells and only their output; 
   b.ws.close()
   await gw.close()
 })
+
+test('serves a Links file to a page by a signature of that one file, with byte ranges; never active content inline', async () => {
+  const { hmacSha256Hex } = await import('../src/shared/sha256.ts')
+  const dir = await mkdtemp(join(tmpdir(), 'ec2ra-linkfile-'))
+  await writeFile(join(dir, 'spec.pdf'), '%PDF-1.4 the bytes of a pdf')
+  await writeFile(join(dir, 'page.html'), '<script>alert(1)</script>')
+  const files: Record<string, { path: string; name: string }> = { pdf1: { path: join(dir, 'spec.pdf'), name: 'spec ü.pdf' }, html1: { path: join(dir, 'page.html'), name: 'page.html' } }
+  const gw = createGatewayServer({ handlers: {} as GatewayHandlers, token: 'secret', staticDir: dir, log: () => undefined, linkFile: async (id) => files[id] ?? null })
+  const { port } = await gw.listen(0, '127.0.0.1')
+  try {
+    // The page signs with the JavaScript HMAC (renderer/wsApi.ts); the server checks with node:crypto's.
+    const url = (id: string, sig = hmacSha256Hex('secret', `links-file:${id}`)): string => `http://127.0.0.1:${port}/links/file/${id}?sig=${sig}`
+    const ok = await fetch(url('pdf1'))
+    assert.equal(ok.status, 200)
+    assert.equal(ok.headers.get('content-type'), 'application/pdf')
+    assert.equal(ok.headers.get('content-disposition'), `inline; filename*=UTF-8''${encodeURIComponent('spec ü.pdf')}`)
+    assert.equal(ok.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(await ok.text(), '%PDF-1.4 the bytes of a pdf')
+    const part = await fetch(url('pdf1'), { headers: { range: 'bytes=0-3' } })
+    assert.equal(part.status, 206)
+    assert.equal(part.headers.get('content-range'), 'bytes 0-3/27')
+    assert.equal(await part.text(), '%PDF')
+    const tail = await fetch(url('pdf1'), { headers: { range: 'bytes=-3' } })
+    assert.equal(await tail.text(), 'pdf')
+    assert.equal((await fetch(url('pdf1'), { headers: { range: 'bytes=90-' } })).status, 416)
+    // A signature for another file, for another token, or none at all, is refused; so is the token itself.
+    assert.equal((await fetch(url('pdf1', hmacSha256Hex('secret', 'links-file:html1')))).status, 403)
+    assert.equal((await fetch(url('pdf1', hmacSha256Hex('other', 'links-file:pdf1')))).status, 403)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/links/file/pdf1`)).status, 403)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/links/file/pdf1?token=secret`)).status, 403)
+    assert.equal((await fetch(url('missing'))).status, 404)
+    const html = await fetch(url('html1'))
+    assert.equal(html.headers.get('content-type'), 'application/octet-stream')
+    assert.match(html.headers.get('content-disposition') ?? '', /^attachment;/, 'HTML downloads instead of running on the gateway origin')
+  } finally {
+    await gw.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
