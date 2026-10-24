@@ -7,11 +7,12 @@ import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import { BREP_FORMATS, nodeLabel, type CadFormat, type CadModel, type CadNode } from '@shared/cad'
 import OcctWorker from './occtWorker.ts?worker&inline'
 import wasmUrl from 'occt-import-js/dist/occt-import-js.wasm?url'
+import { cacheGet, cachePut } from './cadCache'
 
 /**
  * Turns a CAD file into three.js objects for the viewer (cadScene.ts). STEP, IGES and B-rep go through OpenCascade
- * in a worker (occtWorker.ts); what it made is saved as a GLB in main's cache (cad:cachePut, by the file's SHA-256)
- * and read from there next time, which for a large assembly is the difference between a minute and a moment. Meshes
+ * in a worker (occtWorker.ts); what it made is saved as a GLB by the file's SHA-256 (cadCache.ts: main's
+ * cache in the Mac app, the device's own elsewhere) and read from there next time, which for a large assembly is the difference between a minute and a moment. Meshes
  * (STL, glTF, OBJ, 3MF) load with three's own loaders. Every part is a THREE.Group named after the file's product
  * structure, so the parts tree is the scene graph itself.
  */
@@ -131,12 +132,12 @@ async function parseGlb(bytes: ArrayBuffer): Promise<THREE.Group> {
   return g
 }
 
-/** Saves what OpenCascade made, as a GLB in main's cache, once the viewer shows it (a large model takes a moment). */
+/** Saves what OpenCascade made, as a GLB in the cache, once the viewer shows it (a large model takes a moment). */
 function cacheLater(group: THREE.Group, sha256: string): void {
   setTimeout(() => {
     group.userData = { ...group.userData, cadCache: CACHE_VERSION }
     new GLTFExporter().parseAsync(group, { binary: true, onlyVisible: false })
-      .then((glb) => window.api.invoke('cad:cachePut', sha256, new Uint8Array(glb as ArrayBuffer)))
+      .then((glb) => cachePut(sha256, new Uint8Array(glb as ArrayBuffer)))
       .catch(() => undefined)
   }, 400)
 }
@@ -144,7 +145,7 @@ function cacheLater(group: THREE.Group, sha256: string): void {
 export async function loadModel(file: { bytes: Uint8Array; format: CadFormat; sha256: string; name: string }, onStage: (text: string) => void): Promise<LoadedModel> {
   const buf = (): ArrayBuffer => file.bytes.buffer.slice(file.bytes.byteOffset, file.bytes.byteOffset + file.bytes.byteLength) as ArrayBuffer
   if ((BREP_FORMATS as readonly string[]).includes(file.format)) {
-    const cached = await window.api.invoke('cad:cacheGet', file.sha256).catch(() => null)
+    const cached = await cacheGet(file.sha256)
     if (cached) {
       try {
         const g = await parseGlb(cached.buffer.slice(cached.byteOffset, cached.byteOffset + cached.byteLength) as ArrayBuffer)

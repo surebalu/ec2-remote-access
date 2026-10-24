@@ -17,6 +17,7 @@ import { Icon } from '../icons'
 
 export type ReviewTab = 'comments' | 'issues' | 'checklist' | 'measure' | 'info'
 
+const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 const put = (item: CadFileRecord | CadNoteRecord | CadIssueRecord | CadMeasureRecord): RecordOp => ({ op: 'put', item: { ...item, updatedAt: Date.now() } })
 const save = (ops: RecordOp[]): void => { void applyRecords('reviews', ops).catch((e: Error) => useStore.getState().toast('error', e.message)) }
 /** A coordinate difference without "-0.00" for a rounding crumb below zero. */
@@ -127,7 +128,7 @@ function Comments({ file, notes, activePin, onGoTo }: { file: CadFileRecord; not
         <span className="flex-1" />
         {notes.some((n) => n.resolvedAt) && <label className="cad-check"><input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />Resolved</label>}
       </div>
-      {!notes.length && <p className="cad-hint">Press <kbd className="kbd">C</kbd> (or the comment tool) and click the model to pin a numbered comment there. The view you see is kept with it.</p>}
+      {!notes.length && <p className="cad-hint">{COARSE ? 'Tap the comment tool, then the model, to pin a numbered comment there.' : <>Press <kbd className="kbd">C</kbd> (or the comment tool) and click the model to pin a numbered comment there.</>} The view you see is kept with it.</p>}
       <ul className="cad-list">
         {list.map((n) => (
           <li key={n.id} className={`cad-note ${n.resolvedAt ? 'resolved' : ''} ${activePin === n.id ? 'on' : ''}`} data-note={n.pin}>
@@ -262,7 +263,7 @@ function Measures({ measures }: { measures: CadMeasureRecord[] }): ReactElement 
   }
   return (
     <div className="cad-list-wrap">
-      {!measures.length && <p className="cad-hint">Press <kbd className="kbd">M</kbd> (or the ruler) and click two points on the model. A click near a corner snaps to it; lengths are in millimetres.</p>}
+      {!measures.length && <p className="cad-hint">{COARSE ? 'Tap the ruler, then two points on the model. A tap near a corner snaps to it;' : <>Press <kbd className="kbd">M</kbd> (or the ruler) and click two points on the model. A click near a corner snaps to it;</>} lengths are in millimetres.</p>}
       <ul className="cad-list">
         {measures.map((m, n) => (
           <li key={m.id} className="cad-measure">
