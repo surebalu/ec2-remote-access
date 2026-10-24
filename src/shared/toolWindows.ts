@@ -4,7 +4,7 @@
  */
 
 /** The tools that can be dragged out into a window of their own (the hosts list and Overview stay in the main window). */
-export const DETACHABLE_TOOLS = ['local', 'browser', 'notes', 'board', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'] as const
+export const DETACHABLE_TOOLS = ['local', 'browser', 'notes', 'board', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links', 'computers'] as const
 export type DetachableTool = (typeof DETACHABLE_TOOLS)[number]
 export const isToolKind = (k: unknown): k is DetachableTool => typeof k === 'string' && (DETACHABLE_TOOLS as readonly string[]).includes(k)
 

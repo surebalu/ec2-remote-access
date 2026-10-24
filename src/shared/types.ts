@@ -329,7 +329,7 @@ export type WorkspaceTool = { id: string } & (
   | { kind: 'browser'; browser: WorkspaceBrowser }
   | { kind: 'notes'; path?: string }
   | { kind: 'finder'; path?: string }
-  | { kind: 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' }
+  | { kind: 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' | 'computers' }
 )
 
 /** EC2 status checks, recent CPU and SSM check-in for the host details panel. */
@@ -820,6 +820,9 @@ export interface RdpPrepared {
   title: string
   user: string
 }
+
+/** Whether a computer's card can open right now (main/computers.ts probeComputers). */
+export type ComputerReach = 'open' | 'closed' | 'offline' | 'tunnel'
 
 export interface VncPrepareRequest {
   sessionId: string

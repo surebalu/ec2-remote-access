@@ -1,0 +1,66 @@
+/* Computers (ComputersTab.tsx): a library of screens as cards. Colours come from the app's tokens; card tones are fixed
+   per kind of machine so a card keeps its colour until it has a picture. */
+.computers { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; background: var(--bg); }
+.cmp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 28px 6px; }
+.cmp-head h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+.cmp-head p { margin: 2px 0 0; font-size: 12px; }
+.cmp-pill { display: flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); box-shadow: var(--shadow); }
+.cmp-pill button { display: flex; width: 36px; height: 32px; align-items: center; justify-content: center; border-radius: 999px; color: var(--text); }
+.cmp-pill button:hover { background: var(--accent-soft); }
+.cmp-pill svg { width: 17px; height: 17px; }
+.cmp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 28px 4px; }
+.cmp-segment { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--accent-soft); }
+.cmp-segment button { padding: 5px 14px; border-radius: 8px; font-size: 12px; color: var(--text-2, var(--text)); }
+.cmp-segment button.on { background: var(--panel); color: var(--accent); box-shadow: var(--shadow); font-weight: 600; }
+.cmp-search { display: flex; flex: 1; min-width: 180px; max-width: 360px; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.cmp-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+.cmp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 28px 28px; }
+.cmp-group { margin-top: 18px; }
+.cmp-group h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.cmp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
+
+.cmp-card { position: relative; display: block; aspect-ratio: 16 / 10.5; overflow: hidden; border-radius: 18px; background-position: center; background-size: cover; box-shadow: var(--shadow-lg); text-align: left; transition: transform .15s var(--ease), box-shadow .15s var(--ease); }
+.cmp-card:hover { transform: translateY(-2px); }
+.cmp-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.cmp-card[data-tone="violet"]:not(.has-thumb) { background-image: linear-gradient(160deg, #6b4ef7, #4b3bd0 70%, #3f34b8); }
+.cmp-card[data-tone="orange"]:not(.has-thumb) { background-image: linear-gradient(160deg, #e99a3a, #d97a2c 75%, #cf6c27); }
+.cmp-card[data-tone="teal"]:not(.has-thumb) { background-image: linear-gradient(160deg, #3fb6c9, #2a8fa8 70%, #23768e); }
+.cmp-card[data-tone="slate"]:not(.has-thumb) { background-image: linear-gradient(160deg, #6b7486, #4c5466); }
+.cmp-card::after { content: ''; position: absolute; inset: auto 0 0; height: 55%; background: linear-gradient(to top, rgba(0, 0, 0, .55), transparent); pointer-events: none; }
+.cmp-card:not(.has-thumb)::after { background: linear-gradient(to top, rgba(0, 0, 0, .18), transparent); }
+.cmp-card.off { filter: saturate(.35) brightness(.85); }
+.cmp-name { position: absolute; left: 16px; right: 16px; bottom: 13px; z-index: 1; overflow: hidden; color: #fff; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+.cmp-status { position: absolute; top: 12px; left: 13px; z-index: 1; display: flex; }
+.cmp-this { position: absolute; top: 10px; right: 12px; z-index: 1; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .35); color: #fff; font-size: 10px; }
+.cmp-spinner { width: 13px; height: 13px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%; animation: cmp-spin .8s linear infinite; }
+.cmp-row .cmp-spinner { border-color: var(--border); border-top-color: var(--accent); }
+@keyframes cmp-spin { to { transform: rotate(360deg) } }
+.cmp-dot { width: 9px; height: 9px; border: 1.5px solid rgba(255, 255, 255, .85); border-radius: 50%; background: var(--muted); }
+.cmp-dot.open { background: var(--ok); }
+.cmp-dot.closed { background: var(--warn); }
+.cmp-dot.tunnel { background: var(--accent); }
+.cmp-row .cmp-dot { border-color: var(--panel); }
+
+.cmp-list { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+.cmp-row { display: flex; align-items: center; gap: 4px; padding-right: 8px; border-bottom: 1px solid var(--border); }
+.cmp-row:last-child { border-bottom: 0; }
+.cmp-row-main { display: flex; flex: 1; min-width: 0; align-items: center; gap: 12px; padding: 11px 14px; font-size: 14px; color: var(--text); }
+.cmp-row-main:hover { background: var(--accent-soft); }
+.cmp-row-icon { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; color: #fff; }
+.cmp-row-icon[data-tone="violet"] { background: #5a45e4; }
+.cmp-row-icon[data-tone="orange"] { background: #df8530; }
+.cmp-row-icon[data-tone="teal"] { background: #2c96ad; }
+.cmp-row-icon[data-tone="slate"] { background: #5d6577; }
+.cmp-clear { display: flex; width: 100%; align-items: center; gap: 10px; padding: 12px 14px; color: var(--accent); font-size: 14px; }
+.cmp-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 80px auto 0; max-width: 360px; color: var(--muted); text-align: center; font-size: 13px; }
+.cmp-empty svg { width: 44px; height: 44px; }
+
+/* Phone and iPad (MobileApp): a large title, two cards a row, room for the tab bar. */
+.computers.is-mobile .cmp-head { padding: 14px 16px 4px; }
+.computers.is-mobile .cmp-head h1 { font-size: 32px; }
+.computers.is-mobile .cmp-bar { padding: 8px 16px 2px; }
+.computers.is-mobile .cmp-search { max-width: none; height: 38px; font-size: 16px; }
+.computers.is-mobile .cmp-search input { font-size: 16px; }
+.computers.is-mobile .cmp-body { padding: 4px 16px 24px; }
+.computers.is-mobile .cmp-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.computers.is-mobile .cmp-card { border-radius: 16px; }

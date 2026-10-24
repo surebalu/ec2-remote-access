@@ -1,0 +1,36 @@
+/* The screen tab on a phone or tablet (VncTab.tsx, ScreenToolbar.tsx): dark glass over the black session, whatever the
+   app's theme, so the controls read the same over any remote screen. */
+.vnc-stage { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; background: #000; }
+.vnc-touch { position: absolute; inset: 0; z-index: 2; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.vnc-cursor { position: absolute; z-index: 3; width: 22px; height: 22px; margin: -1px 0 0 -1px; pointer-events: none; filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .6)); }
+
+.vt-bar { position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 26px; background: rgba(32, 32, 36, .86); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4); color: #f2f2f5; }
+:root[data-keyboard="open"] .vt-bar { bottom: 8px; }
+.vt-row { display: flex; align-items: center; justify-content: space-between; min-height: 48px; }
+.vt-row + .vt-row.main { border-top: 1px solid rgba(255, 255, 255, .08); }
+.vt-gap { flex: 1; }
+.vt-btn { display: flex; flex: 0 0 auto; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; color: inherit; }
+.vt-btn svg { width: 24px; height: 24px; stroke-width: 1.6; }
+.vt-btn:active { background: rgba(255, 255, 255, .12); }
+.vt-btn.on { color: #b07cff; }
+.vt-glyph { font-size: 22px; line-height: 1; }
+
+.vt-menu-layer { position: absolute; inset: 0; z-index: 7; }
+.vt-menu { position: absolute; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); min-width: 250px; max-width: calc(100% - 32px); max-height: calc(100% - 120px); overflow-y: auto; padding: 6px 0; border: 1px solid rgba(255, 255, 255, .1); border-radius: 26px; background: rgba(38, 38, 42, .94); box-shadow: 0 16px 40px rgba(0, 0, 0, .5); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); color: #f2f2f5; }
+.vt-menu.right { right: 16px; }
+.vt-menu.left { left: 50%; transform: translateX(-50%); }
+.vt-menu.dim { opacity: .55; filter: blur(1px); }
+.vt-menu.vt-sub { background: rgba(58, 58, 62, .97); }
+.vt-menu-group + .vt-menu-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255, 255, 255, .1); }
+.vt-item, .vt-sub-head { display: flex; width: 100%; align-items: center; gap: 12px; padding: 11px 20px; color: inherit; font-size: 16px; text-align: left; }
+.vt-item:disabled { opacity: .4; }
+.vt-item:active { background: rgba(255, 255, 255, .1); }
+.vt-item.danger { color: #ff6b6b; }
+.vt-sub-head { font-weight: 700; border-bottom: 1px solid rgba(255, 255, 255, .1); }
+.vt-item-icon { display: flex; width: 22px; justify-content: center; }
+.vt-item-icon svg { width: 20px; height: 20px; }
+.vt-item-label { flex: 1; min-width: 0; }
+.vt-check { width: 14px; font-size: 14px; }
+.vt-chev svg { width: 14px; height: 14px; }
+.vt-status { position: absolute; top: 10px; left: 50%; z-index: 5; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 8px 14px; transform: translateX(-50%); border-radius: 999px; background: rgba(32, 32, 36, .86); color: #f2f2f5; font-size: 13px; }
+.vt-status .btn { height: 28px; }

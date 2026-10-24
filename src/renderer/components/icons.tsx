@@ -54,6 +54,23 @@ export const Icon = {
       <path d="M2 19h20" />
     </svg>
   ),
+  /** Four arrows: the arrow-keys row of the screen toolbar. */
+  move: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M12 3v18M3 12h18M12 3l-3 3m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3" /></svg>
+  ),
+  scissors: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><circle cx="6" cy="7" r="2.5" /><circle cx="6" cy="17" r="2.5" /><path d="M8.2 8.3 20 18M8.2 15.7 20 6" /></svg>
+  ),
+  sliders: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
+  ),
+  /** A keyboard with an arrow: the shortcuts menu. */
+  keyCombo: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><rect x="2.5" y="5" width="15" height="10" rx="2" /><path d="M6 8.5h1M9.5 8.5h1M13 8.5h1M6.5 11.8h7" /><path d="M16 19h5m-2-2 2 2-2 2" /></svg>
+  ),
+  redo: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M15 6l4 4-4 4" /><path d="M19 10H9a5 5 0 0 0 0 10h3" /></svg>
+  ),
   /** A private network of machines (the tailnet). */
   mesh: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>

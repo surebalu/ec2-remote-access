@@ -180,9 +180,10 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
 }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  computers: Icon.screenShare, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_HINTS: Record<RailSection, string> = {
+  computers: 'Your Tailscale machines; open one to see and control its screen.',
   devtools: 'Local JSON, encoding, tokens, timestamps and hashes.',
   tasks: 'Today, upcoming and someday to-dos, with projects and tags.',
   calendar: 'Month, week and day, with your tasks and subscribed calendars.',

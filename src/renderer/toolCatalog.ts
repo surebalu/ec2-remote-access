@@ -2,7 +2,7 @@ import type { ToolKind } from './store'
 
 /** Stable categories shared by navigation and the tool directory. Usage never moves the user's navigation. */
 export const TOOL_GROUPS: { id: string; label: string; tools: ToolKind[] }[] = [
-  { id: 'operate', label: 'Operate', tools: ['health'] },
+  { id: 'operate', label: 'Operate', tools: ['computers', 'health'] },
   { id: 'work', label: 'Work', tools: ['local', 'finder', 'storage', 'cad', 'browser', 'devtools'] },
   { id: 'plan', label: 'Plan', tools: ['tasks', 'calendar', 'links'] },
   { id: 'create', label: 'Create', tools: ['notes', 'board'] },
@@ -10,6 +10,7 @@ export const TOOL_GROUPS: { id: string; label: string; tools: ToolKind[] }[] = [
 ]
 
 export const TOOL_DESCRIPTIONS: Record<ToolKind, string> = {
+  computers: 'Your Tailscale machines and their screens',
   devtools: 'JSON, encoding, tokens, timestamps and hashes',
   tasks: 'To-dos for today, upcoming and someday', calendar: 'Your days, events and subscribed calendars', links: 'Bookmarks and notes, like Anybox',
   health: 'Service health across environments', local: 'Local shells, splits and command history',

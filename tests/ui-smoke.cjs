@@ -45,6 +45,7 @@ let wsAllowed = null
 // Every window shares the default session, whose one request filter blocks the network, bar that one origin.
 const blockNetwork = (details, callback) => callback({ cancel: !(wsAllowed && details.url.startsWith(wsAllowed)) })
 const vncCreds = {}
+const computerThumbs = {}
 let failWorkspaceHealth = false
 let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
@@ -495,6 +496,9 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'vnc:prepare': return { sessionId: args[0].sessionId, url: vncUrl, destination: '100.64.0.10:5900', route: 'direct', title: 'Fixture Mac' }
     case 'vnc:release': return
     case 'vnc:lastError': return undefined
+    case 'computers:thumbs': return computerThumbs
+    case 'computers:saveThumb': computerThumbs[args[0]] = { image: args[1], at: Date.now() }; return
+    case 'computers:probe': return Object.fromEntries(args[0].map((k) => [k, k === 'tailnet/nMAC' ? 'open' : k.startsWith('tailnet/') ? 'offline' : 'tunnel']))
     // A remote desktop that stays "connecting": the viewer is on the page, which is all the keyboard check needs.
     case 'rdp:prepare': return new Promise(() => undefined)
     case 'rdp:release': return
@@ -829,7 +833,7 @@ app.whenReady().then(async () => {
     await screenshot('hosts-dark.png')
     const screens = () => require('./ui-screens.cjs')({
       output, errors,
-      fixture: { calls: () => calls, setTailnet: (t) => { tailnetFixture = t }, setVnc: (u) => { vncUrl = u }, allowWs: (prefix) => { wsAllowed = prefix } }
+      fixture: { calls: () => calls, thumbs: () => computerThumbs, setTailnet: (t) => { tailnetFixture = t }, setVnc: (u) => { vncUrl = u }, allowWs: (prefix) => { wsAllowed = prefix } }
     })
     // Just the screen sharing checks (electron tests/ui-smoke.cjs --screens).
     if (process.argv.includes('--screens')) {
@@ -1107,7 +1111,7 @@ app.whenReady().then(async () => {
     await key('ArrowRight')
     await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
     assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
-    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 14)
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 15)
     await screenshot('workspace-tools.png')
     await workspaceTab('saved-work')
     await until(`!!document.querySelector('[aria-label="Search saved work"]')`)

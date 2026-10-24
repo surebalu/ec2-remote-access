@@ -91,11 +91,11 @@ export interface BrowserRequest {
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
-export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'storage' | 'cad' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links'
-export const TOOL_KINDS: readonly ToolKind[] = ['local', 'browser', 'notes', 'board', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links']
-export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', storage: 'Storage', cad: 'CAD', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links' }
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'storage' | 'cad' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' | 'computers'
+export const TOOL_KINDS: readonly ToolKind[] = ['local', 'browser', 'notes', 'board', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links', 'computers']
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', storage: 'Storage', cad: 'CAD', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links', computers: 'Computers' }
 /** Tools that are one tab with nothing in main to open or close: shown as they are, on every device. */
-const PLAIN_TOOLS: readonly ToolKind[] = ['health', 'devtools', 'tasks', 'calendar', 'links']
+const PLAIN_TOOLS: readonly ToolKind[] = ['health', 'devtools', 'tasks', 'calendar', 'links', 'computers']
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
 export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'storage', 'claude', 'chatgpt']
 /** Tools about this Mac itself (its shells, files and disk): not shown at all off the Mac app. */
@@ -670,7 +670,7 @@ export const useStore = create<State>((set, get) => ({
         } else if (context.kind === 'browser') tools.push({ id: t.id, kind: 'browser', browser: captureBrowser(context.browser, options.browserTabs) })
         else tools.push({ ...context, id: t.id })
       } else if (t.kind === 'notes') tools.push({ id: t.id, kind: 'notes', path: t.notesPath })
-      else tools.push({ id: t.id, kind: t.kind as 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' })
+      else tools.push({ id: t.id, kind: t.kind as 'board' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links' | 'computers' })
     }
     const cur = state.settings?.workspaces ?? []
     const existing = cur.find((w) => w.name.toLowerCase() === name.trim().toLowerCase())

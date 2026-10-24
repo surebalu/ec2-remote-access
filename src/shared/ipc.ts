@@ -15,7 +15,7 @@ import type { HostHistory, HostSnapshot, ProcessDetail } from './hostInsight'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
-  RdpPrepareRequest, RdpPrepared, VncPrepareRequest, VncPrepared, StoredCredential, Theme,
+  RdpPrepareRequest, RdpPrepared, VncPrepareRequest, VncPrepared, ComputerReach, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, DataStatus, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
@@ -159,6 +159,10 @@ export interface IpcApi {
   'vnc:lastError': (sessionId: string) => Promise<string | undefined>
   /** The machines on this computer's Tailscale network, as hosts; `refresh` skips the 10 s memory. */
   'tailnet:list': (refresh?: boolean) => Promise<TailnetState>
+  /** The Computers library: last screen pictures (data: JPEG) by host key, saving one, and which computers answer now. */
+  'computers:thumbs': () => Promise<Record<string, { image: string; at: number }>>
+  'computers:saveThumb': (key: string, image: string) => Promise<void>
+  'computers:probe': (keys: string[]) => Promise<Record<string, ComputerReach>>
   'creds:get': (instanceKey: string) => Promise<StoredCredential | null>
   'creds:set': (instanceKey: string, cred: StoredCredential) => Promise<void>
   'creds:delete': (instanceKey: string) => Promise<void>

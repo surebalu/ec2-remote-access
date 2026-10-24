@@ -4,12 +4,14 @@ import { allInstances, useStore, vncCredKey, type Tab } from '../store'
 import HostActions, { openHostNote } from './HostActions'
 import { Icon } from './icons'
 import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../mobile'
-import KeyBar from './mobile/KeyBar'
-import Sheet, { SheetItem } from './mobile/Sheet'
 import { PasteSheet } from './mobile/ClipboardSheets'
-import type { StickyMods } from '../terminalKeys'
+import ScreenToolbar, { type MenuNode, type StickyMod, type ToolbarRow } from './vnc/ScreenToolbar'
+import { attachScreenTouch, presetView, type PointerMode, type View } from './vnc/screenTouch'
+import { editCombos, shortcutGroups, type Combo } from '@shared/vncShortcuts'
+import './vnc/vnc.css'
 import { charKeysym, forAppleServer, modifierKeysym, NAMED_KEYSYMS, type VncModifier } from '@shared/vncKeys'
 import { registerDictationTarget } from '../voice'
+import { saveThumb } from '../thumbs'
 
 /**
  * Another computer's screen (VNC / RFB), the way Screens shows one: macOS Screen Sharing over Tailscale above all, but
@@ -31,9 +33,9 @@ const QUALITY: Record<Quality, { quality: number; compression: number; label: st
   fast: { quality: 2, compression: 9, label: 'Low bandwidth' }
 }
 
-const VNC_KEYS = ['Esc', 'Tab', 'Up', 'Down', 'Left', 'Right', 'Del', 'Home', 'End', 'PgUp', 'PgDn', 'F1', 'F2', 'F3', 'F4', 'F5'] as const
-const KEY_NAMES: Record<string, string> = { Esc: 'Escape', Up: 'ArrowUp', Down: 'ArrowDown', Left: 'ArrowLeft', Right: 'ArrowRight', Del: 'Delete', PgUp: 'PageUp', PgDn: 'PageDown' }
-const NO_MODS: StickyMods = { ctrl: false, alt: false }
+const NO_STICKY: Record<StickyMod, boolean> = { shift: false, ctrl: false, option: false, cmd: false }
+/** Cursor speeds the settings menu offers for the trackpad pointer. */
+const SPEEDS = Array.from({ length: 16 }, (_, i) => Math.round((0.5 + i * 0.1) * 10) / 10)
 /** Characters typed with Shift on a US layout; sent with Shift held so a server that maps by key code gets them right. */
 const SHIFTED = /^[A-Z~!@#$%^&*()_+{}|:"<>?]$/
 
@@ -90,13 +92,26 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
   const [quality, setQuality] = useState<Quality>(() => readPref('ui.vncQuality', ['balanced', 'sharp', 'fast'] as const, 'balanced'))
   const [viewOnly, setViewOnly] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
-  const [mods, setModsState] = useState<StickyMods>(NO_MODS)
-  const modsRef = useRef<StickyMods>(NO_MODS)
-  const setMods = (m: StickyMods): void => { modsRef.current = m; setModsState(m) }
-  const [cmdArmed, setCmdArmedState] = useState(false)
-  const cmdRef = useRef(false)
-  const setCmdArmed = (on: boolean): void => { cmdRef.current = on; setCmdArmedState(on) }
-  const [mobileMenu, setMobileMenu] = useState(false)
+  // Phone and tablet: modifiers armed for the next key, the toolbar's open row, how a finger drives the pointer.
+  const [sticky, setStickyState] = useState(NO_STICKY)
+  const stickyRef = useRef(NO_STICKY)
+  const setSticky = (m: Record<StickyMod, boolean>): void => { stickyRef.current = m; setStickyState(m) }
+  const [row, setRow] = useState<ToolbarRow>(null)
+  const [pointer, setPointerState] = useState<PointerMode>(() => readPref('ui.vncPointer', ['trackpad', 'touch'] as const, 'trackpad'))
+  const pointerRef = useRef(pointer)
+  pointerRef.current = pointer
+  const [speed, setSpeedState] = useState(() => { const v = Number(readPref('ui.vncSpeed', SPEEDS.map(String), '1')); return SPEEDS.includes(v) ? v : 1 })
+  const speedRef = useRef(speed)
+  speedRef.current = speed
+  const [zoomOff, setZoomOff] = useState(() => readPref('ui.vncZoom', ['on', 'off'] as const, 'on') === 'off')
+  const zoomOffRef = useRef(zoomOff)
+  zoomOffRef.current = zoomOff
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const [, setView] = useState<View>({ scale: 1, x: 0, y: 0 })
+  const touchRef = useRef<HTMLDivElement>(null)
+  const touchCtl = useRef<ReturnType<typeof attachScreenTouch> | null>(null)
+  /** The last text the remote computer put on its clipboard (standard VNC cut text), for Copy. */
+  const [lastClip, setLastClip] = useState<string | null>(null)
   const [pasteBox, setPasteBox] = useState<string | null>(null)
   /** Text the remote computer copied, waiting for a tap to reach the phone's clipboard (WebKit writes only from a tap). */
   const [remoteClip, setRemoteClip] = useState<string | null>(null)
@@ -145,6 +160,8 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
   useEffect(() => {
     const c = ctl.current
     const id = tab.id
+    // Kept for the cleanup: React has already cleared the ref when an unmount's cleanup runs.
+    const screenEl = screenRef.current
     const clearTimers = (): void => {
       if (c.timer) clearTimeout(c.timer)
       if (c.ticker) clearInterval(c.ticker)
@@ -260,6 +277,7 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
           const text = (e as CustomEvent<{ text: string }>).detail?.text
           if (!text || Date.now() < c.clipQuietUntil) return
           // The Mac app writes it straight to this Mac's clipboard (a shared clipboard, as in Screens); a phone needs a tap.
+          setLastClip(text)
           if (mobile || !/\bElectron\//.test(navigator.userAgent)) setRemoteClip(text)
           else if (activeRef.current) void window.api.invoke('clipboard:write', text)
         })
@@ -288,10 +306,20 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     return () => {
       c.disposed = true
       clearTimers()
+      if (phaseRef.current === 'connected') saveThumb(tab.instanceKey, screenEl?.querySelector('canvas'))
       rfbRef.current?.disconnect()
       rfbRef.current = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Computers card's picture: shortly after connecting, then every two minutes while connected.
+  useEffect(() => {
+    if (phase !== 'connected') return
+    const snap = (): void => saveThumb(tab.instanceKey, screenRef.current?.querySelector('canvas'))
+    const first = setTimeout(snap, 4000)
+    const every = setInterval(snap, 120_000)
+    return () => { clearTimeout(first); clearInterval(every) }
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const viewOnlyRef = useRef(viewOnly)
   viewOnlyRef.current = viewOnly
@@ -310,22 +338,52 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
-  /** Presses a key on the remote computer, with the key bar's armed modifiers held around it. */
+  /** Presses a key on the remote computer, with the toolbar's armed modifiers held around it (then disarmed). */
   const press = (keysym: number, extra: VncModifier[] = []): void => {
     const rfb = rfbRef.current
     if (!rfb || phaseRef.current !== 'connected') return
-    const m = modsRef.current
-    const held: VncModifier[] = [...extra]
-    if (m.ctrl) held.push('ctrl')
-    if (m.alt) held.push('option')
-    if (cmdRef.current) held.push('cmd')
+    const armed = (Object.keys(stickyRef.current) as StickyMod[]).filter((m) => stickyRef.current[m])
+    const held = [...new Set<VncModifier>([...extra, ...armed])]
     const apple = appleServer()
     for (const mod of held) rfb.sendKey(modifierKeysym(mod, apple), null, true)
     rfb.sendKey(keysym, null, true)
     rfb.sendKey(keysym, null, false)
-    for (const mod of held.reverse()) rfb.sendKey(modifierKeysym(mod, apple), null, false)
-    if (m.ctrl || m.alt) setMods(NO_MODS)
-    if (cmdRef.current) setCmdArmed(false)
+    for (const mod of [...held].reverse()) rfb.sendKey(modifierKeysym(mod, apple), null, false)
+    if (armed.length) setSticky(NO_STICKY)
+  }
+  const pressCombo = (combo: Combo): void => press(typeof combo.key === 'number' ? combo.key : charKeysym(combo.key), combo.mods)
+
+  /** A pointer event in framebuffer pixels, through noVNC's own message writer (its touch handling is replaced here). */
+  const sendPointer = (x: number, y: number, mask: number): void => {
+    const rfb = rfbRef.current as unknown as { _sock?: unknown; _rfbConnectionState?: string } | null
+    if (!rfb?._sock || rfb._rfbConnectionState !== 'connected' || viewOnlyRef.current) return
+    RFB.messages.pointerEvent(rfb._sock, Math.round(x), Math.round(y), mask)
+  }
+  // The touch layer (phone and tablet): trackpad or touch pointer, two-finger scroll and right-click, pinch to zoom.
+  useEffect(() => {
+    if (!mobile || !touchRef.current || !screenRef.current) return
+    const handle = attachScreenTouch(touchRef.current, {
+      screen: screenRef.current,
+      canvas: () => screenRef.current?.querySelector('canvas') ?? null,
+      mode: () => pointerRef.current,
+      speed: () => speedRef.current,
+      zoomable: () => !zoomOffRef.current,
+      send: sendPointer,
+      onCursor: (p) => setCursor({ ...p }),
+      onView: (v) => setView({ ...v })
+    })
+    touchCtl.current = handle
+    return () => { handle.detach(); touchCtl.current = null }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  /** Scaling choices for the touch view: fit the screen, fill the pane, or one remote pixel per point. */
+  const scaleTo = (kind: 'fit' | 'fill' | 'actual'): void => {
+    const canvas = screenRef.current?.querySelector('canvas')
+    const layer = touchRef.current?.getBoundingClientRect()
+    if (!canvas || !layer || !touchCtl.current) return
+    const r = canvas.getBoundingClientRect()
+    const now = screenRef.current?.style.transform.match(/scale\(([\d.]+)\)/)?.[1]
+    const k = now ? Number(now) : 1
+    touchCtl.current.setView(presetView(kind, { width: r.width / k, height: r.height / k }, layer, { width: canvas.width, height: canvas.height }))
   }
   const typeText = (text: string): void => {
     for (const ch of text.replace(/\r\n?/g, '\n')) press(charKeysym(ch), SHIFTED.test(ch) ? ['shift'] : [])
@@ -333,7 +391,7 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
   useEffect(() => registerDictationTarget(wrapRef.current!, { label: 'Screen sharing', insert: (text) => typeText(text) }), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendBarKey = (k: string): void => {
-    const keysym = NAMED_KEYSYMS[KEY_NAMES[k] ?? k]
+    const keysym = NAMED_KEYSYMS[k]
     if (keysym) press(keysym)
   }
   const onKbKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -404,11 +462,15 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     }
   }
   const pasteOnPhone = (): void => pasteFromClipboard((text) => { rfbRef.current?.clipboardPasteFrom(text); typeText(text) }, setPasteBox)
+  /** Puts text on this device's clipboard; on a phone it must run straight from a tap. */
+  const copyRemoteClipText = (text: string | null): void => {
+    if (!text) return
+    navigator.clipboard.writeText(text).then(() => toast('success', 'Copied to this device.'), (e: Error) => toast('error', `Copy failed: ${e.message}`))
+  }
   const copyRemoteClip = (): void => {
     const text = remoteClip
     setRemoteClip(null)
-    if (!text) return
-    navigator.clipboard.writeText(text).then(() => toast('success', 'Copied to this device.'), (e: Error) => toast('error', `Copy failed: ${e.message}`))
+    copyRemoteClipText(text)
   }
   const toggleFullscreen = async (): Promise<void> => {
     if (document.fullscreenElement) { await document.exitFullscreen().catch(() => undefined); return }
@@ -458,10 +520,28 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     <div className="vnc-wait"><span className="vnc-spinner" />{message}{phase === 'waiting' && <button className="btn btn-sm" onClick={reconnect}>Now{countdown > 0 ? ` (${countdown}s)` : ''}</button>}</div>
   ) : null
 
+  /** The trackpad pointer, drawn where its framebuffer position falls on screen (noVNC draws no cursor on touch). */
+  const cursorAt = (): ReactElement | null => {
+    const canvas = screenRef.current?.querySelector('canvas')
+    const wrap = wrapRef.current?.getBoundingClientRect()
+    if (!canvas || !wrap || !canvas.width) return null
+    const r = canvas.getBoundingClientRect()
+    const p = cursor ?? { x: canvas.width / 2, y: canvas.height / 2 }
+    const left = r.left - wrap.left + (p.x * r.width) / canvas.width
+    const top = r.top - wrap.top + (p.y * r.height) / canvas.height
+    return (
+      <svg className="vnc-cursor" style={{ left, top }} viewBox="0 0 22 22" aria-hidden="true">
+        <path d="M2 1.5v16.2l4.3-4.1 2.8 6.6 3-1.3-2.8-6.5h6z" fill="#fff" stroke="#000" strokeWidth="1.2" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+
   const screen = (
     <div ref={wrapRef} className="vnc-wrap" data-scale={scale} data-tiled={tiled || undefined}>
       <div ref={screenRef} className="vnc-screen" />
       {overlay && <div className="vnc-overlay">{overlay}</div>}
+      {mobile && <div ref={touchRef} className="vnc-touch" />}
+      {mobile && pointer === 'trackpad' && phase === 'connected' && cursorAt()}
       {mobile && (
         <textarea
           ref={kbRef}
@@ -487,37 +567,67 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
   )
 
   if (mobile) {
+    const apple = appleServer()
+    const connected = phase === 'connected'
+    const groups = shortcutGroups(apple)
+    const shortcuts: MenuNode[] = [
+      ...groups.filter((g) => g.label).map((g): MenuNode => ({
+        id: g.id,
+        label: g.label,
+        icon: g.id === 'desktop' ? <Icon.monitor /> : g.id === 'app' ? <Icon.apps /> : <Icon.settings />,
+        children: [
+          ...g.items.map((i): MenuNode => ({ id: i.id, label: i.label, disabled: !connected, run: () => pressCombo(i.combo) })),
+          ...(g.id === 'system' && !apple ? [{ id: 'cad', label: 'Ctrl+Alt+Delete', disabled: !connected, run: () => rfbRef.current?.sendCtrlAltDel() }] : [])
+        ]
+      })),
+      { id: 'sep1', label: '' },
+      ...groups.filter((g) => !g.label).flatMap((g) => g.items.map((i): MenuNode => ({ id: i.id, label: i.label, icon: i.id === 'spotlight' ? <Icon.search /> : undefined, disabled: !connected, run: () => pressCombo(i.combo) })))
+    ]
+    const choose = <T,>(list: { value: T; label: string }[], current: T, set: (v: T) => void): MenuNode[] =>
+      list.map((o) => ({ id: String(o.value), label: o.label, checked: o.value === current, run: () => set(o.value) }))
+    const settings: MenuNode[] = [
+      { id: 'clipboard', label: 'Clipboard', icon: <Icon.clipboard />, children: [
+        { id: 'type', label: 'Type this device’s clipboard', disabled: !connected, run: pasteOnPhone },
+        { id: 'copy', label: lastClip ? `Copy ${hostName}’s clipboard` : `Nothing copied from ${hostName} yet`, disabled: !lastClip, run: () => { setRemoteClip(null); copyRemoteClipText(lastClip) } }
+      ] },
+      { id: 'sep1', label: '' },
+      { id: 'scaling', label: 'Scaling', icon: <Icon.fit />, children: [
+        { id: 'zoom', label: zoomOff ? 'Turn on zooming' : 'Turn off zooming', run: () => { setZoomOff(!zoomOff); writePref('ui.vncZoom', zoomOff ? 'on' : 'off') } },
+        { id: 'actual', label: 'Actual size', run: () => scaleTo('actual') },
+        { id: 'fill', label: 'Size to fill', run: () => scaleTo('fill') },
+        { id: 'fit', label: 'Size to fit', run: () => scaleTo('fit') }
+      ] },
+      { id: 'quality', label: 'Image quality', icon: <Icon.gauge />, children: choose((Object.keys(QUALITY) as Quality[]).map((q) => ({ value: q, label: QUALITY[q].label })), quality, changeQuality) },
+      { id: 'sep2', label: '' },
+      { id: 'pointer', label: 'Pointer', icon: <Icon.move />, children: choose<PointerMode>([{ value: 'trackpad', label: 'Trackpad' }, { value: 'touch', label: 'Touch' }], pointer, (v) => { setPointerState(v); writePref('ui.vncPointer', v); if (v === 'trackpad') touchCtl.current?.center() }) },
+      { id: 'speed', label: 'Pointer speed', icon: <Icon.gauge />, children: choose(SPEEDS.slice().reverse().map((v) => ({ value: v, label: `${v.toFixed(1)}×` })), speed, (v) => { setSpeedState(v); writePref('ui.vncSpeed', String(v)) }) },
+      { id: 'interaction', label: 'Interaction', icon: <Icon.eye />, children: choose([{ value: false, label: 'Control' }, { value: true, label: 'View only' }], viewOnly, setViewOnly) },
+      { id: 'sep3', label: '' },
+      ...(phase === 'failed' || phase === 'closed' ? [{ id: 'reconnect', label: 'Reconnect', icon: <Icon.refresh />, run: reconnect }] : []),
+      { id: 'note', label: 'Host note', icon: <Icon.note />, run: () => openHostNote(tab.instanceKey) },
+      { id: 'close', label: 'Close connection', icon: <Icon.x />, danger: true, run: disconnect }
+    ]
     return (
-      <div className="flex h-full flex-col">
+      <div className="vnc-stage">
         {screen}
-        <KeyBar
-          mods={mods}
-          onMods={setMods}
-          onKey={sendBarKey}
-          keys={VNC_KEYS}
-          keyboardOpen={keyboardOpen}
-          onKeyboard={toggleKeyboard}
-          onPaste={pasteOnPhone}
-          onMore={() => setMobileMenu(true)}
-          leading={
-            <button type="button" className={`m-key ${cmdArmed ? 'on' : ''}`} aria-pressed={cmdArmed} aria-label={appleServer() ? 'Command (applies to the next key)' : 'Windows key (applies to the next key)'} onPointerDown={(e) => e.preventDefault()} onClick={() => setCmdArmed(!cmdArmed)}>
-              {appleServer() ? '⌘' : 'win'}
-            </button>
-          }
-        />
-        {pasteBox !== null && <PasteSheet initial={pasteBox} action="Type" onSend={(t) => { setPasteBox(null); typeText(t) }} onClose={() => setPasteBox(null)} />}
-        {mobileMenu && (
-          <Sheet title={hostName} subtitle={<>{message}<br />Tap to click · two fingers to right-click or scroll · pinch to zoom · drag to select</>} onClose={() => setMobileMenu(false)}>
-            <SheetItem icon={<Icon.fit />} hint={scale === 'fit' ? 'Fit' : '1:1'} onClick={() => changeScale(scale === 'fit' ? 'real' : 'fit')}>Screen size</SheetItem>
-            <SheetItem icon={<Icon.gauge />} hint={QUALITY[quality].label} onClick={() => changeQuality(quality === 'balanced' ? 'fast' : quality === 'fast' ? 'sharp' : 'balanced')}>Picture quality</SheetItem>
-            <SheetItem icon={<Icon.eye />} hint={viewOnly ? 'On' : 'Off'} onClick={() => setViewOnly(!viewOnly)}>View only</SheetItem>
-            <SheetItem icon={<Icon.clipboard />} disabled={phase !== 'connected'} onClick={() => { setMobileMenu(false); pasteOnPhone() }}>Paste (types the text)</SheetItem>
-            {!appleServer() && <SheetItem icon={<Icon.keyboard />} disabled={phase !== 'connected'} onClick={() => { setMobileMenu(false); rfbRef.current?.sendCtrlAltDel() }}>Send Ctrl+Alt+Del</SheetItem>}
-            {(phase === 'failed' || phase === 'closed') && <SheetItem icon={<Icon.refresh />} onClick={() => { setMobileMenu(false); reconnect() }}>Reconnect</SheetItem>}
-            <SheetItem icon={<Icon.note />} onClick={() => { setMobileMenu(false); openHostNote(tab.instanceKey) }}>Host note</SheetItem>
-            <SheetItem icon={<Icon.x />} danger onClick={() => { setMobileMenu(false); disconnect() }}>Disconnect</SheetItem>
-          </Sheet>
+        {connected && (
+          <ScreenToolbar
+            mac={apple}
+            row={row}
+            onRow={setRow}
+            keyboardOpen={keyboardOpen}
+            onKeyboard={toggleKeyboard}
+            onDictate={() => { kbRef.current?.focus(); toast('info', 'Tap the microphone on the keyboard to dictate.') }}
+            sticky={sticky}
+            onSticky={(m) => setSticky({ ...stickyRef.current, [m]: !stickyRef.current[m] })}
+            onKey={sendBarKey}
+            onEdit={(a) => pressCombo(editCombos(apple)[a])}
+            onTypeText={() => setPasteBox('')}
+            shortcuts={shortcuts}
+            settings={settings}
+          />
         )}
+        {pasteBox !== null && <PasteSheet initial={pasteBox} action="Type" onSend={(t) => { setPasteBox(null); typeText(t) }} onClose={() => setPasteBox(null)} />}
       </div>
     )
   }

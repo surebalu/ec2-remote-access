@@ -51,13 +51,15 @@ const EMPTY: Data = { apps: [], usage: {}, settings: null, hosts: [], profiles: 
 const NO_LINKS: Quicklink[] = []
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  computers: Icon.screenShare, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_ABOUT: Record<RailSection, string> = {
+  computers: 'Tailscale machines and their screens',
   devtools: 'Local developer utilities', tasks: 'Today, upcoming and your projects', calendar: 'Month, week and day', links: 'Your bookmarks and notes', hosts: 'Every account’s hosts', overview: 'All open sessions on one page', health: 'The 3DEXPERIENCE platform at a glance', local: 'Shells on this Mac', finder: 'Files on this Mac', storage: 'Disk space and clean-up', cad: 'STEP files in 3D, with reviews',
   browser: 'AWS console spaces and web tabs', notes: 'Your Markdown notes', board: 'The scratch pad', claude: 'Chat, signed in on its own', chatgpt: 'Chat, signed in on its own'
 }
 const SECTION_WORDS: Record<RailSection, string> = {
+  computers: 'screens screen sharing vnc tailscale remote control mac computers library',
   devtools: 'json base64 url jwt uuid timestamp hash developer utilities', tasks: 'todo to-do things todoist reminders checklist projects', calendar: 'events schedule agenda meetings ical', links: 'bookmarks anybox saved pages urls', hosts: 'instances servers ec2 list', overview: 'all sessions grid', health: 'status monitoring 3dexperience prometheus grafana alerts', local: 'shell zsh console warp', finder: 'files folders', storage: 'disk space clean cleaner junk large files duplicates trash strata', cad: 'step stp iges 3d model part assembly solidworks review viewer', browser: 'web tabs arc',
   notes: 'obsidian markdown', board: 'whiteboard draw sketch', claude: 'ai chat anthropic', chatgpt: 'ai chat openai gpt'
 }
