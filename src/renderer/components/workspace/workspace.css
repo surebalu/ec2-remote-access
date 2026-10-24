@@ -7,7 +7,6 @@
 .ws-header p > span { margin: 0 5px; color: var(--muted); }
 .ws-header-actions { display: flex; align-items: center; flex-shrink: 0; gap: 8px; }
 .ws-header-actions .btn { height: 33px; font-size: 11px; }
-.ws-find kbd { margin-left: 10px; font-size: 10px; color: var(--muted); }
 .hd-fold { display: grid; width: 28px; height: 30px; place-items: center; color: var(--muted); border-radius: 6px; flex-shrink: 0; }
 .hd-fold:hover { background: var(--panel-2); color: var(--text); }
 .hd-fold svg { width: 14px; height: 14px; transform: rotate(180deg); }
@@ -113,7 +112,6 @@
 @container host-workspace (max-width: 900px) {
   .ws-header { padding: 14px 16px; }
   .ws-header h1 { font-size: 22px; }
-  .ws-header-actions .ws-find { display: none; }
   .ws-overview { grid-template-columns: 1fr 1fr; gap: 14px; }
   .ws-attention { padding-left: 14px; }
   .hd-jump-grid { grid-template-columns: 1fr; }
@@ -149,7 +147,6 @@
   .ws-header { padding-top: 10px; padding-bottom: 10px; }
   .ws-header p, .ws-eyebrow, .ws-footer { display: none; }
   .ws-metrics { display: none; }
-  .ws-header-actions .ws-find { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .workspace-deck * { transition: none !important; } }
 

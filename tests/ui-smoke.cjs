@@ -839,7 +839,8 @@ app.whenReady().then(async () => {
     const setInput = (selector, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
     // Developer workbench: real navigation, keyboard transformation, clipboard and draft lifecycle.
     const setToolInput = (value) => js(`(() => { const el = document.querySelector('#dev-input'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
-    await js(`document.querySelector('.app-rail [aria-label="Search"]').click()`)
+    assert.equal(await js(`!!document.querySelector('.app-rail [aria-label="Search"]')`), false, '⌘K has one entry point: the title bar')
+    await js(`document.querySelector('.search-pill[aria-label="Open quick switcher"]').click()`)
     await until(`!!document.querySelector('[role="combobox"]')`)
     await click('Commands >')
     await until(`document.querySelector('[role="combobox"]').value === '>' && document.querySelector('.switcher .launcher-command')?.textContent === 'Commands & Tools'`)

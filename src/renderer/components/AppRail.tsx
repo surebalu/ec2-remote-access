@@ -116,8 +116,8 @@ export default function AppRail(): ReactElement {
         e.preventDefault()
         void window.api.invoke('tools:attach', kind)
       }}>
-      {item({ label: 'Search', icon: <Icon.search />, hue: 220, sat: 14, on: false, title: 'Find hosts, tools and commands (⌘K)', onClick: () => st().openQuickSwitcher() })}
-      {/* One list, in TOOL_GROUPS order, with no group labels or dividers (the user found them cluttered). */}
+      {/* One list, in TOOL_GROUPS order, with no group labels or dividers (the user found them cluttered). ⌘K's one
+          entry point is the title bar's search field: a Search item here repeated it and took a row the tools need. */}
       <div className="rail-sections">
       {item({ label: 'Hosts', icon: <Icon.server />, hue: LOOKS.hosts.hue, on: !gridView && activeTab === 'hosts', title: withKey('Hosts in every account', 'hosts', '⌘1'), onClick: () => st().setActive('hosts'), onContextMenu: (el) => setMenu({ kind: 'hosts', anchor: el }) })}
       {item({
