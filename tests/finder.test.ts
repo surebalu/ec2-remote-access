@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cloudName, copyName, displayPath, favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, placeKind, sortEntries } from '../src/shared/finder.ts'
+import { cloudName, copyName, displayPath, favoritePatch, folderHints, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, placeKind, resolveTyped, sortEntries, tildePath, typedParts } from '../src/shared/finder.ts'
 
 const e = (name: string, type: 'file' | 'dir' = 'file', size = 0, mtime = 0) => ({ name, path: `/x/${name}`, type, size, mtime, mode: 0 })
 
@@ -85,4 +85,33 @@ test('copies are named as Finder names them, and never take a name already there
   // Into another folder: the same name when free, else keep both.
   assert.equal(copyName('report.pdf', false, ['other.pdf'], false), 'report.pdf')
   assert.equal(copyName('report.pdf', false, ['REPORT.pdf', 'report 2.pdf'], false), 'report 3.pdf')
+})
+
+test('Go to Folder reads paths as Finder does', () => {
+  const home = '/Users/me'
+  const cwd = '/Users/me/Projects'
+  assert.equal(resolveTyped('~', home, cwd), '/Users/me')
+  assert.equal(resolveTyped('~/.aws', home, cwd), '/Users/me/.aws')
+  assert.equal(resolveTyped('  ~/.ssh/  ', home, cwd), '/Users/me/.ssh')
+  assert.equal(resolveTyped('/usr/local//bin/', home, cwd), '/usr/local/bin')
+  assert.equal(resolveTyped('app/src', home, cwd), '/Users/me/Projects/app/src')
+  assert.equal(resolveTyped('../Documents', home, cwd), '/Users/me/Documents')
+  assert.equal(resolveTyped('/../../etc', home, cwd), '/etc')
+  assert.equal(resolveTyped("'/Volumes/My Disk'", home, cwd), '/Volumes/My Disk')
+  assert.equal(resolveTyped('"~/Library/Application Support"', home, cwd), '/Users/me/Library/Application Support')
+  assert.equal(tildePath('/Users/me/.aws', home), '~/.aws')
+  assert.equal(tildePath('/Users/meow', home), '/Users/meow')
+  assert.equal(tildePath('/Users/me', home), '~')
+})
+
+test('Go to Folder suggests folders under what is typed, hidden ones once a dot is typed', () => {
+  assert.deepEqual(typedParts('~/.a'), { dir: '~/', partial: '.a' })
+  assert.deepEqual(typedParts('/usr/lo'), { dir: '/usr/', partial: 'lo' })
+  assert.deepEqual(typedParts('~'), { dir: '~', partial: '' })
+  assert.deepEqual(typedParts('Proj'), { dir: '', partial: 'Proj' })
+  const list = [{ name: '.aws', type: 'dir' as const }, { name: '.ssh', type: 'dir' as const }, { name: 'Applications', type: 'dir' as const }, { name: 'apps.txt', type: 'file' as const }, { name: 'Desktop', type: 'dir' as const }]
+  assert.deepEqual(folderHints(list, 'a', false).map((e) => e.name), ['Applications'])
+  assert.deepEqual(folderHints(list, '.', false).map((e) => e.name), ['.aws', '.ssh'])
+  assert.deepEqual(folderHints(list, '', false).map((e) => e.name), ['Applications', 'Desktop'])
+  assert.deepEqual(folderHints(list, '', true).map((e) => e.name), ['.aws', '.ssh', 'Applications', 'Desktop'])
 })

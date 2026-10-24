@@ -1795,6 +1795,16 @@ html[data-ui-font-mono]:not([data-tabs-crowded]) .search-pill { width: 330px; }
 .fi-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--text); }
 .fi-btn:disabled { opacity: .35; }
 .fi-title { min-width: 0; margin: 0 6px; overflow: hidden; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.fi-title button { max-width: 100%; overflow: hidden; padding: 2px 6px; border-radius: 6px; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.fi-title button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+/* Go to Folder: the title becomes a path field with the folders under what is typed. */
+.fi-goto { position: relative; flex: 1; min-width: 160px; max-width: 520px; margin: 0 6px; }
+.fi-goto input { width: 100%; height: 28px; padding: 0 9px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); color: var(--text); font: 13px/1 var(--mono-font); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.fi-goto-hints { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 30; max-height: 280px; margin: 0; padding: 4px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-lg); list-style: none; }
+.fi-goto-hints li { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; cursor: default; }
+.fi-goto-hints li.on { background: var(--accent-soft); }
+.fi-goto-hints li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi-goto-hints .fi-goto-error { color: var(--err); }
 .fi-search { display: inline-flex; align-items: center; gap: 6px; width: 220px; height: 28px; margin-left: 4px; padding: 0 6px 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--muted); }
 .fi-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .fi-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 12px; }

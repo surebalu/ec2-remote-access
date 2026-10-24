@@ -113,7 +113,8 @@ let termSaved = null
 // The Finder tab's pretend disk under /Users/fixture, its Finder favorites and locations, and what it was asked to do.
 const fsEntry = (dir, name, type = 'file', size = 0, ageDays = 1) => ({ name, path: `${dir === '/' ? '' : dir}/${name}`, type, size, mtime: now - ageDays * 86400000, mode: 0 })
 const finderFs = {
-  '/Users/fixture': [fsEntry('/Users/fixture', 'Documents', 'dir'), fsEntry('/Users/fixture', 'Downloads', 'dir'), fsEntry('/Users/fixture', 'Projects', 'dir'), fsEntry('/Users/fixture', '.zshrc', 'file', 120)],
+  '/Users/fixture': [fsEntry('/Users/fixture', 'Documents', 'dir'), fsEntry('/Users/fixture', 'Downloads', 'dir'), fsEntry('/Users/fixture', 'Projects', 'dir'), fsEntry('/Users/fixture', '.zshrc', 'file', 120), fsEntry('/Users/fixture', '.aws', 'dir'), fsEntry('/Users/fixture', '.ssh', 'dir')],
+  '/Users/fixture/.aws': [fsEntry('/Users/fixture/.aws', 'config', 'file', 300), fsEntry('/Users/fixture/.aws', 'sso', 'dir')], '/Users/fixture/.aws/sso': [], '/Users/fixture/.ssh': [],
   '/Users/fixture/Documents': [fsEntry('/Users/fixture/Documents', 'Surendra-Personal', 'dir'), fsEntry('/Users/fixture/Documents', 'Runbook.pdf', 'file', 1234567, 3), fsEntry('/Users/fixture/Documents', 'notes.md', 'file', 4200), fsEntry('/Users/fixture/Documents', 'photo.png', 'file', 250000, 40)],
   '/Users/fixture/Documents/Surendra-Personal': [fsEntry('/Users/fixture/Documents/Surendra-Personal', 'codebase', 'dir'), fsEntry('/Users/fixture/Documents/Surendra-Personal', 'Passport.pdf', 'file', 900000)],
   '/Users/fixture/Downloads': [], '/Users/fixture/Projects': [fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200)]
@@ -3694,6 +3695,35 @@ app.whenReady().then(async () => {
     await tjs(`[...document.querySelectorAll('.fi-place')].find((b) => b.textContent === 'Recents').click()`)
     await tuntil(`document.querySelector('.fi-title').textContent === 'Recents' && document.querySelectorAll('.fi-row').length === 2 && document.querySelector('.fi-th.on')?.textContent.startsWith('Name') !== undefined`, 'recents')
     assert.match(await tjs(`document.querySelectorAll('.fi-row')[0].querySelector('.date').textContent`), /^Today at /)
+    // Go to Folder (a click on the title, or ⇧⌘G): any path, hidden folders included, with the folders under what is typed.
+    const gotoSet = (v) => tjs(`(() => { const i = document.querySelector('.fi-goto input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    const gotoKey = (k) => tjs(`document.querySelector('.fi-goto input').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true }))`)
+    await tjs(`document.querySelector('.fi-title button').click()`)
+    await tuntil(`document.querySelector('.fi-goto input')?.value === '~/'`, 'go to folder opens on the home folder from Recents')
+    await gotoSet('~/.a')
+    await tuntil(`[...document.querySelectorAll('.fi-goto-hints li')].map((l) => l.textContent).join('|') === '.aws'`, 'a dot offers the hidden folders')
+    await tshot('finder-goto.png')
+    await gotoKey('Tab')
+    await tuntil(`document.querySelector('.fi-goto input')?.value === '~/.aws/'`, 'Tab completes')
+    await gotoKey('Enter')
+    await tuntil(`document.querySelector('.fi-title')?.textContent === '.aws' && [...document.querySelectorAll('.fi-row')].map((r) => r.querySelector('.name, .fi-name')?.textContent ?? r.textContent).join('|').includes('config')`, 'Enter goes into the hidden folder')
+    await tkey('g', { metaKey: true, shiftKey: true })
+    await tuntil(`document.querySelector('.fi-goto input')?.value === '~/.aws/'`, '⇧⌘G opens it on this folder')
+    await gotoSet('/nowhere')
+    await gotoKey('Enter')
+    await tuntil(`document.querySelector('.fi-goto-error')?.textContent === 'There is no folder at /nowhere.'`, 'a path that is not there says so')
+    await gotoSet('~/.zshrc')
+    await gotoKey('Enter')
+    await tuntil(`document.querySelector('.fi-title')?.textContent === 'fixture' && document.querySelector('.fi-row.on')?.textContent.includes('.zshrc')`, 'a file opens its folder with the file selected, hidden or not')
+    await tjs(`document.querySelector('.fi-title button').click()`)
+    await gotoSet('Documents/Surendra-Personal')
+    await gotoKey('Enter')
+    await tuntil(`document.querySelector('.fi-title')?.textContent === 'Surendra-Personal'`, 'a path without / is inside the current folder')
+    await tjs(`document.querySelector('.fi-title button').click()`)
+    await tuntil(`!!document.querySelector('.fi-goto input')`)
+    await gotoKey('Escape')
+    await tuntil(`!document.querySelector('.fi-goto') && !!document.querySelector('.fi-title button')`, 'Esc puts the title back')
+    await tkey('.', { metaKey: true, shiftKey: true })
 
     // Storage: a scan of the Mac and the Overview, the Space Map's cards and inspector, going in and out of folders, Large
     // Files to the Trash and Put Back, Hidden Files ticking only caches, Search, the Clean up rooms, the Apps rooms, the
