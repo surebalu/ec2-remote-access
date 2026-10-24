@@ -1,5 +1,5 @@
 import type { BoxStatus } from './box'
-import type { CompanySetup, SetupPreview } from './setup'
+import type { BoxSetup, CompanySetup, SetupPreview } from './setup'
 import type { ExtensionInfo } from './extensions'
 import type { AnyboxLibrary } from './links'
 import type { FrontPage, LinksPanelMode } from './linksPanel'
@@ -395,6 +395,10 @@ export interface IpcApi {
   'setup:pickImport': () => Promise<SetupPreview | null>
   /** Writes the previewed import's AWS profiles and returns the merged settings for the page to save. */
   'setup:apply': (id: string) => Promise<{ settings: Settings; profiles: string[]; dataDir?: string }>
+  /** The setups each Mac keeps in Box (setup/<computer>.json), newest first. */
+  'setup:boxList': () => Promise<BoxSetup[]>
+  /** Like setup:pickImport, for one of them. */
+  'setup:fromBox': (id: string) => Promise<SetupPreview>
   /** `sessionManagerPluginBundled`: the copy inside the Mac app is the one in use (none is installed). */
   'app:paths': () => Promise<{ sessionManagerPlugin: string | null; sessionManagerPluginBundled: boolean; awsCli: string | null; windowsApp: boolean }>
   /** Sends a command to many hosts with SSM Run Command; poll run:status for results (pushed events can be missed). */

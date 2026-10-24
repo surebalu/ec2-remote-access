@@ -49,6 +49,9 @@ export interface SetupPreview {
   settings: string[]
   left: SetupFile['left']
 }
+/** A Mac's setup kept in Box (boxSync.ts), offered to a new Mac after it signs in to Box. */
+export interface BoxSetup { id: string; computer: string; exportedAt: number; /** This computer's own. */ mine: boolean }
+
 /** add: written; same: already there as it is in the file; kept: a different one by that name stays as it is. */
 export type SectionStatus = 'add' | 'same' | 'kept'
 

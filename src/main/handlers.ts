@@ -33,7 +33,7 @@ import { cancelServiceJob, serviceHistory, serviceJob, serviceJobs, serviceLogs,
 import { findBinary } from './util'
 import { findPlugin } from './ssm/session'
 import { boxSignIn } from './box'
-import { boxStatus, boxSyncNow, openLinkFile, signOutOfBox } from './boxSync'
+import { boxSetups, boxStatus, boxSyncNow, openLinkFile, previewBoxSetup, signOutOfBox } from './boxSync'
 import { applyImport, companySetup, exportSetup, pickImport } from './setup'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
@@ -394,6 +394,8 @@ export const handlers: Handlers = {
   'setup:export': () => exportSetup(),
   'setup:pickImport': () => pickImport(),
   'setup:apply': (id) => applyImport(id),
+  'setup:boxList': () => boxSetups(),
+  'setup:fromBox': (id) => previewBoxSetup(id),
   'app:paths': async () => {
     const plugin = findPlugin()
     return {
