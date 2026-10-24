@@ -51,3 +51,8 @@
 .vt-setup .m-segment button { white-space: nowrap; }
 /* A note in a menu (why displays are not listed). */
 .vt-note { margin: 0; padding: 8px 20px 10px 46px; color: rgba(242, 242, 245, .72); font-size: 13px; line-height: 1.45; }
+
+/* The arrangement in miniature next to each display (DisplayGlyph.tsx). */
+.vt-item-icon:has(.vt-glyph-displays) { width: 40px; }
+.vt-glyph-displays rect { fill: rgba(255, 255, 255, .28); }
+.vt-glyph-displays rect.on { fill: #a855f7; }

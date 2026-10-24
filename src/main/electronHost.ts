@@ -108,7 +108,7 @@ export const electronHost: Host = {
   },
   displays() {
     const primary = screen.getPrimaryDisplay().id
-    return screen.getAllDisplays().map((d) => ({ x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height, label: d.label || undefined, primary: d.id === primary }))
+    return screen.getAllDisplays().map((d) => ({ x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height, label: d.label || undefined, primary: d.id === primary, scale: d.scaleFactor }))
   },
   quickLook(path) {
     const win = BrowserWindow.getFocusedWindow() ?? mainWindow()

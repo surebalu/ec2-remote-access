@@ -64,15 +64,20 @@ export function FloatingMenu({ items, onClose, align = 'right' }: { items: MenuN
       {n.children && <span className="vt-chev"><Icon.chevron /></span>}
     </button>
   )
-  const groups: MenuNode[][] = []
-  for (const n of items) {
-    if (n.id.startsWith('sep')) groups.push([])
-    else (groups[groups.length - 1] ?? (groups[0] = [])).push(n)
+  /** Items between `sep…` ids become groups with a divider between them. */
+  const grouped = (list: MenuNode[]): MenuNode[][] => {
+    const out: MenuNode[][] = [[]]
+    for (const n of list) {
+      if (n.id.startsWith('sep')) out.push([])
+      else out[out.length - 1].push(n)
+    }
+    return out.filter((g) => g.length)
   }
+  const groups = grouped(items)
   return (
     <div className="vt-menu-layer" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className={`vt-menu ${align} ${open ? 'dim' : ''}`} role="menu">
-        {groups.filter((g) => g.length).map((g, i) => <div key={i} className="vt-menu-group">{g.map((n) => item(n, false))}</div>)}
+        {groups.map((g, i) => <div key={i} className="vt-menu-group">{g.map((n) => item(n, false))}</div>)}
       </div>
       {open && (
         <div className={`vt-menu vt-sub ${align}`} role="menu" aria-label={open.label}>
@@ -81,7 +86,7 @@ export function FloatingMenu({ items, onClose, align = 'right' }: { items: MenuN
             <span className="vt-item-label">{open.label}</span>
             <span className="vt-chev open"><Icon.chevron open /></span>
           </button>
-          <div className="vt-menu-group">{(open.children ?? []).map((n) => item(n, true))}</div>
+          {grouped(open.children ?? []).map((g, i) => <div key={i} className="vt-menu-group">{g.map((n) => item(n, true))}</div>)}
         </div>
       )}
     </div>

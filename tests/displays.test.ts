@@ -82,3 +82,56 @@ test('a picture of one display alone says so, instead of asking for a layout', (
   assert.equal(soleDisplay([desk[0]], { width: 5120, height: 1440 }), null, 'one display is not a choice')
   assert.match(chooseDisplays({ auto: desk, saved: null }, { width: 3600, height: 2338 }).problem!, /sending only Built-in Display \(3600×2338\)/)
 })
+
+// Measured on the user's Mac (main.log, 2026-10-24): the picture for these two displays was 8720×2468.
+const mixed: DisplayFrame[] = [
+  { x: 0, y: 0, width: 1800, height: 1169, label: 'Built-in Retina Display', primary: true, scale: 2 },
+  { x: 1800, y: -130, width: 5120, height: 1440, label: 'Dell U4924DW', scale: 1 }
+]
+
+test('mixed density: each display at its own pixels, edge to edge, offset in points', () => {
+  const r = resolveDisplays(mixed, { width: 8720, height: 2468 })
+  assert.equal(r.problem, undefined)
+  assert.deepEqual(r.displays.map((d) => [d.name, d.x, d.y, d.width, d.height]), [
+    ['Built-in Retina Display', 0, 130, 3600, 2338],
+    ['Dell U4924DW', 3600, 0, 5120, 1440]
+  ])
+  assert.deepEqual(r.displays[0].points, { width: 1800, height: 1169 }, 'named by the size System Settings shows')
+  assert.deepEqual(chooseDisplays({ auto: mixed, saved: null }, { width: 8720, height: 2468 }).displays.length, 2)
+})
+
+test('mixed density is only used when it reproduces the picture', () => {
+  assert.deepEqual(resolveDisplays(mixed, { width: 8740, height: 2468 }).displays, [], 'widths must add up (within rounding)')
+  assert.deepEqual(resolveDisplays(mixed, { width: 8720, height: 3000 }).displays, [], 'and the height must agree')
+  assert.deepEqual(resolveDisplays(mixed.map((f) => ({ ...f, scale: undefined })), { width: 8720, height: 2468 }).displays, [], 'unknown scales: no guessing')
+  // The same displays at one density still take the uniform path.
+  assert.equal(resolveDisplays(mixed.map((f) => ({ ...f, scale: 1 })), { width: 6920, height: 1440 }).displays[1].x, 1800)
+})
+
+test('stacked displays of mixed density', () => {
+  const stacked: DisplayFrame[] = [
+    { x: 0, y: 0, width: 1800, height: 1169, scale: 2 },
+    { x: -100, y: 1169, width: 2560, height: 1440, scale: 1 }
+  ]
+  const r = resolveDisplays(stacked, { width: 3700, height: 3778 })
+  assert.equal(r.problem, undefined, 'not mistaken for one density scaled ×1.45')
+  assert.deepEqual(r.displays.map((d) => [d.x, d.y, d.width, d.height]), [[100, 0, 3600, 2338], [0, 2338, 2560, 1440]])
+})
+
+test('a typed layout with @2x finds the same crop, its approximate alignment kept inside the picture', () => {
+  assert.deepEqual(parseSizes('1800x1169@2x, 5120x1440'), [{ width: 1800, height: 1169, scale: 2 }, { width: 5120, height: 1440 }])
+  assert.deepEqual(parseSizes('1800 × 1169 @ 2x and 5120×1440 @1x'), [{ width: 1800, height: 1169, scale: 2 }, { width: 5120, height: 1440 }])
+  assert.equal(sizesText([{ width: 1800, height: 1169, scale: 2 }, { width: 5120, height: 1440 }]), '1800×1169@2x, 5120×1440')
+  const typed = layoutFromSizes({ sizes: [{ width: 1800, height: 1169, scale: 2 }, { width: 5120, height: 1440, scale: 1 }], direction: 'row', align: 'center' })
+  const r = resolveDisplays(typed, { width: 8720, height: 2468 })
+  assert.deepEqual(r.displays.map((d) => [d.x, d.y, d.width, d.height]), [[0, 130, 3600, 2338], [3600, 0, 5120, 1440]])
+})
+
+test('displays are numbered as macOS numbers them: the main display is 1, then left to right', () => {
+  assert.deepEqual(resolveDisplays(mixed, { width: 8720, height: 2468 }).displays.map((d) => [d.number, d.points.width]), [[1, 1800], [2, 5120]])
+  const mainOnRight = mixed.map((f) => ({ ...f, primary: f.width === 5120 }))
+  assert.deepEqual(resolveDisplays(mainOnRight, { width: 8720, height: 2468 }).displays.map((d) => [d.number, d.points.width]), [[2, 1800], [1, 5120]])
+  const typed = layoutFromSizes({ sizes: [{ width: 200, height: 400 }, { width: 440, height: 300 }], direction: 'row', align: 'center' })
+  assert.deepEqual(resolveDisplays(typed, { width: 64, height: 40 }).displays.map((d) => d.number), [1, 2], 'without a main display: left to right')
+  assert.equal('primary' in resolveDisplays(mixed, { width: 8720, height: 2468 }).displays[0], false, 'only the number leaves the module')
+})
