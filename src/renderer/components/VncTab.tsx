@@ -8,6 +8,7 @@ import { PasteSheet } from './mobile/ClipboardSheets'
 import ScreenToolbar, { type MenuNode, type StickyMod, type ToolbarRow } from './vnc/ScreenToolbar'
 import { attachScreenTouch, type PointerMode, type Region, type View } from './vnc/screenTouch'
 import DisplaySetup from './vnc/DisplaySetup'
+import DisplayGlyph from './vnc/DisplayGlyph'
 import { chooseDisplays, viewScale, type DisplayInfo, type DisplayLayout, type ScaleKind } from '@shared/displays'
 import { editCombos, shortcutGroups, type Combo } from '@shared/vncShortcuts'
 import './vnc/vnc.css'
@@ -656,11 +657,17 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
         { id: 'fit', label: 'Size to fit', run: () => scaleTo('fit') }
       ] },
       ...(displayInfo?.auto?.length === 1 ? [] : [{ id: 'displays', label: 'Displays', icon: <Icon.monitor />, children: [
-        { id: 'all', label: picture ? `All displays · ${picture.width} × ${picture.height}` : 'All displays', checked: shownDisplay === null, run: () => chooseDisplay(null) },
-        ...resolved.displays.map((x): MenuNode => ({ id: `d${x.id}`, label: `${x.name} · ${x.points.width} × ${x.points.height}`, checked: shownDisplay?.id === x.id, run: () => chooseDisplay(x.id) })),
+        // As a screen-sharing app on iOS lays it out: each display (numbered as macOS does) with the arrangement in
+        // miniature, then All displays below a divider.
+        ...[...resolved.displays].sort((a, b) => b.number - a.number).map((x): MenuNode => ({
+          id: `d${x.id}`, label: `Display ${x.number}: ${x.points.width} × ${x.points.height}`, checked: shownDisplay?.id === x.id, run: () => chooseDisplay(x.id),
+          icon: picture ? <DisplayGlyph displays={resolved.displays} picture={picture} on={x.id} /> : undefined
+        })),
+        ...(resolved.displays.length ? [{ id: 'sep-all', label: '' }] : []),
+        { id: 'all', label: 'All displays', checked: shownDisplay === null, run: () => chooseDisplay(null), icon: picture && resolved.displays.length ? <DisplayGlyph displays={resolved.displays} picture={picture} on="all" /> : undefined },
         ...(!resolved.displays.length && resolved.problem ? [{ id: 'why', label: resolved.problem, note: true }] : []),
         // This Mac's own list (the app runs on it) needs no setup; a layout is only for computers it cannot see.
-        ...(displayInfo?.auto?.length ? [] : [{ id: 'setup', label: resolved.displays.length ? 'Change the layout…' : 'Set up displays…', disabled: !picture, run: () => setDisplaySetup(true) }])
+        ...(displayInfo?.auto?.length ? [] : [{ id: 'sep-setup', label: '' }, { id: 'setup', label: resolved.displays.length ? 'Change the layout…' : 'Set up displays…', disabled: !picture, run: () => setDisplaySetup(true) }])
       ] } as MenuNode]),
       { id: 'quality', label: 'Image quality', icon: <Icon.gauge />, children: choose((Object.keys(QUALITY) as Quality[]).map((q) => ({ value: q, label: QUALITY[q].label })), quality, changeQuality) },
       { id: 'sep2', label: '' },

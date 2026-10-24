@@ -26,11 +26,11 @@ export default function DisplaySetup({ hostName, picture, initial, problem, onSa
     <button type="button" role="radio" aria-checked={value === current} className={value === current ? 'on' : ''} onClick={() => set(value)}>{label}</button>
   )
   return (
-    <Sheet title={`Displays of ${hostName}`} subtitle="Type each display's size, the way System Settings → Displays lists it, in order." onClose={onClose}>
+    <Sheet title={`Displays of ${hostName}`} subtitle="Type each display's size, the way System Settings → Displays lists it, in order. Add @2x after a Retina display (a Mac's built-in one)." onClose={onClose}>
       <div className="vt-setup">
         <label>
           <span className="vt-setup-label">Sizes, {direction === 'row' ? 'left to right' : 'top to bottom'}</span>
-          <input className="input" inputMode="text" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="1800×1169, 5120×1440" value={text} onChange={(e) => setText(e.target.value)} />
+          <input className="input" inputMode="text" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="1800×1169@2x, 5120×1440" value={text} onChange={(e) => setText(e.target.value)} />
         </label>
         <div className="vt-setup-pair">
           <div>
@@ -51,7 +51,7 @@ export default function DisplaySetup({ hostName, picture, initial, problem, onSa
         </div>
         <p className={`vt-setup-note ${ok ? 'ok' : text && !sizes ? 'bad' : check && !ok ? 'bad' : ''}`} role="status">
           {!text ? (problem ?? `The screen picture is ${picture.width}×${picture.height}. Its displays are not known yet.`)
-            : !sizes ? 'Write each size as width×height, for example 1800×1169, separated by commas.'
+            : !sizes ? 'Write each size as width×height, for example 1800×1169@2x, 5120×1440, separated by commas.'
               : ok ? `Matches the screen picture (${picture.width}×${picture.height}): ${check!.displays.map((d) => `${d.name} ${d.points.width}×${d.points.height}`).join(' · ')}.`
                 : (check?.problem ?? 'These sizes do not fit the screen picture.')}
         </p>

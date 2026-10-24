@@ -87,7 +87,11 @@ export async function probeComputers(keys: string[]): Promise<Record<string, Com
 function cleanLayout(l: unknown): DisplayLayout | null {
   const v = l as Partial<DisplayLayout> | null
   if (!v || !Array.isArray(v.sizes) || v.sizes.length < 1 || v.sizes.length > 8) return null
-  const sizes = v.sizes.map((s) => ({ width: Math.round(Number(s?.width)), height: Math.round(Number(s?.height)) }))
+  const sizes = v.sizes.map((s) => {
+    const scale = Number(s?.scale)
+    const size = { width: Math.round(Number(s?.width)), height: Math.round(Number(s?.height)) }
+    return scale > 1 && scale <= 4 ? { ...size, scale } : size
+  })
   if (sizes.some((s) => !(s.width >= 100 && s.width <= 30_000 && s.height >= 100 && s.height <= 30_000))) return null
   return { sizes, direction: v.direction === 'column' ? 'column' : 'row', align: v.align === 'start' || v.align === 'end' ? v.align : 'center' }
 }
