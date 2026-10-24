@@ -17,8 +17,8 @@ import Sheet, { SheetItem } from './Sheet'
 type View = 'hosts' | 'sessions' | 'more'
 
 const dotFor = (st: Tab['status']): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'vnc' ? <Icon.screenShare /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'tasks' ? <Icon.tasks /> : t.kind === 'calendar' ? <Icon.calendar /> : t.kind === 'links' ? <Icon.bookmark /> : t.kind === 'health' ? <Icon.health /> : t.kind === 'cad' ? <Icon.cube /> : <Icon.terminal />)
-const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'vnc' ? 'Screen sharing' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : t.kind === 'devtools' ? 'Dev tools' : t.kind === 'tasks' ? 'Tasks' : t.kind === 'calendar' ? 'Calendar' : t.kind === 'links' ? 'Links' : t.kind === 'health' ? 'Health' : t.kind === 'cad' ? 'CAD' : 'Terminal')
+const kindIcon = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'vnc' || t.kind === 'computers' ? <Icon.screenShare /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'tasks' ? <Icon.tasks /> : t.kind === 'calendar' ? <Icon.calendar /> : t.kind === 'links' ? <Icon.bookmark /> : t.kind === 'health' ? <Icon.health /> : t.kind === 'cad' ? <Icon.cube /> : <Icon.terminal />)
+const kindLabel = (t: Tab): string => (t.kind === 'rdp' ? 'Remote desktop' : t.kind === 'vnc' ? 'Screen sharing' : t.kind === 'computers' ? 'Computers' : t.kind === 'sftp' ? 'Files' : t.kind === 'notes' ? 'Notes' : t.kind === 'browser' ? 'Browser' : t.kind === 'local' ? 'Local terminal' : t.kind === 'board' ? 'Whiteboard' : t.kind === 'devtools' ? 'Dev tools' : t.kind === 'tasks' ? 'Tasks' : t.kind === 'calendar' ? 'Calendar' : t.kind === 'links' ? 'Links' : t.kind === 'health' ? 'Health' : t.kind === 'cad' ? 'CAD' : 'Terminal')
 
 const LIST_HIDDEN_KEY = 'ui.mobileListHidden'
 
@@ -96,6 +96,7 @@ export default function MobileApp(): ReactElement {
           <button className={view === 'sessions' ? 'on' : ''} onClick={() => setView('sessions')}>
             <span className="relative"><Icon.layers />{listed.length > 0 && <span className="m-badge">{listed.length}</span>}</span><span>Sessions</span>
           </button>
+          <button className={active?.kind === 'computers' ? 'on' : ''} onClick={() => s.openTool('computers')}><Icon.screenShare /><span>Computers</span></button>
           <button className={active?.kind === 'health' ? 'on' : ''} onClick={() => s.openTool('health')}><Icon.health /><span>Health</span></button>
           <button className={view === 'more' ? 'on' : ''} onClick={() => setView('more')}><Icon.more /><span>More</span></button>
         </nav>

@@ -79,6 +79,7 @@ function commands(): Command[] {
     { id: 'finder', title: 'Open Finder', keywords: 'files folders local mac favorites recents documents downloads', hint: keyOf('finder'), icon: Icon.finder, run: () => s.openFinder(), when: hasBrowser() },
     { id: 'storage', title: 'Open Storage', keywords: 'disk space clean cleaner junk caches large files duplicates trash strata free up mac', hint: keyOf('storage'), icon: Icon.storage, run: () => s.openTool('storage'), when: hasBrowser() },
     { id: 'cad', title: 'Open the CAD viewer', keywords: 'step stp iges cad 3d model part assembly solidworks review viewer', hint: keyOf('cad'), icon: Icon.cube, run: () => s.openCad() },
+    { id: 'computers', title: 'Open computers', keywords: 'screens screen sharing vnc tailscale remote control mac library', hint: keyOf('computers'), icon: Icon.screenShare, run: () => s.openTool('computers') },
     { id: 'health', title: 'Open health', keywords: '3dexperience platform status monitoring prometheus grafana metrics alerts', hint: keyOf('health'), icon: Icon.health, run: () => s.openTool('health') },
     { id: 'tasks', title: 'Open tasks', keywords: 'todo to-do things todoist reminders today upcoming projects checklist', hint: keyOf('tasks'), icon: Icon.tasks, run: () => s.openTool('tasks') },
     { id: 'calendar', title: 'Open calendar', keywords: 'events schedule agenda meetings month week ical', hint: keyOf('calendar'), icon: Icon.calendar, run: () => s.openTool('calendar') },
@@ -202,7 +203,7 @@ function siteGroups(sites: WebTabInfo[], spaces: WebSpace[], q: string): Result[
 
 const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
-const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark }
+const TOOL_ICONS: Record<ToolKind, IconFn> = { computers: Icon.screenShare, local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark }
 const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'vnc' ? Icon.screenShare : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
 
 /**

@@ -85,6 +85,7 @@ export default function RadialMenu(): ReactElement | null {
     const list: (Item | false)[] = [
       { id: 'hosts', label: 'Hosts', hue: LOOKS.hosts.hue, icon: LOOKS.hosts.icon(), keys: k('hosts') ?? '⌘1', here: !gridView && activeTab === 'hosts', open: false, run: () => st().setActive('hosts') },
       { id: 'overview', label: 'Overview', hue: LOOKS.overview.hue, icon: LOOKS.overview.icon(), keys: k('overview'), here: gridView && !gridHost, open: false, disabled: sessions === 0, run: () => st().showGrid(true) },
+      tool('computers', 'Computers'),
       tool('health', 'Health'),
       hasBrowser() && tool('local', 'Terminal'),
       hasBrowser() && tool('finder', 'Finder'),

@@ -6,6 +6,8 @@ declare module '@novnc/novnc' {
     target?: string
   }
   export default class RFB extends EventTarget {
+    /** noVNC's message writers; the screen tab sends pointer events itself on touch screens (VncTab, vnc/screenTouch). */
+    static messages: { pointerEvent(sock: unknown, x: number, y: number, mask: number): void }
     constructor(target: HTMLElement, urlOrChannel: string | WebSocket, options?: { shared?: boolean; credentials?: RfbCredentials; repeaterID?: string; wsProtocols?: string[] })
     viewOnly: boolean
     scaleViewport: boolean

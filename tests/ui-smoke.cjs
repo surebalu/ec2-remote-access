@@ -45,6 +45,7 @@ let wsAllowed = null
 // Every window shares the default session, whose one request filter blocks the network, bar that one origin.
 const blockNetwork = (details, callback) => callback({ cancel: !(wsAllowed && details.url.startsWith(wsAllowed)) })
 const vncCreds = {}
+const computerThumbs = {}
 let failWorkspaceHealth = false
 let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
@@ -495,6 +496,9 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'vnc:prepare': return { sessionId: args[0].sessionId, url: vncUrl, destination: '100.64.0.10:5900', route: 'direct', title: 'Fixture Mac' }
     case 'vnc:release': return
     case 'vnc:lastError': return undefined
+    case 'computers:thumbs': return computerThumbs
+    case 'computers:saveThumb': computerThumbs[args[0]] = { image: args[1], at: Date.now() }; return
+    case 'computers:probe': return Object.fromEntries(args[0].map((k) => [k, k === 'tailnet/nMAC' ? 'open' : k.startsWith('tailnet/') ? 'offline' : 'tunnel']))
     // A remote desktop that stays "connecting": the viewer is on the page, which is all the keyboard check needs.
     case 'rdp:prepare': return new Promise(() => undefined)
     case 'rdp:release': return
@@ -829,7 +833,7 @@ app.whenReady().then(async () => {
     await screenshot('hosts-dark.png')
     const screens = () => require('./ui-screens.cjs')({
       output, errors,
-      fixture: { calls: () => calls, setTailnet: (t) => { tailnetFixture = t }, setVnc: (u) => { vncUrl = u }, allowWs: (prefix) => { wsAllowed = prefix } }
+      fixture: { calls: () => calls, thumbs: () => computerThumbs, setTailnet: (t) => { tailnetFixture = t }, setVnc: (u) => { vncUrl = u }, allowWs: (prefix) => { wsAllowed = prefix } }
     })
     // Just the screen sharing checks (electron tests/ui-smoke.cjs --screens).
     if (process.argv.includes('--screens')) {
@@ -1107,7 +1111,7 @@ app.whenReady().then(async () => {
     await key('ArrowRight')
     await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
     assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
-    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 14)
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 15)
     await screenshot('workspace-tools.png')
     await workspaceTab('saved-work')
     await until(`!!document.querySelector('[aria-label="Search saved work"]')`)
@@ -1401,7 +1405,7 @@ app.whenReady().then(async () => {
     const keyUp = () => js(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true, cancelable: true }))`)
     await js(`document.dispatchEvent(new PointerEvent('pointermove', { clientX: 760, clientY: 470, bubbles: true }))`)
     await radialKey()
-    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 20`)
+    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 21`)
     assert.ok(await js(`document.querySelector('.radial-item.here').dataset.radial === 'hosts' && document.querySelector('.radial-center strong').textContent === 'Hosts'`), 'it starts on the section in front')
     assert.equal(await js(`document.activeElement === document.querySelector('.radial')`), true, 'the ring takes the keyboard')
     await new Promise((r) => setTimeout(r, 400))
@@ -1411,12 +1415,15 @@ app.whenReady().then(async () => {
     await js(`document.documentElement.setAttribute('data-theme', 'dark')`)
     await radialKey()
     await radialKey()
-    // Overview is skipped while no session is open; two steps from Hosts land on Health.
-    assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'local')
+    // Overview is skipped while no session is open; two steps from Hosts pass Computers and land on Health.
+    assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'health')
     await radialKey()
-    await js(`(() => { const e = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true, metaKey: true, shiftKey: true }); document.activeElement.dispatchEvent(e) })()`)
+    const arrow = (k) => js(`(() => { const e = new KeyboardEvent('keydown', { key: '${k}', bubbles: true, cancelable: true, metaKey: true, shiftKey: true }); document.activeElement.dispatchEvent(e) })()`)
     assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'local')
-    await js(`(() => { const e = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true, metaKey: true, shiftKey: true }); document.activeElement.dispatchEvent(e) })()`)
+    await arrow('ArrowLeft')
+    await arrow('ArrowLeft')
+    assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'computers')
+    await arrow('ArrowRight')
     assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'health')
     await keyUp()
     await until(`!document.querySelector('.radial') && !!document.querySelector('.hl')`)
@@ -2443,7 +2450,7 @@ app.whenReady().then(async () => {
     ssoScenario = true
     phone.setContentSize(430, 932)
     await phone.loadFile(resolve('out/renderer/index.html'), { query: { layout: 'mobile' } })
-    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 4`)
+    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 5`)
     await puntil(`document.body.textContent.includes('corp-prod')`) // profiles loaded and checked: the sign-in banner names the account
     await ptap('More')
     await ptap('Sign in to AWS')

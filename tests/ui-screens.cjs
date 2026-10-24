@@ -15,6 +15,7 @@ const H = 40
  */
 function fakeVnc() {
   const keys = []
+  const pointers = []
   let attempts = 0
   const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   wss.on('connection', (ws) => {
@@ -70,6 +71,7 @@ function fakeVnc() {
           const msg = buf.subarray(0, need)
           buf = buf.subarray(need)
           if (type === 4) keys.push({ down: msg[1] === 1, keysym: msg.readUInt32BE(4) })
+          if (type === 5) pointers.push({ mask: msg[1], x: msg.readUInt16BE(2), y: msg.readUInt16BE(4) })
           if (type === 3 && msg[1] === 0) {
             // A full update: one raw rectangle in the 32-bit format noVNC asks for (R, G, B, unused).
             const head = Buffer.alloc(16)
@@ -85,7 +87,7 @@ function fakeVnc() {
       }
     })
   })
-  return new Promise((res) => wss.on('listening', () => res({ port: wss.address().port, keys, attempts: () => attempts, close: () => wss.close() })))
+  return new Promise((res) => wss.on('listening', () => res({ port: wss.address().port, keys, pointers, attempts: () => attempts, close: () => wss.close() })))
 }
 
 module.exports = async function screensScenario({ output, errors, fixture }) {
@@ -149,17 +151,72 @@ module.exports = async function screensScenario({ output, errors, fixture }) {
     await js(`[...document.querySelectorAll('.rdp-toolbar button')].find((b) => b.textContent === 'Disconnect').click()`)
     await until(`!document.querySelector('.vnc-screen')`, 'tab closed')
     assert.ok(fixture.calls().some((c) => c.channel === 'vnc:release'))
+    // Closing a connected screen keeps its picture for the Computers card.
+    assert.match(fixture.thumbs()['tailnet/nMAC']?.image ?? '', /^data:image\/jpeg;base64,/, 'a thumbnail was saved on close')
 
-    // The phone layout: the saved password connects straight away, with the key bar's ⌘.
+    // Computers: the tailnet as cards, the Mac with its last picture and answering, the PC offline.
+    await js(`document.querySelector('.app-rail [aria-label="Computers"]').click()`)
+    await until(`!!document.querySelector('.cmp-card[data-key="tailnet/nMAC"].has-thumb') && !!document.querySelector('.cmp-card[data-key="tailnet/nMAC"] .cmp-dot.open')`, 'Computers cards')
+    assert.equal(await js(`document.querySelector('.cmp-card[data-key="tailnet/nWIN"]').classList.contains('off')`), true, 'the offline PC is dimmed')
+    assert.equal(await js(`document.querySelector('.cmp-card[data-key="tailnet/nWIN"]').dataset.tone`), 'violet')
+    assert.match(await js(`document.querySelector('.computers').textContent`), /Tailscale.*Fixture Mac.*Fixture PC/, 'grouped, named as people read them')
+    await shot('computers.png')
+    await js(`document.querySelector('.cmp-segment [role="tab"]:nth-child(2)').click()`)
+    await until(`document.querySelector('.cmp-body').textContent.includes('Recent connections') && document.querySelector('.cmp-body').textContent.includes('Fixture Mac')`, 'recent connections')
+    await js(`document.querySelector('.cmp-segment [role="tab"]:nth-child(1)').click()`)
+
+    // The phone layout: the saved password connects straight away, with the floating toolbar.
     await win.setSize(430, 932)
     await win.loadFile(resolve('out/renderer/index.html'), { query: { layout: 'mobile' } })
     await until(`!!document.querySelector('[data-host-key="tailnet/nMAC"]')`, 'phone host list')
     await js(`document.querySelector('[data-host-key="tailnet/nMAC"]').click()`)
     await until(`[...document.querySelectorAll('.m-sheet-item')].some((b) => b.textContent.includes('Share screen'))`, 'host sheet')
     await js(`[...document.querySelectorAll('.m-sheet-item')].find((b) => b.textContent.includes('Share screen')).click()`)
-    await until(`document.querySelector('.vnc-screen canvas')?.width === ${W} && !document.querySelector('.vnc-overlay')`, 'phone screen')
-    assert.equal(await js(`document.querySelector('.m-keybar [aria-label^="Command"]')?.textContent`), '⌘')
+    await until(`document.querySelector('.vnc-screen canvas')?.width === ${W} && !document.querySelector('.vnc-overlay') && !!document.querySelector('.vt-bar')`, 'phone screen')
+    await until(`!!document.querySelector('.vnc-cursor')`, 'the trackpad pointer is drawn')
+    const tap = (fx, fy) => js(`(() => {
+      const layer = document.querySelector('.vnc-touch'); const r = document.querySelector('.vnc-screen canvas').getBoundingClientRect()
+      const x = r.left + r.width * ${fx}, y = r.top + r.height * ${fy}
+      for (const type of ['pointerdown', 'pointerup']) layer.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }))
+    })()`)
+    const settle = async (n) => { for (let i = 0; i < 50 && vnc.pointers.length < n; i++) await new Promise((r) => setTimeout(r, 20)) }
+    // Trackpad: a tap clicks where the pointer is (the middle of the screen), not under the finger.
+    vnc.pointers.length = 0
+    await tap(0.9, 0.9)
+    await settle(3)
+    assert.deepEqual(vnc.pointers.map((p) => p.mask), [0, 1, 0])
+    assert.deepEqual([vnc.pointers[1].x, vnc.pointers[1].y], [W / 2, H / 2], 'trackpad click at the pointer')
+    // Settings → Pointer → Touch: now a tap clicks under the finger.
+    await js(`document.querySelector('.vt-bar [aria-label="Settings"]').click()`)
+    await until(`[...document.querySelectorAll('.vt-item')].some((b) => b.textContent === 'Pointer')`, 'settings menu')
+    await shot('screen-phone-settings.png')
+    await js(`[...document.querySelectorAll('.vt-item')].find((b) => b.textContent === 'Pointer').click()`)
+    await until(`!!document.querySelector('.vt-sub')`, 'pointer choices')
+    await js(`[...document.querySelectorAll('.vt-sub .vt-item')].find((b) => b.textContent.includes('Touch')).click()`)
+    await until(`!document.querySelector('.vt-menu') && !document.querySelector('.vnc-cursor')`, 'touch mode')
+    vnc.pointers.length = 0
+    await tap(0.25, 0.75)
+    await settle(3)
+    assert.deepEqual([vnc.pointers[1].mask, Math.round(vnc.pointers[1].x / 4), Math.round(vnc.pointers[1].y / 5)], [1, Math.round((W * 0.25) / 4), Math.round((H * 0.75) / 5)], 'touch click under the finger')
+    // The editing row's Copy is ⌘C on a Mac: Alt_L (what macOS reads as ⌘) held around c.
+    vnc.keys.length = 0
+    await js(`document.querySelector('.vt-bar [aria-label="Editing"]').click()`)
+    await until(`!!document.querySelector('.vt-bar [aria-label="Copy"]')`, 'editing row')
+    await js(`document.querySelector('.vt-bar [aria-label="Copy"]').click()`)
+    for (let n = 0; n < 50 && vnc.keys.length < 4; n++) await new Promise((r) => setTimeout(r, 20))
+    assert.deepEqual(vnc.keys.map((k) => `${k.down ? '+' : '-'}${k.keysym.toString(16)}`), ['+ffe9', '+63', '-63', '-ffe9'])
+    // The shortcuts menu opens its groups in place.
+    await js(`document.querySelector('.vt-bar [aria-label="Shortcuts"]').click()`)
+    await js(`[...document.querySelectorAll('.vt-item')].find((b) => b.textContent === 'App').click()`)
+    await until(`document.querySelector('.vt-sub')?.textContent.includes('Minimize')`, 'App shortcuts')
+    await shot('screen-phone-shortcuts.png')
+    await js(`document.querySelector('.vt-menu-layer').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+    await until(`!document.querySelector('.vt-menu')`, 'menu closed')
     await shot('screen-phone.png')
+    // Computers on the phone: its own button in the tab bar.
+    await js(`[...document.querySelectorAll('.m-tabbar button')].find((b) => b.textContent.includes('Computers')).click()`)
+    await until(`!!document.querySelector('.computers.is-mobile .cmp-card[data-key="tailnet/nMAC"]')`, 'phone Computers')
+    await shot('computers-phone.png')
     win.destroy()
   } catch (e) {
     await shot('screens-failure.png').catch(() => undefined)

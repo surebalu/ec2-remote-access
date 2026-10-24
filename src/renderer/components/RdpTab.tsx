@@ -13,6 +13,7 @@ import type { StickyMods } from '../terminalKeys'
 import Sheet, { SheetItem } from './mobile/Sheet'
 import { PasteSheet } from './mobile/ClipboardSheets'
 import { registerDictationTarget } from '../voice'
+import { saveThumb } from '../thumbs'
 
 type IronElement = HTMLElement & { module?: unknown }
 
@@ -232,6 +233,7 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
   // Dictation types the finished words on the desktop as Unicode keys, the way the phone's paste does.
   useEffect(() => registerDictationTarget(hostRef.current!, { label: 'Remote desktop', insert: (text) => input.current.text(text) }), [])
 
+  const snapThumb = (): void => saveThumb(tab.instanceKey, hostRef.current?.querySelector('iron-remote-desktop')?.shadowRoot?.querySelector('canvas'))
   const tiledRef = useRef(tiled)
   tiledRef.current = tiled
   const pushSize = (): void => {
@@ -554,6 +556,7 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
       clearTimers()
       ro.disconnect()
       clearTimeout(resizeTimer)
+      saveThumb(tab.instanceKey, host.querySelector('iron-remote-desktop')?.shadowRoot?.querySelector('canvas'))
       unmount()
       untrack()
       void window.api.invoke('rdp:release', id)
@@ -563,6 +566,14 @@ export default function RdpTab({ tab, active, tiled = false }: { tab: Tab; activ
   useEffect(() => {
     if (active) pushSize()
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Computers card's picture: shortly after connecting, every two minutes while connected, and when the tab closes.
+  useEffect(() => {
+    if (phase !== 'connected') return
+    const first = setTimeout(snapThumb, 5000)
+    const every = setInterval(snapThumb, 120_000)
+    return () => { clearTimeout(first); clearInterval(every) }
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     hostRef.current?.querySelector('iron-remote-desktop')?.toggleAttribute('data-contain', mobile || tiled)
