@@ -43,7 +43,7 @@ export function workspaceSummary(input: {
   const profiles = input.profiles.filter((p) => p.enabled)
   const disabled = new Set(input.profiles.filter((p) => !p.enabled).map((p) => p.name))
   const hosts = input.hosts.filter((h) => h.manual || !disabled.has(h.profile))
-  const sessions = input.sessions.filter((t) => !t.transient && ['ssh', 'rdp', 'sftp'].includes(t.kind))
+  const sessions = input.sessions.filter((t) => !t.transient && ['ssh', 'rdp', 'sftp', 'vnc'].includes(t.kind))
   const stale = hosts.filter((h) => h.staleReason)
   const errors = input.errors.filter((e) => !disabled.has(e.profile))
   const issues: AttentionItem[] = []

@@ -7,6 +7,8 @@ import { listProfiles } from './profiles'
 import { credentialsFor } from './credentials'
 import { getSettings, setCachedInventory, getCachedInventory } from '../store'
 import { manualToInstance } from '@shared/manual'
+import { isTailnetKey } from '@shared/tailnet'
+import { findTailnetInstance } from '../tailnet'
 
 export type ProgressFn = (p: ScanProgress) => void
 
@@ -140,6 +142,7 @@ export async function scanAll(onProgress: ProgressFn, onlyProfiles?: string[], r
 }
 
 export function findInstance(key: string): Instance {
+  if (isTailnetKey(key)) return findTailnetInstance(key)
   if (key.startsWith('manual/')) {
     const h = getSettings().manualHosts.find((m) => `manual/${m.id}` === key)
     if (!h) throw new Error(`Server not found: ${key}`)

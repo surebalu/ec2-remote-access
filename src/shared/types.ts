@@ -58,8 +58,10 @@ export interface Instance {
   lastSeenAt?: number
   staleReason?: string
   tags: Record<string, string>
-  /** true for servers added by hand (not from AWS) */
+  /** true for servers added by hand (not from AWS), and for Tailscale machines */
   manual?: boolean
+  /** A machine on the Tailscale network (src/shared/tailnet.ts); `manual` is set too, so it routes directly. */
+  tailnet?: { os: string; online: boolean; self?: boolean; dnsName?: string; lastSeen?: string }
 }
 
 /** A server outside AWS, added by the user. Connection settings live in Settings.overrides[key]. */
@@ -119,6 +121,8 @@ export interface HostOverride {
   sshPort?: number
   rdpUser?: string
   rdpPort?: number
+  /** Screen sharing (VNC) port; 5900 when unset. */
+  vncPort?: number
   forceRoute?: 'direct' | 'ssm'
   identityFile?: string
   useAgent?: boolean
@@ -168,6 +172,8 @@ export interface Settings {
   persistentShells: boolean
   /** An icon in the macOS menu bar listing favorite hosts to connect to (Electron only). */
   menuBarIcon: boolean
+  /** List the machines on this computer's Tailscale network with the hosts (src/shared/tailnet.ts). */
+  tailscaleHosts: boolean
   /** Folders added to the Finder tab's Favorites in this app (besides the macOS Finder sidebar's). */
   finderExtra: string[]
   /** macOS Finder favorites hidden from the Finder tab (Finder itself keeps them). */
@@ -295,7 +301,7 @@ export interface PortForwardRequest {
 export interface WorkspaceTab {
   /** Stable reference for the workspace layout; absent on older saved workspaces. */
   id?: string
-  kind: 'ssh' | 'rdp' | 'sftp'
+  kind: 'ssh' | 'rdp' | 'sftp' | 'vnc'
   instanceKey: string
   user?: string
   port?: number
@@ -773,7 +779,7 @@ export interface Tunnel {
   id: string
   instanceKey: string
   title: string
-  kind: 'rdp' | 'ssh' | 'port'
+  kind: 'rdp' | 'ssh' | 'port' | 'vnc'
   localPort: number
   remotePort: number
   /** Forward target as seen from the instance, when it is not the instance itself. */
@@ -813,6 +819,23 @@ export interface RdpPrepared {
   route: Route
   title: string
   user: string
+}
+
+export interface VncPrepareRequest {
+  sessionId: string
+  instanceKey: string
+  /** Defaults to the host's `vncPort` override, else 5900. */
+  port?: number
+  forceRoute?: 'direct' | 'ssm'
+}
+
+export interface VncPrepared {
+  sessionId: string
+  /** WebSocket the in-page VNC client opens; bytes on it are the raw RFB stream to the host. */
+  url: string
+  destination: string
+  route: Route
+  title: string
 }
 
 export interface StoredCredential {

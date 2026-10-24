@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import WebSocket from 'ws'
+import WebSocket, { WebSocketServer } from 'ws'
 import { createGatewayServer, type GatewayHandlers } from '../src/gateway/server.ts'
 import { createGatewayHost } from '../src/gateway/host.ts'
 
@@ -20,6 +20,8 @@ async function start(overrides: Partial<Record<string, (...a: unknown[]) => Prom
     'sftp:close': async (id: string) => { closed.push(`sftp:${id}`) },
     'rdp:prepare': async (req: { sessionId: string }) => ({ sessionId: req.sessionId, proxyUrl: 'ws://127.0.0.1:5555/rdp', token: 'x' }),
     'rdp:release': async (id: string) => { closed.push(`rdp:${id}`) },
+    'vnc:prepare': async (req: { sessionId: string }) => ({ sessionId: req.sessionId, url: 'ws://127.0.0.1:5555/vnc/abcdefghijklmnopqrstuvwxyz012345', destination: '100.64.0.1:5900', route: 'direct', title: 'mac' }),
+    'vnc:release': async (id: string) => { closed.push(`vnc:${id}`) },
     'ec2:start': async () => { throw new Error('boom') },
     ...overrides
   } as unknown as GatewayHandlers
@@ -106,6 +108,55 @@ test('rewrites the RDP proxy URL to the gateway origin', async () => {
   await gw.close()
 })
 
+test('screen sharing: the session URL points at the gateway, and its socket reaches that session on the local proxy', async () => {
+  // Stands in for the local proxy (rdp/cleanpath.ts), which relays /vnc/<session> to the host's RFB port.
+  const proxy = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await once(proxy, 'listening')
+  const proxyPort = (proxy.address() as { port: number }).port
+  const paths: string[] = []
+  proxy.on('connection', (ws, req) => {
+    paths.push(req.url ?? '')
+    ws.send(Buffer.from('RFB 003.889\n'))
+    ws.on('message', (d) => ws.send(Buffer.concat([Buffer.from('echo:'), d as Buffer])))
+  })
+  const closed: string[] = []
+  const handlers = {
+    'vnc:prepare': async (req: { sessionId: string }) => ({ sessionId: req.sessionId, url: `ws://127.0.0.1:${proxyPort}/vnc/abcdefghijklmnopqrstuvwxyz012345`, destination: '100.64.0.1:5900', route: 'direct', title: 'mac' }),
+    'vnc:release': async (id: string) => { closed.push(id) }
+  } as unknown as GatewayHandlers
+  const gw = createGatewayServer({ handlers, token: 'secret', rdpTarget: async () => `ws://127.0.0.1:${proxyPort}/rdp`, log: () => undefined })
+  const { port } = await gw.listen(0, '127.0.0.1')
+  const c = await client(port, 'secret')
+  await c.next()
+  const r = await c.call('vnc:prepare', { sessionId: 'vnc-1', instanceKey: 'tailnet/n1' })
+  const url = (r.result as { url: string }).url
+  assert.equal(url, `ws://127.0.0.1:${port}/vnc?token=secret&s=abcdefghijklmnopqrstuvwxyz012345`)
+
+  const screen = new WebSocket(url)
+  const got: string[] = []
+  screen.on('message', (d) => got.push(d.toString()))
+  await once(screen, 'open')
+  screen.send(Buffer.from('RFB 003.008\n'))
+  for (let i = 0; i < 50 && got.length < 2; i++) await new Promise((res) => setTimeout(res, 10))
+  assert.deepEqual(got, ['RFB 003.889\n', 'echo:RFB 003.008\n'], 'bytes pass both ways unchanged')
+  assert.deepEqual(paths, ['/vnc/abcdefghijklmnopqrstuvwxyz012345'])
+  screen.close()
+
+  // Without the gateway token, or with a malformed session, there is no relay.
+  const refused = new WebSocket(`ws://127.0.0.1:${port}/vnc?token=nope&s=abcdefghijklmnopqrstuvwxyz012345`)
+  await once(refused, 'error')
+  const malformed = new WebSocket(`ws://127.0.0.1:${port}/vnc?token=secret&s=../rdp`)
+  await once(malformed, 'error')
+  assert.equal(paths.length, 1)
+
+  c.ws.close()
+  await once(c.ws, 'close')
+  await new Promise((res) => setTimeout(res, 20))
+  assert.deepEqual(closed, ['vnc-1'], 'the page going away ends its screen sharing session')
+  await gw.close()
+  proxy.close()
+})
+
 test('closes sessions a socket opened when it disconnects, but not ones it closed itself', async () => {
   const { gw, port, closed } = await start()
   const c = await client(port, 'secret')
@@ -114,11 +165,12 @@ test('closes sessions a socket opened when it disconnects, but not ones it close
   await c.call('ssh:open', { sessionId: 'ssh-b' })
   await c.call('sftp:open', { instanceKey: 'k' })
   await c.call('rdp:prepare', { sessionId: 'rdp-1' })
+  await c.call('vnc:prepare', { sessionId: 'vnc-1', instanceKey: 'tailnet/n1' })
   await c.call('ssh:close', 'ssh-b')
   c.ws.close()
   await once(c.ws, 'close')
   await new Promise((r) => setTimeout(r, 20))
-  assert.deepEqual(closed.sort(), ['rdp:rdp-1', 'sftp:sftp-1', 'ssh:ssh-a', 'ssh:ssh-b'])
+  assert.deepEqual(closed.sort(), ['rdp:rdp-1', 'sftp:sftp-1', 'ssh:ssh-a', 'ssh:ssh-b', 'vnc:vnc-1'])
   await gw.close()
 })
 

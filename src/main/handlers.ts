@@ -22,6 +22,8 @@ import { openRdp, hasWindowsApp } from './rdp/launcher'
 import { openSftp, listSftp, realpathSftp, mkdirSftp, renameSftp, deleteSftp, pickUploads, uploadSftp, downloadSftp, downloadSftpTo, cancelTransfer, listTransfers, clearTransfers, closeSftp } from './sftp/session'
 import { localHome, localList, localRealpath, localMkdir, localRename, localTrash, localReveal } from './localfs'
 import { prepareRdp, releaseRdp, rdpLastError } from './rdp/sessions'
+import { prepareVnc, releaseVnc, vncLastError } from './vnc/sessions'
+import { tailnetHosts } from './tailnet'
 import { getCredential, setCredential, deleteCredential, credentialKeys } from './creds'
 import { listTunnels, closeTunnel } from './tunnels'
 import { openPortForward } from './portForward'
@@ -232,6 +234,10 @@ export const handlers: Handlers = {
   'rdp:prepare': (req) => prepareRdp(req),
   'rdp:release': (id) => releaseRdp(id),
   'rdp:lastError': async (id) => rdpLastError(id),
+  'vnc:prepare': (req) => prepareVnc(req),
+  'vnc:release': (id) => releaseVnc(id),
+  'vnc:lastError': async (id) => vncLastError(id),
+  'tailnet:list': (refresh) => tailnetHosts(refresh === true),
   'creds:get': async (key) => getCredential(key),
   'creds:set': async (key, cred) => setCredential(key, cred),
   'creds:delete': async (key) => deleteCredential(key),

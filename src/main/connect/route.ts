@@ -4,6 +4,7 @@ import { getSettings } from '../store'
 export function decideRoute(inst: Instance, force?: 'direct' | 'ssm'): RouteDecision {
   const ov = getSettings().overrides[inst.key]
   const pref = force ?? ov?.forceRoute
+  if (inst.tailnet) return inst.tailnet.online ? { route: 'direct', reason: 'Tailscale', host: inst.publicIp } : { route: 'not-running', reason: 'Offline in Tailscale' }
   if (inst.manual) return { route: 'direct', reason: 'Manually added server', host: inst.publicIp }
   if (inst.state !== 'running') return { route: 'not-running', reason: `Instance is ${inst.state}` }
   if (pref === 'ssm') {

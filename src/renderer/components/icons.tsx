@@ -39,6 +39,28 @@ export const Icon = {
       <path d="M8 20h8M12 16v4" />
     </svg>
   ),
+  /** Another computer's screen, controlled from here (screen sharing / VNC). */
+  screenShare: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M8 20h8M12 16v4" />
+      <path d="m10 7.5 0 6 1.6-1.5 1.2 2.4 1.1-.6-1.1-2.3 2.2-.2z" fill="currentColor" strokeWidth="1" />
+    </svg>
+  ),
+  /** A Mac (or any laptop): tailnet machines that are neither Windows nor Linux. */
+  laptop: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <rect x="4" y="5" width="16" height="11" rx="1.5" />
+      <path d="M2 19h20" />
+    </svg>
+  ),
+  /** A private network of machines (the tailnet). */
+  mesh: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}>
+      <circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><circle cx="12" cy="10" r="1.6" />
+      <path d="M6.8 6.9 10.6 9.2M17.2 6.9l-3.8 2.3M12 11.6v4.4M6 7.8l4.9 8.6M18 7.8l-4.9 8.6" strokeOpacity=".55" />
+    </svg>
+  ),
   key: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}>
       <circle cx="8" cy="15" r="4" />

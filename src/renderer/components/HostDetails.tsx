@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { HostHealth, Instance } from '@shared/types'
 import { allInstances, routeOf, useStore } from '../store'
 import { groupKeyOf, metaFor } from '../colors'
-import { openDefaultFor, openFilesFor, openInConsole } from '../quickConnect'
+import { openDefaultFor, openFilesFor, openInConsole, openScreenFor } from '../quickConnect'
+import { defaultSessionFor } from '@shared/tailnet'
 import { Icon } from './icons'
 
 function ago(iso?: string): string | undefined {
@@ -98,7 +99,10 @@ export default function HostDetails(): ReactElement | null {
     try { await window.api.invoke('clipboard:write', value); s.toast('success', 'Copied') }
     catch (e) { s.toast('error', (e as Error).message) }
   }
-  const fields: [string, string | undefined][] = [
+  const fields: [string, string | undefined][] = i.tailnet ? [
+    ['Tailscale name', i.instanceId], ['Tailscale IP', i.publicIp], ['OS', i.osHint], ['Tags', i.tags.Tags], ['Note', i.tags.Shared ?? i.tags.Note],
+    ['Last seen', i.tailnet.lastSeen ? `${new Date(i.tailnet.lastSeen).toLocaleString()} (${ago(i.tailnet.lastSeen)})` : undefined]
+  ] : [
     ['Instance ID', i.instanceId], ['Account', i.accountId], ['Profile', i.profile], ['Region / folder', i.region],
     ['OS', i.osHint], ['Instance type', i.instanceType || undefined], ['Public IP', i.publicIp], ['Private IP', i.privateIp],
     ['Public DNS', i.publicDns], ['Availability zone', i.az], ['VPC', i.vpcId], ['Subnet', i.subnetId],
@@ -121,7 +125,8 @@ export default function HostDetails(): ReactElement | null {
         {i.ssmError && <p className="mt-2 break-words">SSM lookup failed: {i.ssmError}</p>}
       </div>
       <div className="my-4 flex flex-wrap gap-2">
-        <button className="btn btn-primary" disabled={!available} onClick={() => openDefaultFor(i.key)}>{i.platform === 'windows' ? <Icon.monitor /> : <Icon.terminal />} Connect</button>
+        <button className="btn btn-primary" disabled={!available} onClick={() => openDefaultFor(i.key)}>{defaultSessionFor(i) === 'vnc' ? <Icon.screenShare /> : i.platform === 'windows' ? <Icon.monitor /> : <Icon.terminal />} {defaultSessionFor(i) === 'vnc' ? 'Share screen' : 'Connect'}</button>
+        {i.tailnet && defaultSessionFor(i) !== 'vnc' && i.platform !== 'windows' && <button className="btn" disabled={!available} onClick={() => void openScreenFor(i.key)}><Icon.screenShare /> Screen</button>}
         <button className="btn" disabled={!available} onClick={() => openFilesFor(i.key)}><Icon.folder /> Files</button>
         <button className="btn" disabled={i.state !== 'running'} onClick={() => s.set({ connectFor: { kind: i.platform === 'windows' ? 'rdp' : 'ssh', key: i.key } })}>Connection options</button>
         {!i.manual && <button className="btn" disabled={!i.ssmOnline || i.state !== 'running'} title={i.ssmOnline ? 'Forward a local port through SSM' : 'Needs an online SSM agent'} onClick={() => s.set({ portForwardFor: { key: i.key } })}><Icon.plug /> Forward port</button>}

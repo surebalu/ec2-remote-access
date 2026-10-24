@@ -110,14 +110,14 @@ function commands(): Command[] {
     { id: 'shortcuts-edit', title: 'Set keyboard shortcuts for the sections…', keywords: 'keys hotkey customize rail claude chatgpt terminal finder', icon: Icon.keyboard, run: () => openKeyboardSettings() },
     { id: 'close', title: 'Close current tab', hint: '⌘W', icon: Icon.x, run: () => void s.closeTab(active!.id), when: !!active },
     { id: 'beside', title: 'Open beside this tab…', keywords: 'split side by side compare next to pane', hint: '⌘\\', icon: Icon.split, run: () => s.openQuickSwitcher('', { beside: active!.id }), when: !!active },
-    { id: 'split', title: 'Split: same session beside this one', hint: '⌘D', icon: Icon.split, run: () => s.duplicateTab(active!.id, true), when: !!active && active.kind !== 'rdp' && isSession(active) },
+    { id: 'split', title: 'Split: same session beside this one', hint: '⌘D', icon: Icon.split, run: () => s.duplicateTab(active!.id, true), when: !!active && active.kind !== 'rdp' && active.kind !== 'vnc' && isSession(active) },
     { id: 'arrange-columns', title: 'Side by side: all in a row', keywords: 'split layout arrange columns', icon: Icon.split, run: () => s.arrangeSplit('columns'), when: inSplit },
     { id: 'arrange-rows', title: 'Side by side: stacked', keywords: 'split layout arrange rows', icon: Icon.splitRows, run: () => s.arrangeSplit('rows'), when: inSplit },
     { id: 'arrange-main', title: 'Side by side: one large, the rest stacked', keywords: 'split layout arrange main', icon: Icon.splitMain, run: () => s.arrangeSplit('main'), when: inSplit && s.splitGroup.length > 2 },
     { id: 'arrange-grid', title: 'Side by side: grid', keywords: 'split layout arrange grid', icon: Icon.grid, run: () => s.arrangeSplit('grid'), when: inSplit && s.splitGroup.length > 2 },
     { id: 'split-zoom', title: s.splitZoom ? 'Side by side: show every pane' : 'Side by side: show this pane alone', keywords: 'split zoom maximize', hint: '⌘⇧↩', icon: Icon.maximize, run: () => s.set({ splitZoom: s.splitZoom ? null : s.activeTab }), when: inSplit },
     { id: 'split-done', title: 'Side by side: done (show the focused pane on its own)', keywords: 'split unsplit exit close', icon: Icon.x, run: () => s.endSplit(), when: inSplit },
-    { id: 'dup', title: 'Duplicate current session', hint: '⌘⇧D', icon: Icon.plus, run: () => s.duplicateTab(active!.id), when: !!active && active.kind !== 'rdp' },
+    { id: 'dup', title: 'Duplicate current session', hint: '⌘⇧D', icon: Icon.plus, run: () => s.duplicateTab(active!.id), when: !!active && active.kind !== 'rdp' && active.kind !== 'vnc' },
     { id: 'broadcast', title: s.broadcastInput ? 'Stop broadcasting input' : 'Broadcast input to all panes in the split', hint: '⌘⇧I', icon: Icon.broadcast, run: () => s.set({ broadcastInput: !s.broadcastInput }), when: s.splitGroup.includes(s.activeTab) },
     { id: 'find', title: 'Find in terminal', hint: '⌘F', icon: Icon.search, run: () => terminalAction(active!.id, 'find'), when: active?.kind === 'ssh' }
   ]
@@ -203,7 +203,7 @@ function siteGroups(sites: WebTabInfo[], spaces: WebSpace[], q: string): Result[
 const fuzzy = (text: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w))
 
 const TOOL_ICONS: Record<ToolKind, IconFn> = { local: Icon.console, browser: Icon.globe, notes: Icon.note, board: Icon.board, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, claude: Icon.claude, chatgpt: Icon.chatgpt, health: Icon.health, devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark }
-const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
+const tabIcon = (t: Tab): IconFn => (t.kind === 'rdp' ? Icon.monitor : t.kind === 'vnc' ? Icon.screenShare : t.kind === 'sftp' ? Icon.folder : t.kind === 'ssh' ? Icon.terminal : TOOL_ICONS[t.kind])
 
 /**
  * Picking what to show beside a tab (⌘\): open tabs not already beside it, the tools, then hosts (a new session there).
@@ -227,7 +227,7 @@ function besideResults(anchor: Tab, query: string, hosts: Instance[]): Result[] 
   return q ? [...tabResults, ...hostResults, ...toolResults] : [...tabResults, ...toolResults, ...hostResults]
 }
 
-const isSessionKind = (t: Tab): boolean => t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp'
+const isSessionKind = (t: Tab): boolean => t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp' || t.kind === 'vnc'
 
 async function power(i: Instance, action: 'start' | 'stop'): Promise<void> {
   const s = useStore.getState()
@@ -342,7 +342,7 @@ export default function QuickSwitcher(): ReactElement {
   const sites = s.webTabs ?? savedWebTabs(saved, spaceName)
   const spaces = s.webSpaces ?? savedSpaces(saved, s.profiles, s.settings)
   const intentCtx: IntentContext = useMemo(() => ({
-    hosts: visible.map((i) => ({ key: i.key, name: i.name, platform: i.platform, profile: i.profile, account: i.manual ? (i.profile === 'servers' ? 'Server' : i.profile) : s.settings?.accountMeta?.[i.profile]?.label ?? i.profile, region: i.manual ? undefined : i.region, state: i.manual ? 'running' : i.state, privateIp: i.privateIp, publicIp: i.publicIp, instanceId: i.manual ? undefined : i.instanceId, tags: Object.values(i.tags ?? {}) })),
+    hosts: visible.map((i) => ({ key: i.key, name: i.name, platform: i.platform, profile: i.profile, account: i.manual ? (i.profile === 'servers' ? 'Server' : i.tailnet ? 'Tailscale' : i.profile) : s.settings?.accountMeta?.[i.profile]?.label ?? i.profile, region: i.manual ? undefined : i.region, state: i.manual && !i.tailnet ? 'running' : i.state, privateIp: i.privateIp, publicIp: i.publicIp, instanceId: i.manual ? undefined : i.instanceId, tags: Object.values(i.tags ?? {}) })),
     sites: sites.map((t) => ({ id: t.id, title: t.title, url: t.url, space: t.space })),
     spaces: spaces.map((x) => ({ id: x.id, name: x.name })),
     services: s.settings?.serviceCatalog?.length ? s.settings.serviceCatalog : DEFAULT_SERVICES,

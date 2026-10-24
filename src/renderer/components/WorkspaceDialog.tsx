@@ -47,7 +47,7 @@ export default function WorkspaceDialog(): ReactElement {
           return <div key={t.id} className={`workspace-pick ${picked.has(t.id) ? 'selected' : ''}`}>
             <label className="workspace-pick-main">
               <input type="checkbox" checked={picked.has(t.id)} disabled={saving} onChange={() => setPicked((p) => toggle(p, t.id))} />
-              <span className="workspace-pick-icon">{remote ? t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : <Icon.terminal /> : LOOKS[t.kind as ToolKind].icon()}</span>
+              <span className="workspace-pick-icon">{remote ? t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'vnc' ? <Icon.screenShare /> : t.kind === 'sftp' ? <Icon.folder /> : <Icon.terminal /> : LOOKS[t.kind as ToolKind].icon()}</span>
               <span><strong>{remote ? t.title : TOOL_NAMES[t.kind as ToolKind]}</strong><small>{detail}</small></span>
             </label>
             {picked.has(t.id) && t.kind === 'local' && terminal && <details className="workspace-subpicks"><summary>Choose terminal tabs</summary>

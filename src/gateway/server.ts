@@ -6,6 +6,7 @@
  *   WS   /ws?token=…  RPC: {t:'call',id,channel,args} -> {t:'result',id,result} | {t:'error',id,message}
  *                     and pushed events {t:'event',channel,payload} (the IpcEvents channels)
  *   WS   /rdp?token=… transparent relay to the local RDCleanPath proxy so IronRDP in the browser reaches it
+ *   WS   /vnc?token=…&s=<session token>  the same for screen sharing: relayed to the proxy's /vnc/<session token>
  *
  * Auth is a single shared bearer token in the query string; the intended deployment sits behind Tailscale (or
  * `tailscale serve` for HTTPS), so the token is a second lock rather than the only one. Sessions a socket opened
@@ -29,7 +30,7 @@ export interface GatewayOptions {
   token: string
   /** Directory of the built renderer to serve at '/'. Omit to serve only the API (tests). */
   staticDir?: string
-  /** Returns the local RDCleanPath proxy URL (ws://127.0.0.1:<port>/rdp) or null when RDP is unavailable. */
+  /** Returns the local RDCleanPath proxy URL (ws://127.0.0.1:<port>/rdp; screen sharing is its /vnc/<token>) or null when RDP is unavailable. */
   rdpTarget?: () => Promise<string | null>
   log?: (line: string) => void
   /** How long sessions of a disconnected, self-identified page stay open for it to reconnect. Default 10 minutes. */
@@ -90,6 +91,7 @@ const SESSION_OPENERS: Record<string, { id: (args: unknown[], result: unknown) =
   'ssh:open': { id: (a) => (a[0] as Opened)?.sessionId, closer: 'ssh:close' },
   'sftp:open': { id: (_a, r) => (r as Opened)?.sessionId, closer: 'sftp:close' },
   'rdp:prepare': { id: (a) => (a[0] as Opened)?.sessionId, closer: 'rdp:release' },
+  'vnc:prepare': { id: (a) => (a[0] as Opened)?.sessionId, closer: 'vnc:release' },
   'term:open': { id: (a) => (a[0] as Opened)?.id, closer: 'term:close' }
 }
 const SESSION_CLOSERS = new Set<string>(Object.values(SESSION_OPENERS).map((x) => x.closer))
@@ -153,6 +155,10 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     }
     if (url.pathname === '/ws') rpc.handleUpgrade(req, socket, head, (ws) => onRpcConnection(ws, req))
     else if (url.pathname === '/rdp' && opts.rdpTarget) relay.handleUpgrade(req, socket, head, (ws) => void onRdpConnection(ws))
+    else if (url.pathname === '/vnc' && opts.rdpTarget && /^[A-Za-z0-9_-]{16,64}$/.test(url.searchParams.get('s') ?? '')) {
+      const session = url.searchParams.get('s')!
+      relay.handleUpgrade(req, socket, head, (ws) => void onRdpConnection(ws, (proxy) => proxy.replace(/\/rdp$/, `/vnc/${session}`)))
+    }
     else {
       socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
       socket.destroy()
@@ -284,6 +290,11 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
           if (channel === 'rdp:prepare' && result && typeof result === 'object' && 'proxyUrl' in result) {
             ;(result as { proxyUrl: string }).proxyUrl = `${publicWsBase}/rdp?token=${encodeURIComponent(opts.token)}`
           }
+          // The local proxy's address means nothing to a phone: the same session goes through this server instead.
+          if (channel === 'vnc:prepare' && result && typeof result === 'object' && 'url' in result) {
+            const session = /\/vnc\/([A-Za-z0-9_-]+)$/.exec((result as { url: string }).url)?.[1] ?? ''
+            ;(result as { url: string }).url = `${publicWsBase}/vnc?token=${encodeURIComponent(opts.token)}&s=${session}`
+          }
           if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'result', id, result: result ?? null }))
         },
         (e: Error) => {
@@ -308,9 +319,11 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     })
   }
 
-  async function onRdpConnection(client: WebSocket): Promise<void> {
-    const target = await opts.rdpTarget!().catch(() => null)
-    if (!target) { client.close(1011, 'RDP proxy unavailable'); return }
+  /** Relays a page's WebSocket to the local proxy: RDCleanPath as it is, or (with `path`) one screen-sharing session. */
+  async function onRdpConnection(client: WebSocket, path?: (proxy: string) => string): Promise<void> {
+    const proxy = await opts.rdpTarget!().catch(() => null)
+    if (!proxy) { client.close(1011, 'RDP proxy unavailable'); return }
+    const target = path ? path(proxy) : proxy
     const upstream = new WebSocket(target)
     const queue: RawData[] = []
     client.on('message', (d) => { if (upstream.readyState === WebSocket.OPEN) upstream.send(d); else queue.push(d) })

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { allInstances, routeOf, useStore, type Tab } from '../store'
-import { openFilesFor, openInConsole, openRdpFor, openSshFor } from '../quickConnect'
+import { openFilesFor, openInConsole, openRdpFor, openScreenFor, openSshFor } from '../quickConnect'
 import { Icon } from './icons'
 
 /** Opens (creating on first use) a host's note in the Notes tab, beside `tabId` when given. */
@@ -39,6 +39,12 @@ export default function HostActions({ instanceKey, current, tabId }: { instanceK
       {current !== 'rdp' && i.platform === 'windows' && (
         <button className="btn btn-sm btn-rdp" disabled={!reachable} title="Remote desktop to this host (shift-click for options)" onClick={(e) => void openRdpFor(instanceKey, e.shiftKey)}>
           <Icon.monitor /> RDP
+        </button>
+      )}
+      {/* A tailnet Mac or Linux machine (the Pi's wayvnc) usually has a screen to share; EC2 hosts keep it in the menu. */}
+      {current !== 'vnc' && i.tailnet && i.platform !== 'windows' && (
+        <button className="btn btn-sm" disabled={!reachable} title={`Show and control ${i.name}'s screen (Screen Sharing / VNC)`} onClick={() => void openScreenFor(instanceKey)}>
+          <Icon.screenShare /> Screen
         </button>
       )}
       <button className={`btn btn-sm ${noteBeside ? 'on' : ''}`} title={noteBeside ? 'Close the note beside this session' : "This host's note, beside this session (kept in your notes folder)"} aria-pressed={noteBeside} onClick={() => (noteBeside ? void s.closeTab(notesTab!.id) : openHostNote(instanceKey, tabId))}>

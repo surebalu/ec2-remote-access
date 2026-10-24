@@ -2,6 +2,7 @@ import { workspaceSize, workspaceSummary } from '@shared/workspaces'
 import { useEffect, useState, type ReactElement } from 'react'
 import { routeOf, useStore, visibleInstances } from '../store'
 import { MANUAL_PROFILE, manualKey } from '@shared/manual'
+import { defaultSessionFor, TAILNET_PROFILE } from '@shared/tailnet'
 import { openDefaultFor } from '../quickConnect'
 import { metaFor } from '../colors'
 import { Icon } from './icons'
@@ -60,6 +61,37 @@ export default function Sidebar(): ReactElement | null {
       return next
     })
   }
+  // The Tailscale list starts open; closing it is remembered per machine.
+  const [tailnetOpen, setTailnetOpen] = useState(() => {
+    try { return localStorage.getItem('ui.tailnetOpen') !== '0' } catch { return true }
+  })
+  const toggleTailnet = (): void => {
+    setTailnetOpen(!tailnetOpen)
+    try { localStorage.setItem('ui.tailnetOpen', tailnetOpen ? '0' : '1') } catch { /* storage unavailable */ }
+  }
+  const tailnet = s.settings?.tailscaleHosts === false ? null : s.tailnet
+  const tailnetDevices = tailnet?.devices ?? []
+  /** Machines on the tailnet as rows (this one first, online ones next): click selects, double-click opens. */
+  const tailnetRows = (): ReactElement => (
+    <ul className="mb-1 ml-7 space-y-px">
+      {tailnetDevices.map((i) => (
+        <li key={i.key}>
+          <button
+            className={`nav-row w-full py-1 text-left text-[11px] ${s.selectedKey === i.key && s.profileFilter === TAILNET_PROFILE ? 'on' : ''} ${i.tailnet?.online ? '' : 'opacity-60'}`}
+            title={`${i.instanceId} · ${i.publicIp} · ${i.osHint}${i.tailnet?.online ? '' : ' · offline'}\nDouble-click to open ${{ vnc: 'its screen', rdp: 'Remote Desktop', ssh: 'SSH' }[defaultSessionFor(i)]}`}
+            onClick={() => s.revealHost(i.key)}
+            onDoubleClick={() => i.tailnet?.online && openDefaultFor(i.key)}
+          >
+            <span className="dot" style={{ background: i.tailnet?.online ? 'var(--ok)' : 'var(--muted)' }} />
+            {i.tailnet?.os === 'macOS' ? <Icon.laptop className="muted" /> : i.platform === 'windows' ? <Icon.windows className="muted" /> : <Icon.linux className="muted" />}
+            <span className="min-w-0 flex-1 truncate">{i.name}</span>
+            {i.tailnet?.self && <span className="muted text-[10px]">this</span>}
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+
   /** Starred hosts (AWS and own servers): click selects in the Favorites view, double-click connects. */
   const favoriteHosts = (): ReactElement | null => {
     const favs = new Set(s.settings?.favorites ?? [])
@@ -71,12 +103,12 @@ export default function Sidebar(): ReactElement | null {
           <li key={i.key}>
             <button
               className={`nav-row w-full py-1 text-left text-[11px] ${s.selectedKey === i.key && s.favoritesOnly ? 'on' : ''} ${i.state === 'running' ? '' : 'opacity-60'}`}
-              title={`${i.manual ? i.instanceId : `${i.instanceId} · ${i.profile}`} · ${i.state}\nDouble-click to open ${i.platform === 'windows' ? 'RDP' : 'SSH'}`}
+              title={`${i.manual ? i.instanceId : `${i.instanceId} · ${i.profile}`} · ${i.state}\nDouble-click to open ${{ vnc: 'its screen', rdp: 'RDP', ssh: 'SSH' }[defaultSessionFor(i)]}`}
               onClick={() => s.revealHost(i.key)}
               onDoubleClick={() => i.state === 'running' && openDefaultFor(i.key)}
             >
               <span className="dot" style={{ background: i.state === 'running' ? 'var(--ok)' : 'var(--muted)' }} />
-              {i.platform === 'windows' ? <Icon.windows className="muted" /> : <Icon.linux className="muted" />}
+              {i.tailnet?.os === 'macOS' ? <Icon.laptop className="muted" /> : i.platform === 'windows' ? <Icon.windows className="muted" /> : <Icon.linux className="muted" />}
               <span className="min-w-0 flex-1 truncate">{i.name || i.instanceId}</span>
             </button>
           </li>
@@ -102,7 +134,7 @@ export default function Sidebar(): ReactElement | null {
               onDoubleClick={() => i.state === 'running' && openDefaultFor(i.key)}
             >
               <span className="dot" style={{ background: i.state === 'running' ? 'var(--ok)' : 'var(--muted)' }} />
-              {i.platform === 'windows' ? <Icon.windows className="muted" /> : <Icon.linux className="muted" />}
+              {i.tailnet?.os === 'macOS' ? <Icon.laptop className="muted" /> : i.platform === 'windows' ? <Icon.windows className="muted" /> : <Icon.linux className="muted" />}
               <span className="min-w-0 flex-1 truncate">{i.name || i.instanceId}</span>
             </button>
           </li>
@@ -343,6 +375,33 @@ export default function Sidebar(): ReactElement | null {
           </li>
         )}
       </ul>
+
+      {/* Machines on this computer's Tailscale network (src/shared/tailnet.ts), as Screens lists them. */}
+      {tailnet?.installed && (tailnet.running || tailnetDevices.length > 0) && (
+        <>
+          <div className="mt-4 flex items-center justify-between px-3">
+            <span className="section-title" title={tailnet.tailnet ? `Tailnet: ${tailnet.tailnet}` : undefined}>Tailscale</span>
+            <button className="btn btn-ghost btn-sm btn-icon" title="Read the tailnet again" aria-label="Refresh Tailscale machines" onClick={() => void s.refreshTailnet(true)}>
+              <Icon.refresh />
+            </button>
+          </div>
+          <ul className="mt-1 space-y-0.5 px-2">
+            <li>
+              <div className={`nav-row !pl-1 ${s.profileFilter === TAILNET_PROFILE ? 'on' : ''}`}>
+                <button className="muted flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-[var(--accent-soft-2)]" title={tailnetOpen ? 'Collapse' : 'Show machines'} onClick={toggleTailnet}>
+                  <Icon.chevron open={tailnetOpen} />
+                </button>
+                <button className="flex min-w-0 flex-1 items-center gap-2 text-left" title={tailnet.error ?? 'Every machine on the tailnet; double-click one to open it'} onClick={() => nav({ profileFilter: TAILNET_PROFILE, favoritesOnly: false })} onDoubleClick={toggleTailnet}>
+                  <Icon.mesh className="muted" />
+                  <span className="truncate">{tailnet.running ? 'All machines' : 'Not connected'}</span>
+                </button>
+                <span className="mono muted text-[11px]" title="Online / all">{tailnetDevices.filter((d) => d.tailnet?.online).length}/{tailnetDevices.length}</span>
+              </div>
+              {tailnetOpen && tailnetRows()}
+            </li>
+          </ul>
+        </>
+      )}
 
       {/* Saved project workspaces */}
       {(workspaces.length > 0 || s.tabs.length > 0) && (

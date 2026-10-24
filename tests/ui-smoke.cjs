@@ -37,6 +37,14 @@ let settings = {
 }
 let cached = { instances: [running, stopped, stale], errors: [{ profile: 'development', region: 'us-east-1', message: stale.staleReason }], scannedAt: now }
 let failSsh = false
+// Screen sharing (ui-screens.cjs): the tailnet the fixture reports, the fake VNC server's socket, the one ws:// origin
+// the page may open (everything else stays blocked), and screen-sharing sign-ins kept apart from RDP's.
+let tailnetFixture = null
+let vncUrl = null
+let wsAllowed = null
+// Every window shares the default session, whose one request filter blocks the network, bar that one origin.
+const blockNetwork = (details, callback) => callback({ cancel: !(wsAllowed && details.url.startsWith(wsAllowed)) })
+const vncCreds = {}
 let failWorkspaceHealth = false
 let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
@@ -480,8 +488,13 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'run:status': { const r = runsSent.find((x) => x.id === args[0]); return r ? runState(r) : null }
     case 'run:list': return runsSent.map(runState).reverse()
     case 'run:cancel': return
-    case 'creds:get': return null
-    case 'creds:set': return
+    case 'creds:get': return String(args[0]).startsWith('vnc:') ? (vncCreds[args[0]] ?? null) : null
+    case 'creds:set': if (String(args[0]).startsWith('vnc:')) vncCreds[args[0]] = args[1]; return
+    case 'creds:delete': delete vncCreds[args[0]]; return
+    case 'tailnet:list': return tailnetFixture
+    case 'vnc:prepare': return { sessionId: args[0].sessionId, url: vncUrl, destination: '100.64.0.10:5900', route: 'direct', title: 'Fixture Mac' }
+    case 'vnc:release': return
+    case 'vnc:lastError': return undefined
     // A remote desktop that stays "connecting": the viewer is on the page, which is all the keyboard check needs.
     case 'rdp:prepare': return new Promise(() => undefined)
     case 'rdp:release': return
@@ -797,7 +810,7 @@ app.whenReady().then(async () => {
   await new Promise((r) => webServer.listen(0, '127.0.0.1', r))
   webPort = webServer.address().port
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
-  win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
+  win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, blockNetwork)
   win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
   // Names the script when it throws; Electron's own error says only that "a script" failed.
   const js = (code) => win.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
@@ -814,6 +827,18 @@ app.whenReady().then(async () => {
     await win.loadFile(resolve('out/renderer/index.html'))
     await until(`document.querySelectorAll('[data-host-key]').length === 3`)
     await screenshot('hosts-dark.png')
+    const screens = () => require('./ui-screens.cjs')({
+      output, errors,
+      fixture: { calls: () => calls, setTailnet: (t) => { tailnetFixture = t }, setVnc: (u) => { vncUrl = u }, allowWs: (prefix) => { wsAllowed = prefix } }
+    })
+    // Just the screen sharing checks (electron tests/ui-smoke.cjs --screens).
+    if (process.argv.includes('--screens')) {
+      await screens()
+      assert.deepEqual(errors, [])
+      console.log(`Screen sharing checks passed. Screenshots: ${output}`)
+      app.exit(0)
+      return
+    }
     // This uses only the fixture IPC above. No production main, real credentials, shell or file writes are loaded.
     if (workspacePreview) {
       settings = { ...settings,
@@ -2154,7 +2179,7 @@ app.whenReady().then(async () => {
 
     // Phone layout (what the gateway serves to an iPhone): host list, action sheet, terminal key bar, back to lists.
     const phone = new BrowserWindow({ show: false, width: 430, height: 932, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
-    phone.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
+    phone.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, blockNetwork)
     phone.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
     const pjs = (code) => phone.webContents.executeJavaScript(code)
     const puntil = async (code) => {
@@ -4328,6 +4353,7 @@ app.whenReady().then(async () => {
     ewin.destroy()
     settings.theme = savedTheme
     emptyScenario = false
+    await screens()
     assert.deepEqual(errors, [])
     console.log(`UI smoke checks passed. Screenshots: ${output}`)
     app.exit(0)

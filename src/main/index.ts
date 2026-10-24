@@ -17,6 +17,7 @@ import { closeMonitor } from './storage/monitor'
 import { flushDataFolder, updateDataFolder } from './dataFolder'
 import { flushBoxSync, updateBoxSync } from './boxSync'
 import { releaseAllRdp } from './rdp/sessions'
+import { releaseAllVnc } from './vnc/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
 import { setupAutoUpdate } from './updater'
@@ -146,7 +147,7 @@ app.on('before-quit', (e) => {
   closeStorage()
   closeMonitor()
   closeControl()
-  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder(), flushBoxSync()])
+  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), releaseAllVnc(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder(), flushBoxSync()])
     .then(() => stopProxy())
     .catch(() => undefined)
     .finally(() => app.quit())

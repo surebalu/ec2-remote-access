@@ -152,14 +152,15 @@ export default function Launcher(): ReactElement {
   const load = async (): Promise<void> => {
     const soft = <T,>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback)
     void window.api.invoke('wm:status').then((st) => setWm({ helper: st.helper, accessibility: st.accessibility }), () => setWm(null))
-    const [apps, usage, settings, cached, profiles, browser, home] = await Promise.all([
+    const [apps, usage, settings, cached, profiles, browser, home, tailnet] = await Promise.all([
       soft(window.api.invoke('launcher:apps'), [] as LauncherApp[]),
       soft(window.api.invoke('launcher:usage'), {} as LauncherUsage),
       soft(window.api.invoke('settings:get'), null),
       soft(window.api.invoke('inventory:cached'), null),
       soft(window.api.invoke('profiles:list'), [] as AwsProfile[]),
       soft(window.api.invoke('browser:load'), null),
-      soft(window.api.invoke('local:home'), '')
+      soft(window.api.invoke('local:home'), ''),
+      soft(window.api.invoke('tailnet:list'), null)
     ])
     if (settings) {
       // The dictation key and language (voice.ts reads them from the store, as the main window's does).
@@ -168,7 +169,7 @@ export default function Launcher(): ReactElement {
       applyAppearance(settings.theme, settings.colorTheme)
     }
     const off = new Set(profiles.filter((p) => !p.enabled).map((p) => p.name))
-    const hosts = [...(cached?.instances ?? []).filter((i) => !off.has(i.profile)), ...(settings?.manualHosts ?? []).map(manualToInstance)]
+    const hosts = [...(cached?.instances ?? []).filter((i) => !off.has(i.profile)), ...(settings?.manualHosts ?? []).map(manualToInstance), ...(tailnet?.devices ?? [])]
     setData({ apps, usage, settings, hosts, profiles, browser, home })
   }
 
@@ -220,7 +221,7 @@ export default function Launcher(): ReactElement {
 
   // ----- rows -----
   const settings = data.settings
-  const accountLabel = (i: Instance): string => (i.manual ? (i.profile === 'servers' ? 'Server' : i.profile) : settings?.accountMeta?.[i.profile]?.label ?? i.profile)
+  const accountLabel = (i: Instance): string => (i.manual ? (i.profile === 'servers' ? 'Server' : i.tailnet ? 'Tailscale' : i.profile) : settings?.accountMeta?.[i.profile]?.label ?? i.profile)
   const spaceName = (id: string): string => {
     const own = data.browser?.spaces.find((s) => s.id === id)
     if (own) return own.name
@@ -488,7 +489,7 @@ export default function Launcher(): ReactElement {
     const b = data.browser
     const spaces = [...(b?.spaces ?? []), ...data.profiles.filter((p) => p.enabled && p.kind !== 'static').map((p) => ({ id: spaceIdForProfile(p.name), name: settings?.accountMeta?.[p.name]?.label ?? p.name }))]
     return {
-      hosts: data.hosts.map((i) => ({ key: i.key, name: i.name, platform: i.platform, profile: i.profile, account: accountLabel(i), region: i.manual ? undefined : i.region, state: i.manual ? 'running' : i.state, privateIp: i.privateIp, publicIp: i.publicIp, instanceId: i.manual ? undefined : i.instanceId, tags: Object.values(i.tags ?? {}) })),
+      hosts: data.hosts.map((i) => ({ key: i.key, name: i.name, platform: i.platform, profile: i.profile, account: accountLabel(i), region: i.manual ? undefined : i.region, state: i.manual && !i.tailnet ? 'running' : i.state, privateIp: i.privateIp, publicIp: i.publicIp, instanceId: i.manual ? undefined : i.instanceId, tags: Object.values(i.tags ?? {}) })),
       apps: data.apps,
       sites: (b?.tabs ?? []).filter((t) => /^https?:/.test(t.url || t.homeUrl || '')).map((t) => ({ id: t.id, title: t.name || t.title || hostOf(t.url || t.homeUrl || ''), url: t.url || t.homeUrl || '', space: t.spaceId })),
       spaces: spaces.map((x) => ({ id: x.id, name: x.name })),

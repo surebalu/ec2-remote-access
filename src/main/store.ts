@@ -47,6 +47,7 @@ export const defaultSettings: Settings = {
   phoneAccessBind: 'tailscale',
   phoneTerminals: false,
   menuBarIcon: true,
+  tailscaleHosts: true,
   colorTheme: '',
   uiFont: 'System',
   sectionZoom: {},

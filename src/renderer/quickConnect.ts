@@ -5,7 +5,8 @@
  */
 import type { Instance, SftpOpenRequest } from '@shared/types'
 import { consoleHome, ec2InstanceUrl } from '@shared/browser'
-import { allInstances, useStore, type Beside } from './store'
+import { defaultSessionFor } from '@shared/tailnet'
+import { allInstances, useStore, vncCredKey, type Beside } from './store'
 import { nativeApp } from './mobile'
 
 /** The built-in browser needs Electron's <webview>; on a phone or the gateway page links open in the device's browser. */
@@ -49,12 +50,32 @@ export function openInConsole(i: Instance): void {
   openAccountConsole(i.profile, ec2InstanceUrl(i.region, i.instanceId))
 }
 
-/** Double-click behaviour: RDP for Windows hosts, SSH for everything else. `beside` opens it next to another tab. */
+/**
+ * Double-click behaviour: RDP for Windows hosts, SSH for everything else, and a Mac on the tailnet shows its screen.
+ * `beside` opens it next to another tab.
+ */
 export function openDefaultFor(key: string, beside?: Beside): void {
   const i = instanceFor(key)
   if (!i) return
-  if (i.platform === 'windows') void openRdpFor(key, false, beside)
+  const kind = defaultSessionFor(i)
+  if (kind === 'vnc') void openScreenFor(key, beside)
+  else if (kind === 'rdp') void openRdpFor(key, false, beside)
   else openSshFor(key, false, beside)
+}
+
+/**
+ * Shows a computer's screen (VNC / macOS Screen Sharing). Opens straight away: the tab asks for whatever sign-in the
+ * computer wants, so there is no dialog first. An open screen of the same host is brought forward instead.
+ */
+export async function openScreenFor(key: string, beside?: Beside): Promise<void> {
+  const s = useStore.getState()
+  const i = instanceFor(key)
+  if (!i) return
+  const open = s.tabs.find((t) => t.kind === 'vnc' && t.instanceKey === key)
+  if (open) { s.setActive(open.id); return }
+  const cred = await window.api.invoke('creds:get', vncCredKey(key)).catch(() => null)
+  const port = s.settings?.overrides[key]?.vncPort
+  s.addTab({ id: newId('vnc'), kind: 'vnc', instanceKey: key, title: i.tailnet ? i.name : `${i.name} @ ${i.profile}`, status: 'connecting', vncRequest: { user: cred?.user || undefined, password: cred?.password, port } }, { beside })
 }
 
 const newId = (kind: string): string => `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
