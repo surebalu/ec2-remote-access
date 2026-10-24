@@ -15,6 +15,8 @@ export interface LinkItem extends RecordItem {
   url?: string
   /** A file's absolute path on the Mac. */
   path?: string
+  /** The file's copy in Box (boxSync.ts), which a computer without `path` downloads to open it. */
+  box?: { id: string; size: number }
   /** A file's size in bytes. */
   size?: number
   title: string

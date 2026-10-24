@@ -151,10 +151,10 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
     setSelected(null)
   }
   const open = (l: LinkItem, external = false): void => {
-    if (l.kind === 'file' && l.path) {
-      // Files live on the Mac and open in their own app there.
+    if (l.kind === 'file' && (l.path || l.box)) {
+      // Files open in their own app on a Mac: from this Mac, else downloaded from their copy in Box.
       if (!hasBrowser()) { toast('info', 'Files open in the Mac app.'); return }
-      void window.api.invoke('local:open', l.path).then(() => save(l, { openedAt: Date.now() }), (e: Error) => toast('error', e.message))
+      void window.api.invoke('links:openFile', l.id).then(() => save(l, { openedAt: Date.now() }), (e: Error) => toast('error', e.message))
       return
     }
     if (!l.url) { setSelected(l.id); return }

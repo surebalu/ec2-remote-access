@@ -52,6 +52,9 @@ const companyDefaults = {
   accountMeta: { 'prod-plm': { label: 'Prod', color: 'rose' } }
 }
 const setupDone = []
+// Box sync (main/boxSync.ts) as the page sees it: signed out until box:signIn, then signed in and synced.
+const boxSignedOut = { available: true, signedIn: false, syncing: false }
+let boxFixture = boxSignedOut
 let failNoteWrites = false
 // Notes vault for the Notes tab.
 const noteFolders = new Set(['Projects'])
@@ -332,6 +335,15 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'sso:cancel': return
     case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', sessionManagerPluginBundled: emptyScenario, awsCli: null, windowsApp: false }
     case 'app:company': return companyFixture
+    case 'box:status': return boxFixture
+    case 'box:signIn':
+      setupDone.push(['box:signIn', args[0] ?? null])
+      boxFixture = { available: true, signedIn: true, syncing: false, user: { name: 'Fixture Person', login: 'person@example.com' }, folder: { id: '123', name: 'Remote Access Tool' }, lastSync: Date.now(), files: { done: 3, total: 3, tooLarge: 1 } }
+      setTimeout(() => { if (!_e.sender.isDestroyed()) _e.sender.send('box:status', boxFixture) }, 150)
+      return { url: 'https://account.box.com/api/oauth2/authorize?fixture', opened: true }
+    case 'box:sync': setupDone.push(['box:sync']); boxFixture = { ...boxFixture, lastSync: Date.now() }; return boxFixture
+    case 'box:signOut': setupDone.push(['box:signOut']); boxFixture = boxSignedOut; return boxFixture
+    case 'links:openFile': return
     case 'sso:start': setupDone.push(['sso:start', args[0]]); return { flowId: 'flow-2', userCode: 'WXYZ-1234', verificationUri: 'https://device.sso.example/', verificationUriComplete: 'https://device.sso.example/?user_code=WXYZ-1234', expiresIn: 600 }
     case 'sso:wait': return [{ accountId: '111111111111', accountName: 'Corp Production', roles: ['ReadOnly', 'Admin'] }, { accountId: '222222222222', accountName: 'Corp QA', roles: ['Admin'] }, { accountId: '333333333333', accountName: 'Sandbox', roles: ['Admin'] }]
     case 'sso:save': setupDone.push(['sso:save', args[0]]); return args[0].selections.map((x) => x.profileName)
@@ -1014,8 +1026,9 @@ app.whenReady().then(async () => {
     await nav('Files')
     await until(`document.querySelectorAll('.link-row').length === 1 && document.querySelector('.link-row').textContent.includes('PDF · 1.2 MB') && document.querySelector('.link-row .link-icon.badge')?.textContent === 'PDF'`)
     await js(`document.querySelector('.link-row .link-go').click()`)
-    for (let i = 0; i < 50 && !calls.some((c) => c.channel === 'local:open'); i++) await new Promise((r) => setTimeout(r, 30))
-    assert.equal(calls.filter((c) => c.channel === 'local:open').at(-1)?.args[0], '/fixture/Links Files/Work/Architecture review.pdf')
+    for (let i = 0; i < 50 && !calls.some((c) => c.channel === 'links:openFile'); i++) await new Promise((r) => setTimeout(r, 30))
+    // By the link's id: main opens it from this Mac, or downloads its copy in Box where the Mac does not have it.
+    assert.equal(recordDocs.links.items[calls.filter((c) => c.channel === 'links:openFile').at(-1)?.args[0]]?.path, '/fixture/Links Files/Work/Architecture review.pdf')
     // A folder lists as Finder does: its subfolder first, then only what is directly in it; a double-click opens the
     // subfolder, and the path bar and ⌘↑ go back up.
     await nav('Work')
@@ -4245,6 +4258,18 @@ app.whenReady().then(async () => {
     await ejs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Export…').click()`)
     await euntil(`document.querySelector('.toasts')?.textContent.includes('Setup exported to /Users/fixture/Desktop')`)
     await eshot('settings-data-setup.png')
+    // Settings → Data → Box: sign in (the Mac opens the browser itself), the status pushed back, Sync now, Sign out.
+    await euntil(`[...document.querySelectorAll('.settings-body button')].some((b) => b.textContent === 'Sign in to Box…')`)
+    await ejs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Sign in to Box…').click()`)
+    await euntil(`document.querySelector('.settings-body').textContent.includes('Signed in as Fixture Person (person@example.com)')`)
+    assert.deepEqual(setupDone.find((d) => d[0] === 'box:signIn'), ['box:signIn', null], 'the Mac asks with no origin: its own loopback sign-in')
+    assert.match(await ejs(`document.querySelector('.settings-body').textContent`), /Sent 2 to Box.*1 larger than 50 MB stay on this Mac/)
+    await eshot('settings-box.png')
+    await ejs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Sync now' && b.closest('.set-group')?.textContent.includes('Box')).click()`)
+    for (let n = 0; n < 50 && !setupDone.some((d) => d[0] === 'box:sync'); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(setupDone.some((d) => d[0] === 'box:sync'), 'Sync now')
+    await ejs(`window.confirm = () => true; [...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Sign out').click()`)
+    await euntil(`[...document.querySelectorAll('.settings-body button')].some((b) => b.textContent === 'Sign in to Box…')`)
     companyFixture = null
     ewin.destroy()
     settings.theme = savedTheme

@@ -34,6 +34,10 @@ ssh "$TARGET" "mkdir -p '$APP/out'"
 rsync -a --delete out/gateway/ "$TARGET:$APP/out/gateway/"
 rsync -a --delete out/renderer/ "$TARGET:$APP/out/renderer/"
 rsync -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$TARGET:$APP/"
+# The Box app's keys (build/box.json, never in git), for the gateway's Box sync: readable by its user only.
+if [ -f build/box.json ]; then
+  ssh "$TARGET" 'mkdir -p "$HOME/.config/ec2-remote-access" && umask 077 && cat > "$HOME/.config/ec2-remote-access/box-app.json"' < build/box.json
+fi
 
 echo "Setting up the machine…"
 ssh "$TARGET" "APP='$APP' PORT='$PORT' NODE_MAJOR='$NODE_MAJOR' PNPM_VERSION='$PNPM_VERSION' SERVICE='$SERVICE' ALLOW_TERMINALS='$ALLOW_TERMINALS' sh -s" <<'REMOTE'

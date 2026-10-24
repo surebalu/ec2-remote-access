@@ -32,6 +32,8 @@ import { dbHistory, dbKill, dbList, dbLocks } from './dbLocks'
 import { cancelServiceJob, serviceHistory, serviceJob, serviceJobs, serviceLogs, serviceStatus, startServiceJob } from './services'
 import { findBinary } from './util'
 import { findPlugin } from './ssm/session'
+import { boxSignIn } from './box'
+import { boxStatus, boxSyncNow, openLinkFile, signOutOfBox } from './boxSync'
 import { applyImport, companySetup, exportSetup, pickImport } from './setup'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
@@ -114,6 +116,11 @@ export const handlers: Handlers = {
     return d ? syncNow() : dataStatus()
   },
   'data:sync': () => syncNow(),
+  'box:status': async () => boxStatus(),
+  'box:signIn': (origin) => boxSignIn(typeof origin === 'string' ? origin : undefined),
+  'box:signOut': () => signOutOfBox(),
+  'box:sync': () => boxSyncNow(),
+  'links:openFile': (id) => openLinkFile(id),
   'data:copyLinkFiles': () => copyLinkFiles(),
   'data:reveal': async (id) => {
     const s = dataStatus()

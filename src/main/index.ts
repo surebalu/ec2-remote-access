@@ -15,6 +15,7 @@ import { closeDbLocks } from './dbLocks'
 import { closeStorage, noteDiskUse } from './storage/storage'
 import { closeMonitor } from './storage/monitor'
 import { flushDataFolder, updateDataFolder } from './dataFolder'
+import { flushBoxSync, updateBoxSync } from './boxSync'
 import { releaseAllRdp } from './rdp/sessions'
 import { stopProxy } from './rdp/cleanpath'
 import { getSettings } from './store'
@@ -116,6 +117,7 @@ app.whenReady().then(async () => {
   updateLinksPanelKeys()
   updateDesktopKeys()
   updateDataFolder()
+  updateBoxSync()
   // The Storage tool's disk trend: one reading a day while the app runs, whether or not the tool is open.
   if (process.platform === 'darwin') {
     void noteDiskUse().catch(() => undefined)
@@ -144,7 +146,7 @@ app.on('before-quit', (e) => {
   closeStorage()
   closeMonitor()
   closeControl()
-  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder()])
+  Promise.all([saveSessionCookies(), closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), stopPhoneAccess(), closePlmHealth(), closeDbLocks(), flushDataFolder(), flushBoxSync()])
     .then(() => stopProxy())
     .catch(() => undefined)
     .finally(() => app.quit())
