@@ -46,6 +46,7 @@ let wsAllowed = null
 const blockNetwork = (details, callback) => callback({ cancel: !(wsAllowed && details.url.startsWith(wsAllowed)) })
 const vncCreds = {}
 const computerThumbs = {}
+const displayLayouts = {}
 let failWorkspaceHealth = false
 let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
@@ -496,6 +497,8 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'vnc:prepare': return { sessionId: args[0].sessionId, url: vncUrl, destination: '100.64.0.10:5900', route: 'direct', title: 'Fixture Mac' }
     case 'vnc:release': return
     case 'vnc:lastError': return undefined
+    case 'computers:displays': return { auto: null, saved: displayLayouts[args[0]] ?? null }
+    case 'computers:saveDisplays': if (args[1]) displayLayouts[args[0]] = args[1]; else delete displayLayouts[args[0]]; return
     case 'computers:thumbs': return computerThumbs
     case 'computers:saveThumb': computerThumbs[args[0]] = { image: args[1], at: Date.now() }; return
     case 'computers:probe': return Object.fromEntries(args[0].map((k) => [k, k === 'tailnet/nMAC' ? 'open' : k.startsWith('tailnet/') ? 'offline' : 'tunnel']))

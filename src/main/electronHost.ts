@@ -106,6 +106,10 @@ export const electronHost: Host = {
     if (p.x < b.x || p.y < b.y || p.x >= b.x + b.width || p.y >= b.y + b.height) return null
     return { x: (p.x - b.x) / zoom, y: (p.y - b.y) / zoom }
   },
+  displays() {
+    const primary = screen.getPrimaryDisplay().id
+    return screen.getAllDisplays().map((d) => ({ x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height, label: d.label || undefined, primary: d.id === primary }))
+  },
   quickLook(path) {
     const win = BrowserWindow.getFocusedWindow() ?? mainWindow()
     win?.previewFile(path)

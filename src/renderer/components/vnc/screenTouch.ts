@@ -16,10 +16,15 @@ export type PointerMode = 'trackpad' | 'touch'
 
 export interface View { scale: number; x: number; y: number }
 
+/** A rectangle of the screen picture, in its pixels. */
+export interface Region { x: number; y: number; width: number; height: number }
+
 export interface TouchDeps {
   /** The element noVNC draws into; it is transformed for zoom. */
   screen: HTMLElement
   canvas: () => HTMLCanvasElement | null
+  /** The one display being shown (a Mac with several): panning, the pointer and zooming out stop at its edges. */
+  region: () => Region | null
   mode: () => PointerMode
   /** Cursor speed multiplier for trackpad mode (1 = follows the finger). */
   speed: () => number
@@ -35,11 +40,11 @@ const TAP_MS = 250
 const HOLD_MS = 500
 const SLOP = 10
 const SCROLL_STEP = 24
-const MAX_SCALE = 8
+const MAX_SCALE = 16
 
 interface Pt { id: number; x: number; y: number }
 
-export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: () => void; setView: (v: View) => void; cursor: () => { x: number; y: number }; center: () => void } {
+export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: () => void; setView: (v: View) => void; cursor: () => { x: number; y: number }; center: () => void; showRegion: () => void; fitScale: () => number; picturePerPixel: () => number } {
   const pts = new Map<number, Pt>()
   let view: View = { scale: 1, x: 0, y: 0 }
   let cursor = { x: 0, y: 0 }
@@ -59,18 +64,51 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
   let lifted = false
 
   const box = (): DOMRect | null => d.canvas()?.getBoundingClientRect() ?? null
+  /** The picture's pixels the pointer may reach: one display, or all of it. */
+  const limits = (): { x0: number; y0: number; x1: number; y1: number } | null => {
+    const c = d.canvas()
+    if (!c) return null
+    const g = d.region()
+    return g ? { x0: g.x, y0: g.y, x1: g.x + g.width - 1, y1: g.y + g.height - 1 } : { x0: 0, y0: 0, x1: c.width - 1, y1: c.height - 1 }
+  }
   const toFb = (cx: number, cy: number): { x: number; y: number } | null => {
     const c = d.canvas()
     const r = box()
-    if (!c || !r || !r.width || !r.height) return null
+    const lim = limits()
+    if (!c || !r || !lim || !r.width || !r.height) return null
     const x = ((cx - r.left) * c.width) / r.width
     const y = ((cy - r.top) * c.height) / r.height
-    return { x: Math.max(0, Math.min(c.width - 1, x)), y: Math.max(0, Math.min(c.height - 1, y)) }
+    return { x: Math.max(lim.x0, Math.min(lim.x1, x)), y: Math.max(lim.y0, Math.min(lim.y1, y)) }
+  }
+  /** The picture's pixels per CSS pixel with nothing zoomed (what noVNC fitted it to). */
+  const picturePerPixel = (): number => {
+    const c = d.canvas()
+    const r = box()
+    return c && r && r.width ? c.width / (r.width / view.scale) : 1
+  }
+  /** The zoom that shows the region (or the whole picture) as large as the layer allows without cutting it. */
+  const fitScale = (): number => {
+    const c = d.canvas()
+    const g = d.region()
+    if (!c || !g) return 1
+    const l = layer.getBoundingClientRect()
+    const k = 1 / picturePerPixel()
+    return Math.max(1, Math.min(MAX_SCALE, Math.min(l.width / (g.width * k), l.height / (g.height * k))))
   }
   const fbPerPx = (): number => {
     const c = d.canvas()
     const r = box()
     return c && r && r.width ? c.width / r.width : 1
+  }
+  /** Where the region (or the whole picture) falls on screen. */
+  const shown = (): DOMRect | null => {
+    const r = box()
+    const c = d.canvas()
+    const g = d.region()
+    if (!r || !c || !g) return r
+    const sx = r.width / c.width
+    const sy = r.height / c.height
+    return new DOMRect(r.left + g.x * sx, r.top + g.y * sy, g.width * sx, g.height * sy)
   }
 
   const apply = (): void => {
@@ -81,7 +119,7 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
   /** Keeps the picture on screen: centred when smaller than the layer, edge to edge when larger. */
   const clamp = (): void => {
     apply()
-    const r = box()
+    const r = shown()
     const l = layer.getBoundingClientRect()
     if (!r) return
     let dx = 0
@@ -98,9 +136,9 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
 
   const ensureCursor = (): void => {
     if (cursorSet) return
-    const c = d.canvas()
-    if (!c) return
-    cursor = { x: c.width / 2, y: c.height / 2 }
+    const lim = limits()
+    if (!lim) return
+    cursor = { x: (lim.x0 + lim.x1) / 2, y: (lim.y0 + lim.y1) / 2 }
     cursorSet = true
     d.onCursor(cursor)
   }
@@ -184,10 +222,10 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
       }
       if (!moved) return
       if (d.mode() === 'trackpad') {
-        const c = d.canvas()
-        if (!c) return
+        const lim = limits()
+        if (!lim) return
         const k = fbPerPx() * d.speed()
-        cursor = { x: Math.max(0, Math.min(c.width - 1, cursor.x + dx * k)), y: Math.max(0, Math.min(c.height - 1, cursor.y + dy * k)) }
+        cursor = { x: Math.max(lim.x0, Math.min(lim.x1, cursor.x + dx * k)), y: Math.max(lim.y0, Math.min(lim.y1, cursor.y + dy * k)) }
         cursorSet = true
         d.onCursor(cursor)
         d.send(cursor.x, cursor.y, mask)
@@ -211,7 +249,7 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
       }
       if (two.kind === 'pinch') {
         const l = layer.getBoundingClientRect()
-        const scale = Math.max(1, Math.min(MAX_SCALE, two.view0.scale * (dist / Math.max(1, two.dist0))))
+        const scale = Math.max(fitScale(), Math.min(MAX_SCALE, two.view0.scale * (dist / Math.max(1, two.dist0))))
         // Keep the spot between the fingers under them while zooming and moving.
         const ox = (two.mid0.x - l.left - two.view0.x) / two.view0.scale
         const oy = (two.mid0.y - l.top - two.view0.y) / two.view0.scale
@@ -258,6 +296,16 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
     dragging = false
   }
 
+  /** Shows the region (or the whole picture) as large as the layer allows, and puts the trackpad pointer in it. */
+  const showRegion = (): void => {
+    setView({ scale: fitScale(), x: 0, y: 0 })
+    cursorSet = false
+    ensureCursor()
+  }
+  // Turning the device or resizing the pane changes what noVNC fitted: keep the same display in view.
+  const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { if (d.region()) showRegion(); else clamp() })
+  watch?.observe(layer)
+
   layer.addEventListener('pointerdown', down)
   layer.addEventListener('pointermove', move)
   layer.addEventListener('pointerup', up)
@@ -265,6 +313,7 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
   return {
     detach: () => {
       clearHold()
+      watch?.disconnect()
       layer.removeEventListener('pointerdown', down)
       layer.removeEventListener('pointermove', move)
       layer.removeEventListener('pointerup', up)
@@ -273,13 +322,9 @@ export function attachScreenTouch(layer: HTMLElement, d: TouchDeps): { detach: (
     },
     setView,
     cursor: () => cursor,
-    center: () => { cursorSet = false; ensureCursor() }
+    center: () => { cursorSet = false; ensureCursor() },
+    showRegion,
+    fitScale,
+    picturePerPixel
   }
-}
-
-/** The view for a scaling choice: fit (the whole screen), fill (covers the layer), actual (one remote pixel per CSS pixel). */
-export function presetView(kind: 'fit' | 'fill' | 'actual', fit: { width: number; height: number }, layer: { width: number; height: number }, fb: { width: number; height: number }): View {
-  if (!fit.width || !fit.height) return { scale: 1, x: 0, y: 0 }
-  const scale = kind === 'fit' ? 1 : kind === 'fill' ? Math.max(layer.width / fit.width, layer.height / fit.height) : fb.width / fit.width
-  return { scale: Math.max(1, Math.min(MAX_SCALE, scale)), x: 0, y: 0 }
 }

@@ -34,3 +34,18 @@
 .vt-chev svg { width: 14px; height: 14px; }
 .vt-status { position: absolute; top: 10px; left: 50%; z-index: 5; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 8px 14px; transform: translateX(-50%); border-radius: 999px; background: rgba(32, 32, 36, .86); color: #f2f2f5; font-size: 13px; }
 .vt-status .btn { height: 28px; }
+
+/* Display setup (DisplaySetup.tsx), inside the phone sheet. */
+.vt-setup { display: flex; flex-direction: column; gap: 14px; padding: 4px 16px 18px; }
+.vt-setup-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+.vt-setup .input { width: 100%; height: 44px; font-size: 16px; }
+.vt-setup-pair { display: flex; flex-wrap: wrap; gap: 14px 20px; }
+.vt-setup-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 13px; line-height: 1.45; }
+.vt-setup-note.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.vt-setup-note.bad { background: color-mix(in srgb, var(--err) 14%, transparent); }
+.vt-setup-actions { display: flex; align-items: center; gap: 8px; }
+.vt-setup-actions .btn { height: 40px; padding-inline: 16px; }
+.vt-setup .m-segment { margin: 0; }
+
+.vt-setup-pair > div { flex: 1 1 100%; }
+.vt-setup .m-segment button { white-space: nowrap; }

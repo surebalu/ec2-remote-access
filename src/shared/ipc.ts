@@ -21,6 +21,7 @@ import type {
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, DataStatus, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
 import type { TailnetState } from './tailnet'
+import type { DisplayInfo, DisplayLayout } from './displays'
 import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
 import type { DownloadItem, NetworkInfo, ProcessInfo, SpeedRun } from './macTools'
 import type { MacCalendar, MacEvent } from './calendar'
@@ -163,6 +164,9 @@ export interface IpcApi {
   'computers:thumbs': () => Promise<Record<string, { image: string; at: number }>>
   'computers:saveThumb': (key: string, image: string) => Promise<void>
   'computers:probe': (keys: string[]) => Promise<Record<string, ComputerReach>>
+  /** Where a computer's displays sit (the screen tab's display choice): its own list, and what was typed for it. */
+  'computers:displays': (key: string) => Promise<DisplayInfo>
+  'computers:saveDisplays': (key: string, layout: DisplayLayout | null) => Promise<void>
   'creds:get': (instanceKey: string) => Promise<StoredCredential | null>
   'creds:set': (instanceKey: string, cred: StoredCredential) => Promise<void>
   'creds:delete': (instanceKey: string) => Promise<void>
