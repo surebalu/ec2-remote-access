@@ -4263,7 +4263,7 @@ app.whenReady().then(async () => {
     await ejs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Sign in to Box…').click()`)
     await euntil(`document.querySelector('.settings-body').textContent.includes('Signed in as Fixture Person (person@example.com)')`)
     assert.deepEqual(setupDone.find((d) => d[0] === 'box:signIn'), ['box:signIn', null], 'the Mac asks with no origin: its own loopback sign-in')
-    assert.match(await ejs(`document.querySelector('.settings-body').textContent`), /Sent 2 to Box.*1 larger than 50 MB stay on this Mac/)
+    assert.match(await ejs(`document.querySelector('.settings-body').textContent`), /Sent 2 to Box.*1 larger than your Box plan takes stay on this Mac/)
     await eshot('settings-box.png')
     await ejs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Sync now' && b.closest('.set-group')?.textContent.includes('Box')).click()`)
     for (let n = 0; n < 50 && !setupDone.some((d) => d[0] === 'box:sync'); n++) await new Promise((r) => setTimeout(r, 30))

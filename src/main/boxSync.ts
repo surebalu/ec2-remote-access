@@ -7,7 +7,7 @@ import { boardStep, mergeStamps } from '@shared/dataFolder'
 import type { LinkItem } from '@shared/links'
 import { itemsOf, puts, RECORD_KINDS, type RecordKind } from '@shared/records'
 import { boardsDir, deletedBoards, deletedBoardsFile, isBoardId, onBoardsChanged } from './boards'
-import { BoxHttpError, boxApp, boxSignedIn, boxSignOut, download, fileInfo, folderIn, listFolder, onBoxConnected, onBoxSignIn, removeFile, upload, type BoxItem } from './box'
+import { BoxHttpError, boxApp, boxSignedIn, boxSignOut, download, fileInfo, folderIn, listFolder, onBoxConnected, onBoxSignIn, removeFile, upload, uploadLarge, type BoxItem } from './box'
 import { linkFilesRoot } from './dataFolder'
 import { host } from './host'
 import { log } from './log'
@@ -193,17 +193,15 @@ async function uploadLinkFiles(): Promise<void> {
     for (const l of todo) {
       if (!boxSignedIn()) break
       const size = statSync(l.path!).size
-      if (size > BOX_SIMPLE_UPLOAD_MAX) {
-        tooLarge++
-      } else {
-        const parts = linkFileKey(l.path!, from)
-        const parent = await dir(['Links Files', ...parts.slice(0, -1)])
-        const name = parts.at(-1)!
-        let r = await upload(parent, name, await readFile(l.path!))
-        // Already there (an earlier run whose note of it was lost): that copy.
-        if (r === 'conflict') r = named(await listFolder(parent), name) ?? 'conflict'
-        if (r !== 'conflict') batch.push({ ...l, box: { id: r.id, size } })
-      }
+      const parts = linkFileKey(l.path!, from)
+      const parent = await dir(['Links Files', ...parts.slice(0, -1)])
+      const name = parts.at(-1)!
+      // Up to 50 MB in one request; larger in parts, read from disk a part at a time.
+      let r = size > BOX_SIMPLE_UPLOAD_MAX ? await uploadLarge(parent, name, l.path!, size) : await upload(parent, name, await readFile(l.path!))
+      // Already there (an earlier run whose note of it was lost): that copy.
+      if (r === 'conflict') r = named(await listFolder(parent), name) ?? 'conflict'
+      if (r === 'too-large') tooLarge++
+      else if (r !== 'conflict') batch.push({ ...l, box: { id: r.id, size } })
       done++
       files = { done, total: todo.length, tooLarge }
       if (done % 10 === 0) { await flush(); saveState(); tell() }

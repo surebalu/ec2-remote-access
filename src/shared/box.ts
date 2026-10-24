@@ -21,8 +21,16 @@ export const BOX_LOOPBACK_PORT = 53682
 export const BOX_LOOPBACK = `http://127.0.0.1:${BOX_LOOPBACK_PORT}/box/callback`
 /** The two forms of the Mac's redirect a Box app may list; anything else would wait on an address the app never serves. */
 export const BOX_LOOPBACKS = [BOX_LOOPBACK, `http://localhost:${BOX_LOOPBACK_PORT}/box/callback`]
-/** Box's simple upload takes files up to 50 MB; larger ones would need an upload session. */
+/** Box's simple upload takes files up to 50 MB; larger ones go up in parts through an upload session (uploadLarge). */
 export const BOX_SIMPLE_UPLOAD_MAX = 50 * 1024 * 1024
+
+/** The byte ranges (inclusive) an upload session's parts cover: Box's part size each, the last one shorter. */
+export function partRanges(size: number, partSize: number): [number, number][] {
+  if (size <= 0 || partSize <= 0) return []
+  const out: [number, number][] = []
+  for (let start = 0; start < size; start += partSize) out.push([start, Math.min(size, start + partSize) - 1])
+  return out
+}
 
 export interface BoxTokens { accessToken: string; refreshToken: string; expiresAt: number; refreshExpiresAt: number }
 
@@ -35,7 +43,7 @@ export interface BoxStatus {
   syncing: boolean
   lastSync?: number
   lastError?: string
-  /** Links files sent to Box so far, and those too large for a simple upload. */
+  /** Links files sent to Box so far, and those Box would not take (over the account's upload limit). */
   files?: { done: number; total: number; tooLarge: number }
 }
 
