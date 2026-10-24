@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import { isCadFile } from '@shared/cad'
 import type { SftpEntry } from '@shared/types'
 import {
-  favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, sortEntries,
+  favoritePatch, folderHints, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, resolveTyped, sortEntries, tildePath, typedParts,
   type FinderPlace, type FinderPlaces, type FinderSort, type OpenWithApp, type RecentFile
 } from '@shared/finder'
 import { registerWorkspaceContext } from '../../workspaceContext'
@@ -109,6 +109,8 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
   const searchRef = useRef<HTMLInputElement>(null)
   const anchorEl = useRef<HTMLDivElement>(null)
   const typeAhead = useRef<{ text: string; at: number }>({ text: '', at: 0 })
+  /** A file Go to Folder named: selected once its folder has loaded (loading clears the selection). */
+  const pendingSel = useRef<string | null>(null)
   const lastClick = useRef<string | null>(null)
 
   const loadPlaces = useCallback(() => void window.api.invoke('finder:places').then(setPlaces, (e: Error) => toast('error', e.message)), [toast])
@@ -130,7 +132,7 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
     try {
       const list = where === RECENTS ? await window.api.invoke('finder:recents') : await window.api.invoke('local:list', where)
       setEntries(list)
-      if (!quiet) setSel([])
+      if (!quiet) { setSel(pendingSel.current ? [pendingSel.current] : []); pendingSel.current = null }
     } catch (e) {
       if (!quiet) { setEntries([]); setError((e as Error).message.replace(/^[A-Z]+: /, '')) }
     } finally {
@@ -175,6 +177,53 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
     if (!next || !loc) return
     setHistory((h) => ({ back: [...h.back, loc], fwd: h.fwd.slice(1) }))
     setLoc(next)
+  }
+
+  // ----- Go to Folder (⇧⌘G, or a click on the title): any path, hidden folders included -----
+  const [goto, setGoto] = useState<{ text: string; error?: string } | null>(null)
+  const [hints, setHints] = useState<Entry[]>([])
+  const [hintAt, setHintAt] = useState(-1)
+  const home = places?.home ?? ''
+  const here = loc && loc !== RECENTS ? loc : home
+  const openGoto = (): void => { setGoto({ text: loc && loc !== RECENTS ? `${tildePath(loc, home).replace(/\/$/, '')}/` : '~/' }); setHintAt(-1) }
+  // The folders under what is typed so far, as Finder offers them.
+  useEffect(() => {
+    if (!goto) { setHints([]); return }
+    const { dir, partial } = typedParts(goto.text)
+    let gone = false
+    const t = setTimeout(() => void window.api.invoke('local:list', resolveTyped(dir || '.', home, here)).then(
+      (list) => { if (!gone) { setHints(folderHints(list, partial, showHidden)); setHintAt(-1) } },
+      () => { if (!gone) setHints([]) }), 120)
+    return () => { gone = true; clearTimeout(t) }
+  }, [goto?.text, home, here, showHidden]) // eslint-disable-line react-hooks/exhaustive-deps
+  const completion = (h: Entry): string => { const { dir } = typedParts(goto?.text ?? ''); return `${dir === '~' ? '~/' : dir}${h.name}/` }
+  const submitGoto = async (text: string): Promise<void> => {
+    if (!text.trim()) return
+    const target = resolveTyped(text, home, here)
+    const shownName = tildePath(target, home)
+    try {
+      await window.api.invoke('local:list', target)
+      setGoto(null)
+      go(target)
+      return
+    } catch { /* not a folder that can be listed: a file, a locked folder, or nothing */ }
+    const parent = parentOf(target)
+    const name = target.slice(parent === '/' ? 1 : parent.length + 1)
+    const found = (await window.api.invoke('local:list', parent).catch(() => null))?.find((x) => x.name === name)
+    if (!found) { setGoto({ text, error: `There is no folder at ${shownName}.` }); return }
+    setGoto(null)
+    // A locked folder opens to its own error, as clicking it does; a file opens its folder with the file selected.
+    if (found.type === 'dir') { go(target); return }
+    if (name.startsWith('.') && !showHidden) setShowHidden(true)
+    if (parent === loc) setSel([found.path])
+    else { pendingSel.current = found.path; go(parent) }
+  }
+  const gotoKey = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setGoto(null) }
+    else if (e.key === 'Enter') { e.preventDefault(); void submitGoto(hintAt >= 0 && hints[hintAt] ? completion(hints[hintAt]) : goto?.text ?? '') }
+    else if (e.key === 'Tab' && hints.length) { e.preventDefault(); setGoto({ text: completion(hints[Math.max(0, hintAt)]) }) }
+    else if (e.key === 'ArrowDown' && hints.length) { e.preventDefault(); setHintAt((i) => Math.min(hints.length - 1, i + 1)) }
+    else if (e.key === 'ArrowUp' && hints.length) { e.preventDefault(); setHintAt((i) => Math.max(-1, i - 1)) }
   }
 
   const shown: Entry[] = useMemo(() => {
@@ -327,6 +376,7 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
       case 'c': case 'ç': if (typing || !selected.length) return false; if (k.alt) copyPaths(); else copyFiles(); return true
       case 'd': if (typing || !selected.length || k.shift) return false; duplicate(); return true
       case '.': if (!k.shift) return false; setShowHidden((v) => { write(HIDDEN_KEY, !v); return !v }); return true
+      case 'g': if (!k.shift) return false; openGoto(); return true
       case 'y': quickLook(); return true
     }
     return false
@@ -463,8 +513,28 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
             <button type="button" className="fi-btn" aria-label="Back" title="Back (⌘[)" disabled={!history.back.length} onClick={goBack}><Icon.back /></button>
             <button type="button" className="fi-btn" aria-label="Forward" title="Forward (⌘])" disabled={!history.fwd.length} onClick={goForward}><Icon.forward /></button>
           </span>
-          <h2 className="fi-title">{title}</h2>
+          {goto ? (
+            <div className="fi-goto">
+              <input autoFocus aria-label="Go to folder" value={goto.text} spellCheck={false} autoCapitalize="off" autoCorrect="off"
+                placeholder="~/.aws, /usr/local, Projects/app" aria-autocomplete="list" aria-expanded={hints.length > 0}
+                onChange={(e) => setGoto({ text: e.target.value })} onKeyDown={gotoKey} onFocus={(e) => e.target.select()} onBlur={() => setGoto(null)} />
+              {(hints.length > 0 || goto.error) && (
+                <ul className="fi-goto-hints" role="listbox" aria-label="Folders">
+                  {goto.error && <li className="fi-goto-error" role="alert">{goto.error}</li>}
+                  {hints.map((h, i) => (
+                    <li key={h.path} role="option" aria-selected={i === hintAt} className={i === hintAt ? 'on' : ''}
+                      onMouseDown={(e) => { e.preventDefault(); void submitGoto(completion(h)) }} onMouseEnter={() => setHintAt(i)}>
+                      <FileIcon e={h} size={14} /><span>{h.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <h2 className="fi-title"><button type="button" title="Go to folder (⇧⌘G)" onClick={openGoto}>{title}</button></h2>
+          )}
           <span className="flex-1" />
+          <button type="button" className="fi-btn" aria-label="Go to folder" title="Go to folder: type any path, hidden folders included (⇧⌘G)" onClick={openGoto}>{svg(<><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" /><path d="M9 13.5h6M12.5 11l2.5 2.5-2.5 2.5" /></>)}</button>
           <button type="button" className="fi-btn" aria-label="New folder" title="New folder (⌘⇧N)" disabled={!loc || loc === RECENTS} onClick={() => void newFolder()}>{svg(<><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" /><path d="M12 10.5v5M9.5 13h5" /></>)}</button>
           <button type="button" className="fi-btn" aria-label="Open in Terminal" title="Open this folder in the Terminal tab" disabled={!loc || loc === RECENTS} onClick={() => loc && inTerminal(loc)}><Icon.console /></button>
           <button type="button" className="fi-btn" aria-label="Quick Look" title="Quick Look (Space)" disabled={!selected.length} onClick={quickLook}>{svg(<><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.8" /></>)}</button>
@@ -589,6 +659,7 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
               <MenuItem disabled={!loc || loc === RECENTS} onClick={() => { setMenu(null); if (loc) void window.api.invoke('local:reveal', loc) }}>Show in Finder</MenuItem>
               <MenuSep />
               <MenuItem on={showHidden} onClick={() => { setMenu(null); setShowHidden((v) => { write(HIDDEN_KEY, !v); return !v }) }} hint="⌘⇧.">Show Hidden Files</MenuItem>
+              <MenuItem onClick={() => { setMenu(null); openGoto() }} hint="⇧⌘G">Go to Folder…</MenuItem>
             </>
           )}
         </Popover>

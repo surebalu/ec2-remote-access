@@ -175,3 +175,44 @@ export function favoritePatch(s: { finderExtra?: string[]; finderHidden?: string
     ? { finderExtra: extra.includes(path) ? extra : [...extra, path], finderHidden: hidden.filter((p) => p !== path) }
     : { finderExtra: extra.filter((p) => p !== path), finderHidden: hidden.includes(path) ? hidden : [...hidden, path] }
 }
+
+// ----- Go to Folder (⇧⌘G) -----
+
+/** A path as Go to Folder shows it: the home folder as ~. */
+export const tildePath = (path: string, home: string): string => (home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path)
+
+/**
+ * A typed path as an absolute one, as Finder's Go to Folder reads it: ~ and ~/… are the home folder, a path without a
+ * leading / is inside the current folder, quotes around a pasted path go, and . and .. resolve (never above /).
+ */
+export function resolveTyped(input: string, home: string, cwd: string): string {
+  const text = input.trim().replace(/^(['"])(.*)\1$/, '$2')
+  const full = text === '~' || text.startsWith('~/') ? home + text.slice(1) : text.startsWith('/') ? text : `${cwd.replace(/\/+$/, '')}/${text}`
+  const parts: string[] = []
+  for (const p of full.split('/')) {
+    if (!p || p === '.') continue
+    if (p === '..') parts.pop()
+    else parts.push(p)
+  }
+  return `/${parts.join('/')}`
+}
+
+/**
+ * What to suggest while typing: the folder the text is in so far (everything up to the last /) and the start of the
+ * name after it. Folders whose name starts with that (any case) are offered; hidden ones only once the name starts
+ * with a dot, or while hidden files are shown.
+ */
+export function typedParts(input: string): { dir: string; partial: string } {
+  const text = input.trimStart()
+  const cut = text.lastIndexOf('/')
+  if (cut < 0) return text === '~' ? { dir: '~', partial: '' } : { dir: '', partial: text }
+  return { dir: text.slice(0, cut + 1), partial: text.slice(cut + 1) }
+}
+
+export function folderHints<T extends Pick<SftpEntry, 'name' | 'type'>>(entries: T[], partial: string, showHidden: boolean, max = 8): T[] {
+  const p = partial.toLowerCase()
+  return entries
+    .filter((e) => e.type === 'dir' && e.name.toLowerCase().startsWith(p) && (showHidden || p.startsWith('.') || !e.name.startsWith('.')))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+    .slice(0, max)
+}
