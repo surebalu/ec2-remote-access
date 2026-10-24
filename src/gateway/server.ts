@@ -14,6 +14,7 @@
  * a backgrounded app's sockets within seconds, and the same page reconnecting within `resumeGraceMs` keeps its
  * terminals and desktops rather than finding them closed.
  */
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
@@ -45,7 +46,26 @@ export interface GatewayOptions {
    * the browser without the gateway's token; the sign-in's own state is what proves the answer is ours.
    */
   boxCallback?: (query: URLSearchParams) => Promise<string>
+  /**
+   * A Links file by its item id, as a path on this machine (its own copy or Box's, boxSync.ts linkFileLocal), for
+   * /links/file/<id>: a page here (a phone's Safari) opens the files Links keeps. null when there is none.
+   */
+  linkFile?: (id: string) => Promise<{ path: string; name: string } | null>
 }
+
+/**
+ * Types a page's file may show as, in the browser: passive ones only. Anything else (HTML, SVG, scripts, unknown)
+ * downloads as an attachment, since a file shown inline on the gateway's origin could read its token.
+ */
+const INLINE: Record<string, string> = {
+  '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.heic': 'image/heic', '.mp4': 'video/mp4', '.m4v': 'video/x-m4v', '.mov': 'video/quicktime', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8',
+  '.csv': 'text/plain; charset=utf-8', '.json': 'text/plain; charset=utf-8'
+}
+
+/** The signature a /links/file link carries: that one file's id signed with the gateway's token (renderer/wsApi.ts makes it). */
+export const linkFileSignature = (token: string, id: string): Buffer => createHmac('sha256', token).update(`links-file:${id}`).digest()
 
 export interface Gateway {
   server: Server
@@ -139,10 +159,51 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     }
   })
 
+  /**
+   * A Links file for a page here. The link carries a signature of that one file's id (not the token, which would sit
+   * in Safari's history), checked in constant time. Byte ranges, which Safari needs to play a video.
+   */
+  async function serveLinkFile(req: IncomingMessage, res: ServerResponse, id: string, sig: string): Promise<void> {
+    const want = linkFileSignature(opts.token, id)
+    const got = /^[0-9a-f]{64}$/.test(sig) ? Buffer.from(sig, 'hex') : Buffer.alloc(0)
+    const text = (status: number, message: string): void => { res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }).end(message) }
+    if (got.length !== want.length || !timingSafeEqual(got, want)) { text(403, 'This link is not valid here.'); return }
+    let file: { path: string; name: string } | null
+    try {
+      file = await opts.linkFile!(id)
+    } catch (e) {
+      text(502, `The file could not be fetched: ${(e as Error).message}`)
+      return
+    }
+    if (!file || !existsSync(file.path)) { text(404, 'This file is not on this computer, and not in Box yet.'); return }
+    const size = statSync(file.path).size
+    const type = INLINE[extname(file.name).toLowerCase()]
+    const headers: Record<string, string | number> = {
+      'content-type': type ?? 'application/octet-stream',
+      'content-disposition': `${type ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store', 'accept-ranges': 'bytes'
+    }
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''))
+    if (range && (range[1] || range[2])) {
+      const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]))
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1
+      if (start > end || start >= size) { res.writeHead(416, { 'content-range': `bytes */${size}` }).end(); return }
+      res.writeHead(206, { ...headers, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 })
+      if (req.method === 'HEAD') { res.end(); return }
+      createReadStream(file.path, { start, end }).pipe(res)
+      return
+    }
+    res.writeHead(200, { ...headers, 'content-length': size })
+    if (req.method === 'HEAD') { res.end(); return }
+    createReadStream(file.path).pipe(res)
+  }
+
   async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname === '/auth') { res.writeHead(url.searchParams.get('token') === opts.token ? 204 : 401, { 'cache-control': 'no-store' }).end(); return }
+    const linkFile = /^\/links\/file\/([A-Za-z0-9_-]{1,64})$/.exec(url.pathname)
+    if (linkFile && opts.linkFile) { await serveLinkFile(req, res, linkFile[1], url.searchParams.get('sig') ?? ''); return }
     if (url.pathname === '/box/callback' && opts.boxCallback) {
       const page = await opts.boxCallback(url.searchParams)
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page)

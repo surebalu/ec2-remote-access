@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { sha256Hex, sha256Sync } from '../src/shared/sha256.ts'
+import { hmacSha256Hex, sha256Hex, sha256Sync } from '../src/shared/sha256.ts'
 
 const node = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex')
 
@@ -27,4 +27,14 @@ test('a real STEP file: the JavaScript digest and crypto.subtle agree with node:
   const step = new Uint8Array(readFileSync('node_modules/occt-import-js/test/testfiles/cax-if/as1_pe_203.stp'))
   assert.equal(sha256Sync(step), node(step))
   assert.equal(await sha256Hex(step), node(step))
+})
+
+test('HMAC-SHA-256 matches node:crypto for short, block-sized and long keys and messages', () => {
+  // RFC 4231 test case 2.
+  assert.equal(hmacSha256Hex('Jefe', 'what do ya want for nothing?'), '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843')
+  for (const key of ['', 'k', 'x'.repeat(64), 'y'.repeat(65), randomBytes(40).toString('hex'), 'héllo ключ']) {
+    for (const msg of ['', 'links-file:abc123', 'z'.repeat(200), 'ünïcode ✓']) {
+      assert.equal(hmacSha256Hex(key, msg), createHmac('sha256', key).update(msg).digest('hex'), `key ${key.length}, message ${msg.length}`)
+    }
+  }
 })

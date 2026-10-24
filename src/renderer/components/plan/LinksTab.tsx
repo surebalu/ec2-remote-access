@@ -11,6 +11,7 @@ import Modal from '../Modal'
 import Popover, { MenuItem } from '../Popover'
 import { downloadText, NavItem, newId, pickTextFile, typeColor, typing, UndoBar, useFileIcons, useLocal, useLocalSet, useToday } from './parts'
 import './plan.css'
+import { linkFileUrl } from '../../wsApi'
 
 /**
  * Links: a bookmark library in the spirit of Anybox (rules and import/export formats in src/shared/links.ts, kept as
@@ -152,8 +153,15 @@ export default function LinksTab({ active }: { tab: Tab; active: boolean }): Rea
   }
   const open = (l: LinkItem, external = false): void => {
     if (l.kind === 'file' && (l.path || l.box)) {
-      // Files open in their own app on a Mac: from this Mac, else downloaded from their copy in Box.
-      if (!hasBrowser()) { toast('info', 'Files open in the Mac app.'); return }
+      // Files open in their own app on a Mac: from this Mac, else downloaded from their copy in Box. On a phone or
+      // iPad, the computer it is paired with serves the file to Safari (a link signed for that file, made in the tap).
+      if (!hasBrowser()) {
+        const url = linkFileUrl(l.id)
+        if (!url) { toast('info', 'Files open in the Mac app.'); return }
+        window.open(url, '_blank', 'noopener')
+        save(l, { openedAt: Date.now() })
+        return
+      }
       void window.api.invoke('links:openFile', l.id).then(() => save(l, { openedAt: Date.now() }), (e: Error) => toast('error', e.message))
       return
     }

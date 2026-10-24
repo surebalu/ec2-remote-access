@@ -9,6 +9,7 @@
  * token produces a prompt instead of a silent reconnect loop.
  */
 import type { IpcApi, IpcEvents } from '@shared/ipc'
+import { hmacSha256Hex } from '@shared/sha256'
 
 type Api = Window['api']
 
@@ -22,6 +23,15 @@ function readToken(): string {
     return t
   }
   try { return localStorage.getItem(TOKEN_KEY) ?? '' } catch { return '' }
+}
+
+/**
+ * A Links file's address on the gateway (/links/file): signed for that one file with the token, so the link can open
+ * in Safari (and sit in its history) without carrying the token. Made synchronously, inside the tap that opens it.
+ */
+export function linkFileUrl(id: string): string | null {
+  const token = readToken()
+  return token ? `${location.origin}/links/file/${encodeURIComponent(id)}?sig=${hmacSha256Hex(token, `links-file:${id}`)}` : null
 }
 
 function rememberToken(t: string): void {

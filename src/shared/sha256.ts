@@ -20,6 +20,10 @@ const hex = (words: Uint32Array): string => Array.from(words, (w) => w.toString(
 
 /** The digest in plain JavaScript: about as fast as a phone reads a large file, so no worker is needed. */
 export function sha256Sync(bytes: Uint8Array): string {
+  return hex(digest(bytes))
+}
+
+function digest(bytes: Uint8Array): Uint32Array {
   const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19])
   const w = new Uint32Array(64)
   const block = (view: DataView, at: number): void => {
@@ -51,7 +55,33 @@ export function sha256Sync(bytes: Uint8Array): string {
   end.setUint32(tail.length - 8, Math.floor(bytes.length / 0x20000000))
   end.setUint32(tail.length - 4, (bytes.length * 8) >>> 0)
   for (let at = 0; at < tail.length; at += 64) block(end, at)
-  return hex(h)
+  return h
+}
+
+const raw = (words: Uint32Array): Uint8Array => {
+  const out = new Uint8Array(32)
+  const v = new DataView(out.buffer)
+  words.forEach((w, i) => v.setUint32(i * 4, w))
+  return out
+}
+
+/**
+ * HMAC-SHA-256 (RFC 2104) as hex, synchronously: a page signs a link inside the tap that opens it (a window opened
+ * after waiting is blocked) and over plain http, where WebCrypto is missing (gateway/server.ts's /links/file).
+ */
+export function hmacSha256Hex(key: string, message: string): string {
+  const enc = new TextEncoder()
+  let k: Uint8Array = enc.encode(key)
+  if (k.length > 64) k = raw(digest(k))
+  const pad = (byte: number): Uint8Array => { const p = new Uint8Array(64).fill(byte); k.forEach((b, i) => { p[i] ^= b }); return p }
+  const msg = enc.encode(message)
+  const inner = new Uint8Array(64 + msg.length)
+  inner.set(pad(0x36))
+  inner.set(msg, 64)
+  const outer = new Uint8Array(64 + 32)
+  outer.set(pad(0x5c))
+  outer.set(raw(digest(inner)), 64)
+  return hex(digest(outer))
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
