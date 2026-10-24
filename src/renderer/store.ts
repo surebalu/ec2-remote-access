@@ -79,15 +79,15 @@ export interface BrowserRequest {
 }
 
 /** The built-in tools: one tab each, opened from the app rail. */
-export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'storage' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links'
-export const TOOL_KINDS: readonly ToolKind[] = ['local', 'browser', 'notes', 'board', 'finder', 'storage', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links']
-export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', storage: 'Storage', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links' }
+export type ToolKind = 'local' | 'browser' | 'notes' | 'board' | 'finder' | 'storage' | 'cad' | 'claude' | 'chatgpt' | 'health' | 'devtools' | 'tasks' | 'calendar' | 'links'
+export const TOOL_KINDS: readonly ToolKind[] = ['local', 'browser', 'notes', 'board', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links']
+export const TOOL_NAMES: Record<ToolKind, string> = { local: 'Terminal', browser: 'Browser', notes: 'Notes', board: 'Whiteboard', finder: 'Finder', storage: 'Storage', cad: 'CAD', claude: 'Claude', chatgpt: 'ChatGPT', health: 'Health', devtools: 'Dev tools', tasks: 'Tasks', calendar: 'Calendar', links: 'Links' }
 /** Tools that are one tab with nothing in main to open or close: shown as they are, on every device. */
 const PLAIN_TOOLS: readonly ToolKind[] = ['health', 'devtools', 'tasks', 'calendar', 'links']
 /** Tools that need the Mac app (its shells, files or embedded web pages); a browser on the gateway has the others. */
-export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'storage', 'claude', 'chatgpt']
+export const DESKTOP_TOOLS: readonly ToolKind[] = ['local', 'browser', 'finder', 'storage', 'cad', 'claude', 'chatgpt']
 /** Tools about this Mac itself (its shells, files and disk): not shown at all off the Mac app. */
-export const MAC_TOOLS: readonly ToolKind[] = ['local', 'finder', 'storage']
+export const MAC_TOOLS: readonly ToolKind[] = ['local', 'finder', 'storage', 'cad']
 const inElectron = /\bElectron\//.test(navigator.userAgent)
 /** This page is a detached tool's own window (main/toolWindows.ts loads it with ?tool=<kind>). */
 export const toolWindowKind = ((): ToolKind | null => {
@@ -226,6 +226,9 @@ interface State {
   /** Shows the Finder tab (local files; there is one), at `path` when given. */
   openFinder: (path?: string) => void
   finderRequest: { path: string; nonce: number } | null
+  /** Shows the CAD tool (there is one), opening the model at `path` when given. */
+  openCad: (path?: string) => void
+  cadRequest: { path: string; nonce: number } | null
   portForwardFor: { key?: string; presetId?: string; remotePort?: number } | null
   /** Open Run Command dialog: the hosts it starts with (editable there), or a past run to show. */
   runCommandFor: { keys: string[]; runId?: string; command?: string } | null
@@ -351,6 +354,7 @@ const RELAYED: Record<string, (s: State, args: unknown[]) => void> = {
   openNotes: (s, a) => s.openNotes(typeof a[0] === 'string' ? a[0] : undefined),
   openTerminal: (s, a) => s.openTerminal(a[0] as { profile?: string; cwd?: string; newTab?: boolean } | undefined),
   openFinder: (s, a) => s.openFinder(typeof a[0] === 'string' ? a[0] : undefined),
+  openCad: (s, a) => s.openCad(typeof a[0] === 'string' ? a[0] : undefined),
   openBoard: (s) => s.openBoard(),
   openTool: (s, a) => { if ((TOOL_KINDS as readonly unknown[]).includes(a[0])) s.openTool(a[0] as ToolKind) },
   showInLinks: (s, a) => s.showInLinks((a[0] ?? {}) as { view?: string; id?: string }),
@@ -455,6 +459,7 @@ export const useStore = create<State>((set, get) => ({
     else if (kind === 'notes') s.openNotes()
     else if (kind === 'finder') s.openFinder()
     else if (kind === 'board') s.openBoard()
+    else if (kind === 'cad') s.openCad()
     else if (PLAIN_TOOLS.includes(kind) || kind === 'storage') s.setActive(s.toolTab(kind))
     else if (inElectron) s.setActive(s.toolTab(kind))
     else void window.api.invoke('shell:open', WEB_APPS[kind as WebAppKind].home)
@@ -515,6 +520,13 @@ export const useStore = create<State>((set, get) => ({
     get().setActive(id)
   },
   finderRequest: null,
+  cadRequest: null,
+  openCad: (path) => {
+    if (relayed('cad', 'openCad', [path])) return
+    const id = get().toolTab('cad')
+    if (path) set({ cadRequest: { path, nonce: Date.now() + Math.random() } })
+    get().setActive(id)
+  },
   openFinder: (path) => {
     if (relayed('finder', 'openFinder', [path])) return
     const id = get().toolTab('finder')
@@ -1095,7 +1107,7 @@ export const useStore = create<State>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
-    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'storage' || (tab && (PLAIN_TOOLS.includes(tab.kind as ToolKind) || isWebApp(tab.kind)))) { /* nothing in main to close: they save as they go */ }
+    else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'storage' || tab?.kind === 'cad' || (tab && (PLAIN_TOOLS.includes(tab.kind as ToolKind) || isWebApp(tab.kind)))) { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
     set((s) => {
       const idx = s.tabs.findIndex((t) => t.id === id)

@@ -49,8 +49,8 @@ export default function App(): ReactElement {
   const browserInFront = useStore((s) => {
     if (s.gridView) return false
     const kindOf = (id: string): Tab['kind'] | undefined => s.tabs.find((t) => t.id === id)?.kind
-    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder', 'storage', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(id) ?? ''))
-    return ['browser', 'local', 'board', 'notes', 'finder', 'storage', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(s.activeTab) ?? '')
+    if (s.splitGroup.includes(s.activeTab)) return s.splitGroup.some((id) => ['browser', 'local', 'board', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(id) ?? ''))
+    return ['browser', 'local', 'board', 'notes', 'finder', 'storage', 'cad', 'claude', 'chatgpt', 'health', 'devtools', 'tasks', 'calendar', 'links'].includes(kindOf(s.activeTab) ?? '')
   })
   // The terminals beside a web page (the Browser, Claude, ChatGPT) in a split, for the page's context menu "Paste
   // into …", which main builds.
@@ -168,6 +168,7 @@ export default function App(): ReactElement {
     else if (c.kind === 'ask') st.askAssistant(c.app, c.text)
     else if (c.kind === 'today') void window.api.invoke('notes:daily').then((p) => st.openNotes(p), (e: Error) => st.toast('error', e.message))
     else if (c.kind === 'links') st.showInLinks({ view: c.view, id: c.id })
+    else if (c.kind === 'cad') st.openCad(c.path)
     else if (c.kind === 'storage') {
       if (c.room && (STORAGE_ROOMS as readonly string[]).includes(c.room)) setRoom(c.room as RoomId)
       st.openTool('storage')

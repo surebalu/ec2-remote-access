@@ -1,0 +1,194 @@
+/* The CAD tool (components/cad): the parts tree, the 3D stage with its floating toolbar and view cube, and the review
+   beside it. Colours are the theme's tokens and the type is the app font, as everywhere else. */
+.cad { --cad-line: color-mix(in srgb, var(--text) 10%, transparent); --cad-soft: color-mix(in srgb, var(--text) 5%, transparent);
+  --pin: #e11d48; --len: #f59e0b;
+  display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--text); font: 400 12.5px/1.35 var(--ui-font); }
+.cad-boot { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); }
+.cad-head { display: flex; flex-shrink: 0; align-items: center; gap: 8px; height: 46px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.cad-head-icon { width: 18px; height: 18px; color: hsl(28 85% 55%); }
+.cad-head-file { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cad-head-file b { overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; }
+.cad-head-sub { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; }
+.cad-chip { padding: 1px 7px; border-radius: 6px; background: var(--cad-soft); color: var(--text-2); font-size: 10.5px; font-weight: 650; letter-spacing: .02em; }
+.cad-chip.verdict[data-verdict='approved'] { background: var(--ok-soft); color: var(--ok); }
+.cad-chip.verdict[data-verdict='changes'] { background: var(--err-soft); color: var(--err); }
+.cad-chip.verdict[data-verdict='open'] { background: var(--accent-soft); color: var(--accent); }
+.cad-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; color: var(--muted); }
+.cad-icon-btn svg { width: 16px; height: 16px; }
+.cad-icon-btn:hover, .cad-icon-btn.on { background: var(--cad-soft); color: var(--text); }
+.cad-menu-wrap { position: relative; }
+.cad-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; display: flex; flex-direction: column; min-width: 230px; padding: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-lg); }
+.cad-menu-wrap.up .cad-menu { top: auto; bottom: calc(100% + 10px); left: 50%; right: auto; transform: translateX(-50%); }
+.cad-menu button { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: 12.5px; text-align: left; white-space: nowrap; }
+.cad-menu button:hover { background: var(--accent-soft); }
+.cad-menu hr { margin: 4px 2px; border: 0; border-top: 1px solid var(--border); }
+
+.cad { --cad-tree-w: 250px; --cad-review-w: 340px; }
+.cad.narrow { --cad-tree-w: 220px; --cad-review-w: 300px; }
+.cad.no-tree { --cad-tree-w: 0px; }
+.cad.no-review { --cad-review-w: 0px; }
+.cad-body { display: grid; flex: 1; grid-template-columns: var(--cad-tree-w) minmax(0, 1fr) var(--cad-review-w); min-height: 0; }
+/* Placed by column: a panel that is not rendered must not pull the stage into its place. */
+.cad-tree { grid-area: 1 / 1; }
+.cad-stage { grid-area: 1 / 2; }
+.cad-review { grid-area: 1 / 3; }
+
+/* Parts */
+.cad-tree { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--border); background: var(--panel); }
+.cad-panel-head { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.cad-panel-head b { color: var(--text); }
+.cad-mini { padding: 2px 7px; border-radius: 6px; color: var(--text-2); font-size: 11px; }
+.cad-mini:hover:not(:disabled) { background: var(--cad-soft); color: var(--text); }
+.cad-mini:disabled { opacity: .45; }
+.cad-filter { margin: 0 10px 6px; height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; outline: none; }
+.cad-filter:focus { border-color: var(--accent); }
+.cad-nodes, .cad-nodes ul { margin: 0; padding: 0; list-style: none; }
+.cad-nodes { flex: 1; padding: 2px 6px 12px; overflow: auto; }
+.cad-node { display: flex; align-items: center; gap: 4px; height: 26px; padding-right: 4px; border-radius: 6px; cursor: default; }
+.cad-node:hover { background: var(--cad-soft); }
+.cad-node.on { background: var(--accent-soft-2); }
+.cad-node.hidden .cad-node-name { opacity: .45; text-decoration: line-through; }
+.cad-node-chev { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--muted); }
+.cad-node-chev svg { width: 11px; height: 11px; }
+.cad-node-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cad-node-count { color: var(--muted); font-size: 10.5px; }
+.cad-node-eye { display: inline-flex; padding: 3px; border-radius: 5px; color: var(--muted); opacity: 0; }
+.cad-node:hover .cad-node-eye, .cad-node.hidden .cad-node-eye { opacity: 1; }
+.cad-node-eye svg { width: 13px; height: 13px; }
+
+/* Stage */
+.cad-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--panel) 92%, var(--accent) 8%), var(--bg) 70%); }
+.cad-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; }
+.cad-stage.tool-orbit .cad-canvas { cursor: grab; }
+.cad-stage.tool-orbit .cad-canvas:active { cursor: grabbing; }
+.cad-overlay { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.cad-pin { position: absolute; top: 0; left: 0; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid #fff; border-radius: 50% 50% 50% 4px; background: var(--pin); color: #fff; font: 700 11px/1 var(--ui-font); box-shadow: 0 2px 8px rgba(0, 0, 0, .3); pointer-events: auto; cursor: pointer; }
+.cad-pin.resolved { background: #8b93a3; }
+.cad-pin.on { box-shadow: 0 0 0 4px color-mix(in srgb, var(--pin) 35%, transparent), 0 2px 8px rgba(0, 0, 0, .3); }
+.cad-len { position: absolute; top: 0; left: 0; padding: 2px 7px; border-radius: 6px; background: var(--len); color: #1c1917; font: 650 11px/1.4 var(--ui-font); white-space: nowrap; transform-origin: center; translate: -50% -50%; box-shadow: 0 1px 4px rgba(0, 0, 0, .2); }
+.cad-composer { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; gap: 6px; width: 280px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-lg); pointer-events: auto; }
+.cad-composer-head { color: var(--muted); font-size: 11.5px; }
+.cad-composer-head b { color: var(--pin); }
+.cad-composer textarea { resize: none; font-size: 12.5px; }
+.cad-composer-foot { display: flex; align-items: center; gap: 6px; font-size: 10.5px; }
+.cad-tool-hint { position: absolute; top: 12px; left: 50%; z-index: 3; padding: 5px 12px; border-radius: 999px; background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 2px 10px rgba(0, 0, 0, .12); color: var(--text-2); font-size: 11.5px; translate: -50% 0; }
+
+.cad-cube-wrap { position: absolute; top: 26px; right: 26px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 24px; width: 80px; perspective: 340px; }
+.cad-cube { position: relative; width: 80px; height: 80px; transform-style: preserve-3d; }
+.cad-cube-face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--text) 20%, transparent); background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text-2); font: 650 9.5px/1 var(--ui-font); letter-spacing: .06em; text-transform: uppercase; backface-visibility: hidden; }
+.cad-cube-face:hover { background: var(--accent-soft-2); color: var(--accent); }
+.cad-cube-iso { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text-2); font-size: 10px; font-weight: 650; letter-spacing: .04em; }
+
+/* Wraps onto a second row in a narrow stage (a split pane) rather than running off it. */
+.cad-toolbar { position: absolute; bottom: 16px; left: 50%; z-index: 3; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px; width: max-content; max-width: calc(100% - 24px); padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--text) 13%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 6px 24px rgba(0, 0, 0, .18); translate: -50% 0; white-space: nowrap; }
+.cad-toolbar > button, .cad-menu-wrap > .cad-text-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; border-radius: 999px; color: var(--text-2); font-size: 12px; }
+.cad-toolbar > button svg { width: 16px; height: 16px; }
+.cad-toolbar > button:hover, .cad-text-btn:hover { background: var(--cad-soft); color: var(--text); }
+.cad-toolbar > button.on { background: var(--accent); color: var(--on-accent); }
+.cad-text-btn { padding: 0 9px; border-radius: 999px; color: var(--text-2); font-size: 12px; }
+.cad-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--cad-line); }
+.cad-seg-mini { display: inline-flex; align-items: center; gap: 1px; padding-left: 6px; color: var(--muted); }
+.cad-seg-mini svg { width: 15px; height: 15px; margin-right: 3px; }
+.cad-seg-mini button { height: 26px; min-width: 28px; padding: 0 7px; border-radius: 999px; color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+.cad-seg-mini button.on { background: var(--accent-soft-2); color: var(--accent); }
+.cad-range { width: 110px; accent-color: var(--accent); }
+
+.cad-start { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 48px 24px; overflow-y: auto; }
+.cad-drop { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(520px, 100%); padding: 34px 24px; border: 2px dashed color-mix(in srgb, var(--text) 18%, transparent); border-radius: 18px; background: color-mix(in srgb, var(--panel) 80%, transparent); text-align: center; }
+.cad-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.cad-drop-icon { width: 42px; height: 42px; color: hsl(28 85% 55%); }
+.cad-drop h2 { margin: 0; font-size: 17px; }
+.cad-drop p { margin: 0 0 6px; color: var(--muted); font-size: 12.5px; }
+.cad-recent { width: min(620px, 100%); }
+.cad-recent h3 { margin: 0 0 8px 4px; color: var(--muted); font-size: 11.5px; font-weight: 650; }
+.cad-recent ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.cad-recent li button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 6px 10px 6px 6px; border: 1px solid transparent; border-radius: 12px; text-align: left; }
+.cad-recent li button:hover { border-color: var(--border); background: var(--panel); }
+.cad-recent img, .cad-thumb-blank { flex-shrink: 0; width: 64px; height: 44px; border-radius: 8px; background: var(--panel); object-fit: cover; }
+.cad-thumb-blank { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.cad-thumb-blank svg { width: 20px; height: 20px; }
+.cad-recent-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.cad-recent-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cad-recent-text span { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.cad-loading { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 10px; background: color-mix(in srgb, var(--bg) 55%, transparent); color: var(--text-2); font-size: 13px; }
+.cad-loading svg { width: 20px; height: 20px; color: hsl(28 85% 55%); }
+.cad-error { position: absolute; top: 50%; left: 50%; z-index: 6; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: min(440px, 90%); padding: 16px; border: 1px solid color-mix(in srgb, var(--err) 40%, var(--border)); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow-lg); translate: -50% -50%; }
+.cad-error p { margin: 0 0 4px; color: var(--text-2); }
+.cad-drop-over { position: absolute; inset: 10px; z-index: 7; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 16px; background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 650; pointer-events: none; }
+
+/* Review */
+.cad-review { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-left: 1px solid var(--border); background: var(--panel); }
+.cad-verdict { padding: 12px 12px 10px; border-bottom: 1px solid var(--border); }
+.cad-verdict-row { display: flex; align-items: center; gap: 6px; }
+.cad-verdict-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; }
+.cad-verdict-chip svg { width: 15px; height: 15px; }
+.cad-verdict[data-verdict='approved'] .cad-verdict-chip { color: var(--ok); }
+.cad-verdict[data-verdict='changes'] .cad-verdict-chip { color: var(--err); }
+.cad-verdict[data-verdict='open'] .cad-verdict-chip { color: var(--accent); }
+.cad-btn { height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); font-size: 11.5px; font-weight: 600; }
+.cad-btn.ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); color: var(--ok); }
+.cad-btn.ok:hover { background: var(--ok-soft); }
+.cad-btn.warn { border-color: color-mix(in srgb, var(--err) 40%, var(--border)); color: var(--err); }
+.cad-btn.warn:hover { background: var(--err-soft); }
+.cad-progress { height: 5px; margin: 10px 0 6px; overflow: hidden; border-radius: 999px; background: var(--cad-soft); }
+.cad-progress i { display: block; height: 100%; background: linear-gradient(90deg, color-mix(in srgb, var(--ok) 70%, #fff), var(--ok)); transition: width .3s; }
+.cad-verdict-sub { margin: 0; color: var(--muted); font-size: 11.5px; }
+/* A narrow review (beside another pane) scrolls its tabs rather than hiding the last one. */
+.cad-tabs { display: flex; flex-shrink: 0; gap: 2px; padding: 6px 8px 0; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
+.cad-tabs button { position: relative; flex: 1 0 auto; height: 30px; padding: 0 4px; white-space: nowrap; border-bottom: 2px solid transparent; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.cad-tabs button.on { border-color: var(--accent); color: var(--text); }
+.cad-tab-count { display: inline-block; min-width: 15px; margin-left: 4px; padding: 0 4px; border-radius: 999px; background: var(--cad-soft); color: var(--text-2); font-size: 10px; line-height: 15px; }
+.cad-tab-body { flex: 1; min-height: 0; overflow: hidden; }
+.cad-list-wrap { display: flex; flex-direction: column; height: 100%; }
+.cad-list-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.cad-check { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.cad-hint { margin: 6px 12px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.cad-list { flex: 1; display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 6px 10px 10px; overflow-y: auto; list-style: none; }
+.cad-note, .cad-issue, .cad-measure { display: flex; gap: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-elev); }
+.cad-note.on { border-color: var(--pin); box-shadow: 0 0 0 2px color-mix(in srgb, var(--pin) 18%, transparent); }
+.cad-note.resolved, .cad-issue.resolved { opacity: .62; }
+.cad-pin-badge { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50% 50% 50% 4px; background: var(--pin); color: #fff; font-size: 11px; font-weight: 700; }
+.cad-note.resolved .cad-pin-badge { background: #8b93a3; }
+.cad-pin-badge svg { width: 12px; height: 12px; }
+.cad-note-body { flex: 1; min-width: 0; }
+.cad-note-body p { margin: 0 0 3px; overflow-wrap: anywhere; }
+.cad-note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+.cad-note-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.cad-note-actions button, .cad-note-actions select { height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text-2); font: inherit; font-size: 11px; }
+.cad-note-actions button:hover { color: var(--text); }
+.cad-note-actions .danger:hover { border-color: var(--err); color: var(--err); }
+.cad-sev-dot { flex-shrink: 0; width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: #9aa3b2; }
+.cad-issue[data-severity='med'] .cad-sev-dot { background: #f59e0b; }
+.cad-issue[data-severity='high'] .cad-sev-dot { background: #f97316; }
+.cad-issue[data-severity='critical'] .cad-sev-dot { background: #e11d48; }
+.cad-tag { padding: 0 6px; border-radius: 5px; background: var(--cad-soft); color: var(--text-2); font-size: 10px; font-weight: 650; line-height: 17px; text-transform: uppercase; }
+.cad-issue[data-severity='critical'] .cad-tag.sev { background: color-mix(in srgb, #e11d48 15%, transparent); color: #e11d48; }
+.cad-issue[data-severity='high'] .cad-tag.sev { background: color-mix(in srgb, #f97316 15%, transparent); color: #ea580c; }
+.cad-measure-n { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--len); color: #1c1917; font-size: 11px; font-weight: 700; }
+.cad-compose { display: flex; flex-shrink: 0; align-items: flex-end; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.cad-compose.col { flex-direction: column; align-items: stretch; }
+.cad-compose textarea, .cad-compose .input { flex: 1; font-size: 12.5px; resize: none; }
+.cad-compose-row { display: flex; gap: 6px; }
+.cad-compose-row select { flex: 1; }
+.cad-checks { flex: 1; margin: 0; padding: 4px 10px 10px; overflow-y: auto; list-style: none; }
+.cad-checks h4 { margin: 10px 2px 4px; color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.cad-checkline { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 8px; }
+.cad-checkline:hover { background: var(--cad-soft); }
+.cad-check-text { flex: 1; min-width: 0; font-size: 12px; }
+.cad-check-text em { color: var(--err); font-style: normal; }
+.cad-checkrow.pass .cad-check-text { color: var(--muted); }
+.cad-seg { display: inline-flex; flex-shrink: 0; padding: 2px; border-radius: 8px; background: var(--cad-soft); }
+.cad-seg button { height: 20px; padding: 0 6px; border-radius: 6px; color: var(--muted); font-size: 10.5px; font-weight: 650; }
+.cad-seg button.on[data-s='pass'] { background: var(--ok); color: #fff; }
+.cad-seg button.on[data-s='fail'] { background: var(--err); color: #fff; }
+.cad-seg button.on[data-s='na'] { background: var(--muted); color: var(--panel); }
+.cad-info { padding: 12px; }
+.cad-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 0; font-size: 12px; }
+.cad-info dt { color: var(--muted); }
+.cad-info dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cad-info-actions { display: flex; gap: 6px; margin-top: 12px; }
+.cad-ask { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.cad-ask textarea { resize: none; font-size: 12.5px; }
+.cad-ask-row { display: flex; gap: 6px; }
+.cad-check-note { width: calc(100% - 16px); height: 26px; margin: 0 8px 6px; font-size: 11.5px; }

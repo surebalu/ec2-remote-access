@@ -6,6 +6,7 @@ import type { RecentFile } from '@shared/finder'
 import { displayPath, formatDate, formatSize, parentOf } from '@shared/finder'
 import { calculate, convert, formatNumber, issueKey, jiraSite, matchScore, recentIds, usageBoost, type LauncherApp, type LauncherPreview, type LauncherUsage, type SystemAction } from '@shared/launcher'
 import { WINDOW_LAYOUTS, type WindowLayout } from '@shared/windowLayouts'
+import { isCadFile } from '@shared/cad'
 import { comboOf, formatCombo, RAIL_SECTIONS, SECTION_NAMES, sectionKeys, type RailSection } from '@shared/keyCombos'
 import { manualToInstance } from '@shared/manual'
 import { matchesHost } from '@shared/hostSearch'
@@ -50,14 +51,14 @@ const EMPTY: Data = { apps: [], usage: {}, settings: null, hosts: [], profiles: 
 const NO_LINKS: Quicklink[] = []
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_ABOUT: Record<RailSection, string> = {
-  devtools: 'Local developer utilities', tasks: 'Today, upcoming and your projects', calendar: 'Month, week and day', links: 'Your bookmarks and notes', hosts: 'Every account’s hosts', overview: 'All open sessions on one page', health: 'The 3DEXPERIENCE platform at a glance', local: 'Shells on this Mac', finder: 'Files on this Mac', storage: 'Disk space and clean-up',
+  devtools: 'Local developer utilities', tasks: 'Today, upcoming and your projects', calendar: 'Month, week and day', links: 'Your bookmarks and notes', hosts: 'Every account’s hosts', overview: 'All open sessions on one page', health: 'The 3DEXPERIENCE platform at a glance', local: 'Shells on this Mac', finder: 'Files on this Mac', storage: 'Disk space and clean-up', cad: 'STEP files in 3D, with reviews',
   browser: 'AWS console spaces and web tabs', notes: 'Your Markdown notes', board: 'The scratch pad', claude: 'Chat, signed in on its own', chatgpt: 'Chat, signed in on its own'
 }
 const SECTION_WORDS: Record<RailSection, string> = {
-  devtools: 'json base64 url jwt uuid timestamp hash developer utilities', tasks: 'todo to-do things todoist reminders checklist projects', calendar: 'events schedule agenda meetings ical', links: 'bookmarks anybox saved pages urls', hosts: 'instances servers ec2 list', overview: 'all sessions grid', health: 'status monitoring 3dexperience prometheus grafana alerts', local: 'shell zsh console warp', finder: 'files folders', storage: 'disk space clean cleaner junk large files duplicates trash strata', browser: 'web tabs arc',
+  devtools: 'json base64 url jwt uuid timestamp hash developer utilities', tasks: 'todo to-do things todoist reminders checklist projects', calendar: 'events schedule agenda meetings ical', links: 'bookmarks anybox saved pages urls', hosts: 'instances servers ec2 list', overview: 'all sessions grid', health: 'status monitoring 3dexperience prometheus grafana alerts', local: 'shell zsh console warp', finder: 'files folders', storage: 'disk space clean cleaner junk large files duplicates trash strata', cad: 'step stp iges 3d model part assembly solidworks review viewer', browser: 'web tabs arc',
   notes: 'obsidian markdown', board: 'whiteboard draw sketch', claude: 'ai chat anthropic', chatgpt: 'ai chat openai gpt'
 }
 
@@ -243,10 +244,12 @@ export default function Launcher(): ReactElement {
   const fileRow = (f: Pick<RecentFile, 'name' | 'path' | 'type'>): Row => {
     const id = `file:${f.path}`
     const dir = f.type === 'dir' ? f.path : parentOf(f.path)
+    const cad = f.type !== 'dir' && isCadFile(f.path)
     return {
-      id, title: f.name, subtitle: displayPath(parentOf(f.path), data.home), icon: f.type === 'dir' ? <Icon.folder /> : <Icon.note />, iconPath: f.path, detail: { kind: 'path', path: f.path }, type: f.type === 'dir' ? 'Folder' : 'File',
+      id, title: f.name, subtitle: displayPath(parentOf(f.path), data.home), icon: f.type === 'dir' ? <Icon.folder /> : cad ? <Icon.cube /> : <Icon.note />, iconPath: f.path, detail: { kind: 'path', path: f.path }, type: f.type === 'dir' ? 'Folder' : cad ? 'CAD Model' : 'File',
       actions: [
-        { title: 'Open', key: 'enter', run: openPath(id, f.path) },
+        ...(cad ? [{ title: 'Open in CAD Viewer', key: 'enter', run: inApp(id, { kind: 'cad', path: f.path }) }] : []),
+        { title: cad ? 'Open With Its App' : 'Open', key: cad ? 'alt+enter' : 'enter', run: openPath(id, f.path) },
         { title: 'Show in Finder', key: 'cmd+enter', run: reveal(f.path) },
         { title: 'Quick Look', key: 'cmd+y', run: quickLook(f.path) },
         { title: 'Copy Path', key: 'shift+cmd+c', run: copy(f.path) },

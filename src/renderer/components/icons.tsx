@@ -522,6 +522,31 @@ export const Icon = {
   brain: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}><path d="M9.5 4.5A2.5 2.5 0 0 0 7 7v.2A3 3 0 0 0 5 10a3 3 0 0 0 1 2.2A3 3 0 0 0 7.5 17 2.5 2.5 0 0 0 12 18.5V6a1.5 1.5 0 0 0-2.5-1.5zM14.5 4.5A2.5 2.5 0 0 1 17 7v.2A3 3 0 0 1 19 10a3 3 0 0 1-1 2.2 3 3 0 0 1-1.5 4.8A2.5 2.5 0 0 1 12 18.5" /><path d="M12 10h-2M12 14h2.5" /></svg>
   ),
+  eye: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
+  ),
+  /** The CAD tool: a box in three faces. */
+  cube: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M12 2.8 20 7.2v9.6l-8 4.4-8-4.4V7.2z" /><path d="M4 7.2 12 11.6l8-4.4M12 11.6v9.6" /><path d="M12 11.6 20 7.2 12 2.8 4 7.2z" fill="currentColor" fillOpacity=".14" stroke="none" /></svg>
+  ),
+  ruler: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="m3.5 15.5 12-12 5 5-12 12z" /><path d="m7 12 1.6 1.6M9.5 9.5l2.4 2.4M12 7l1.6 1.6M14.5 4.5l2.4 2.4" /></svg>
+  ),
+  comment: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V16.5H5A1.5 1.5 0 0 1 3.5 15V6A1.5 1.5 0 0 1 5 4.5z" /><path d="M8 9h8M8 12.2h5" /></svg>
+  ),
+  section: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5z" /><path d="M2.5 13.5 21.5 9" strokeDasharray="2.4 2.2" /></svg>
+  ),
+  camera: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4 7.5h3.2L9 5h6l1.8 2.5H20a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1z" /><circle cx="12" cy="13" r="3.4" /></svg>
+  ),
+  fit: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" /><rect x="8.5" y="8.5" width="7" height="7" rx="1" /></svg>
+  ),
+  orbit: (p: { className?: string }): ReactElement => (
+    <svg {...base} className={p.className}><ellipse cx="12" cy="12" rx="9" ry="4" /><path d="M16.5 4.8A9 4 90 0 1 12 21" /><circle cx="12" cy="12" r="1.6" fill="currentColor" /></svg>
+  ),
   eyeOff: (p: { className?: string }): ReactElement => (
     <svg {...base} className={p.className}><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 8.5 4.5 9.5 7a13 13 0 0 1-2.6 3.8M6.6 6.6C4.5 8 3.1 10.1 2.5 12c1 2.5 4.5 7 9.5 7a9.6 9.6 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2" /></svg>
   ),
