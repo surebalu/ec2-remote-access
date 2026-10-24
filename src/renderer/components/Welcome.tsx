@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import type { CompanySetup } from '@shared/setup'
+import { hasBrowser } from '../quickConnect'
 import { useStore } from '../store'
 import { Icon } from './icons'
 
-type Paths = { sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }
+type Paths = { sessionManagerPlugin: string | null; sessionManagerPluginBundled: boolean; awsCli: string | null; windowsApp: boolean }
 
 const FEATURES: { icon: ReactNode; title: string; text: string }[] = [
   { icon: <Icon.cloud />, title: 'Every account at once', text: 'Finds the instances in all your AWS profiles and regions, and keeps them in one list.' },
@@ -14,8 +16,11 @@ const FEATURES: { icon: ReactNode; title: string; text: string }[] = [
 export default function Welcome(): ReactElement {
   const set = useStore((s) => s.set)
   const [paths, setPaths] = useState<Paths | null>(null)
+  // The organization's sign-in when this build carries one (build/company.json): one button sets up its accounts.
+  const [company, setCompany] = useState<CompanySetup | null>(null)
   useEffect(() => {
     void window.api.invoke('app:paths').then(setPaths)
+    void window.api.invoke('app:company').then(setCompany, () => undefined)
   }, [])
   const req = (ok: boolean | null, label: string, detail: string, link?: string, optional = false): ReactElement => (
     <div className="welcome-req">
@@ -45,11 +50,21 @@ export default function Welcome(): ReactElement {
           ))}
         </div>
         <div className="welcome-actions">
-          <button className="welcome-action primary" onClick={() => set({ addAccountOpen: true })}>
+          {company && (
+            <button className="welcome-action primary wide" onClick={() => set({ addAccountOpen: 'company' })}>
+              <span className="welcome-action-icon"><Icon.key /></span>
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block text-[13.5px] font-semibold">Sign in to {company.name} AWS</span>
+                <span className="block truncate text-[11.5px] opacity-85">Sets up {company.aws.profiles.map((p) => p.name).join(', ')} through IAM Identity Center</span>
+              </span>
+              <Icon.chevron />
+            </button>
+          )}
+          <button className={`welcome-action ${company ? '' : 'primary'}`} onClick={() => set({ addAccountOpen: true })}>
             <span className="welcome-action-icon"><Icon.cloud /></span>
             <span className="min-w-0 flex-1 text-left">
               <span className="block text-[13.5px] font-semibold">Add an AWS account</span>
-              <span className="block text-[11.5px] opacity-85">Sign in with IAM Identity Center (SSO) or access keys</span>
+              <span className={`block text-[11.5px] ${company ? 'muted' : 'opacity-85'}`}>{company ? 'Another start URL, or access keys' : 'Sign in with IAM Identity Center (SSO) or access keys'}</span>
             </span>
             <Icon.chevron />
           </button>
@@ -62,9 +77,14 @@ export default function Welcome(): ReactElement {
             <Icon.chevron />
           </button>
         </div>
+        {hasBrowser() && (
+          <button className="welcome-import" onClick={() => void useStore.getState().importSetup()}>
+            Moving from another Mac? <span>Import a setup file</span> exported there (Settings → Data).
+          </button>
+        )}
         <div className="welcome-reqs">
           <div className="welcome-reqs-title">Before you connect</div>
-          {req(paths ? !!paths.sessionManagerPlugin : null, 'AWS Session Manager plugin', paths?.sessionManagerPlugin ?? 'For private instances: brew install --cask session-manager-plugin', 'https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html')}
+          {req(paths ? !!paths.sessionManagerPlugin : null, 'AWS Session Manager plugin', paths?.sessionManagerPluginBundled ? 'Included with the app' : paths?.sessionManagerPlugin ?? 'For private instances: brew install --cask session-manager-plugin', 'https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html')}
           {req(paths ? !!paths.awsCli : null, 'AWS CLI', paths?.awsCli ?? 'Not required: sign-in is built in', undefined, true)}
           {req(paths ? paths.windowsApp : null, 'Windows App', paths?.windowsApp ? 'Installed' : 'Only for handing desktops to Microsoft’s client; the built-in RDP works without it', 'https://apps.apple.com/app/windows-app/id1295203466', true)}
         </div>

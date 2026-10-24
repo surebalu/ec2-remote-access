@@ -31,6 +31,8 @@ import { hostHistory, hostProcess, hostSnapshot } from './hostInsight'
 import { dbHistory, dbKill, dbList, dbLocks } from './dbLocks'
 import { cancelServiceJob, serviceHistory, serviceJob, serviceJobs, serviceLogs, serviceStatus, startServiceJob } from './services'
 import { findBinary } from './util'
+import { findPlugin } from './ssm/session'
+import { applyImport, companySetup, exportSetup, pickImport } from './setup'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
 import { recentLog } from './log'
 import { applyRecords, loadRecords } from './records'
@@ -381,11 +383,19 @@ export const handlers: Handlers = {
   },
   'theme:set': async (theme) => host().setThemeSource(theme),
   'dialog:pickFile': async (title) => (await host().pickPaths({ title, kind: 'file' }))?.[0] ?? null,
-  'app:paths': async () => ({
-    sessionManagerPlugin: getSettings().sessionManagerPluginPath || findBinary('session-manager-plugin'),
-    awsCli: getSettings().awsCliPath || findBinary('aws'),
-    windowsApp: hasWindowsApp()
-  }),
+  'app:company': async () => companySetup(),
+  'setup:export': () => exportSetup(),
+  'setup:pickImport': () => pickImport(),
+  'setup:apply': (id) => applyImport(id),
+  'app:paths': async () => {
+    const plugin = findPlugin()
+    return {
+      sessionManagerPlugin: plugin?.path ?? null,
+      sessionManagerPluginBundled: plugin?.bundled ?? false,
+      awsCli: getSettings().awsCliPath || findBinary('aws'),
+      windowsApp: hasWindowsApp()
+    }
+  },
   'run:start': (req) => startRun(req),
   'run:status': async (id) => runStatus(id),
   'services:status': (keys) => serviceStatus(keys),

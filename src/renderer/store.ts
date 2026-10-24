@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { SetupPreview } from '@shared/setup'
 import type { WebSpace } from '@shared/types'
 import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, WorkspaceTool, WorkspaceTerminal, WorkspaceBrowser, HostShell, PaneNode } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
@@ -272,7 +273,11 @@ interface State {
   manualHostFolder: string | null
   /** null = closed; 'new' = create; otherwise the folder name being edited */
   folderEditor: string | null
-  addAccountOpen: boolean
+  /** 'company': opened from the welcome screen's sign-in for the organization baked into this build (app:company). */
+  addAccountOpen: boolean | 'company'
+  /** A setup file being imported (Settings → Data, the welcome screen): what it would do, shown before anything is written. */
+  setupImport: SetupPreview | null
+  importSetup: () => Promise<void>
   /** profile name being edited, or null */
   editAccount: string | null
   ssoSessions: SsoSessionInfo[]
@@ -728,6 +733,15 @@ export const useStore = create<State>((set, get) => ({
   manualHostFolder: null,
   folderEditor: null,
   addAccountOpen: false,
+  setupImport: null,
+  importSetup: async () => {
+    try {
+      const preview = await window.api.invoke('setup:pickImport')
+      if (preview) set({ setupImport: preview })
+    } catch (e) {
+      get().toast('error', (e as Error).message)
+    }
+  },
   editAccount: null,
   ssoSessions: [],
   ssoWait: null,

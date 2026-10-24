@@ -41,6 +41,17 @@ let failWorkspaceHealth = false
 let workspaceHealthAge = 0
 // First run: no AWS profiles, no servers, nothing scanned.
 let emptyScenario = false
+// The organization's sign-in a build may carry (app:company), and what the first-run and setup actions asked main for.
+let companyFixture = null
+const companyDefaults = {
+  name: 'Corp',
+  aws: {
+    sessions: [{ name: 'corp', startUrl: 'https://corp.awsapps.com/start', region: 'us-west-2' }],
+    profiles: [{ name: 'prod-plm', session: 'corp', accountId: '111111111111', roleName: 'Admin', region: 'us-west-2' }, { name: 'qa-plm', session: 'corp', accountId: '222222222222', roleName: 'Admin', region: 'us-west-1' }]
+  },
+  accountMeta: { 'prod-plm': { label: 'Prod', color: 'rose' } }
+}
+const setupDone = []
 let failNoteWrites = false
 // Notes vault for the Notes tab.
 const noteFolders = new Set(['Projects'])
@@ -318,7 +329,19 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
       return [{ name: 'corp', tokenValid: ssoTokenWritten, expiresAt: new Date(Date.now() + (ssoTokenWritten ? 1 : -1) * 3600000).toISOString(), hasRefreshToken: false, profiles: [ssoProfile.name] }]
     case 'sso:loginSession': return { flowId: 'flow-1', userCode: 'ABCD-EFGH', verificationUri: 'https://device.sso.example/', verificationUriComplete: 'https://device.sso.example/?user_code=ABCD-EFGH', expiresIn: 600 }
     case 'sso:cancel': return
-    case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', awsCli: null, windowsApp: false }
+    case 'app:paths': return { sessionManagerPlugin: '/fixture/plugin', sessionManagerPluginBundled: emptyScenario, awsCli: null, windowsApp: false }
+    case 'app:company': return companyFixture
+    case 'sso:start': setupDone.push(['sso:start', args[0]]); return { flowId: 'flow-2', userCode: 'WXYZ-1234', verificationUri: 'https://device.sso.example/', verificationUriComplete: 'https://device.sso.example/?user_code=WXYZ-1234', expiresIn: 600 }
+    case 'sso:wait': return [{ accountId: '111111111111', accountName: 'Corp Production', roles: ['ReadOnly', 'Admin'] }, { accountId: '222222222222', accountName: 'Corp QA', roles: ['Admin'] }, { accountId: '333333333333', accountName: 'Sandbox', roles: ['Admin'] }]
+    case 'sso:save': setupDone.push(['sso:save', args[0]]); return args[0].selections.map((x) => x.profileName)
+    case 'setup:export': setupDone.push(['export']); return '/Users/fixture/Desktop/EC2 Remote Access setup.json'
+    case 'setup:pickImport': return {
+      id: 'imp-1', fileName: 'EC2 Remote Access setup 2026-10-24.json', from: { computer: 'Old Mac', home: '/Users/old' }, exportedAt: now - 3600000,
+      sessions: [{ name: 'corp', status: 'add' }], profiles: [{ name: 'prod-plm', accountId: '111111111111', status: 'add' }, { name: 'qa-plm', accountId: '222222222222', status: 'kept' }],
+      settings: ['3 favorites', '2 host settings', 'appearance, terminal, Notes and other preferences'],
+      left: { profiles: [{ name: 'old-keys', why: 'uses access keys, which are never exported' }], dataDir: '/Volumes/home/EC2 Remote Access' }
+    }
+    case 'setup:apply': setupDone.push(['apply', args[0]]); return { settings: { ...settings, favorites: [...settings.favorites, 'imported/us-east-1/i-imported'] }, profiles: ['prod-plm'], dataDir: '/Volumes/home/EC2 Remote Access' }
     case 'app:about': return { version: '1.0.0', electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: 'darwin', arch: 'arm64', dataDir: '/fixture/data', logsDir: '/fixture/data/logs' }
     case 'app:reveal': return
     case 'diag:log': return { path: '/fixture/main.log', text: '' }
@@ -4147,6 +4170,51 @@ app.whenReady().then(async () => {
     }
     await ejs(`document.querySelector('.welcome-action.primary').click()`)
     await euntil(`!!document.querySelector('[role="dialog"]')`)
+    assert.match(await ejs(`[...document.querySelectorAll('.welcome-req')][0].textContent`), /Included with the app/, 'the plugin shipped in the app counts')
+    // A build carrying the organization's sign-in: one button signs in and offers its profiles, named as the file names them.
+    companyFixture = companyDefaults
+    await ewin.loadFile(resolve('out/renderer/index.html'))
+    await euntil(`document.querySelector('.welcome-action.primary.wide')?.textContent.includes('Sign in to Corp AWS')`)
+    assert.match(await ejs(`document.querySelector('.welcome-action.primary.wide').textContent`), /Sets up prod-plm, qa-plm/)
+    await eshot('welcome-company.png')
+    await ejs(`document.querySelector('.welcome-action.primary.wide').click()`)
+    await euntil(`document.querySelectorAll('[role="dialog"] tbody tr').length === 3`)
+    assert.deepEqual(setupDone.find((d) => d[0] === 'sso:start')[1], { startUrl: 'https://corp.awsapps.com/start', region: 'us-west-2' }, 'the sign-in starts at once with the company start URL')
+    const rows = await ejs(`[...document.querySelectorAll('[role="dialog"] tbody tr')].map((r) => [r.querySelector('input[type=checkbox]').checked, r.querySelector('select').value, r.querySelector('input.mono').value, r.querySelector('input[placeholder^="Dev"]').value].join('|'))`)
+    assert.deepEqual(rows, ['true|Admin|prod-plm|Prod', 'true|Admin|qa-plm|Corp QA', 'false|Admin|sandbox|Sandbox'], 'the company profiles come named and ticked; other accounts unticked')
+    await eshot('welcome-company-accounts.png')
+    await ejs(`[...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.startsWith('Add 2 accounts')).click()`)
+    await euntil(`[...document.querySelectorAll('[role="dialog"] button')].some((b) => b.textContent.trim() === 'Done')`)
+    const ssoSaved = setupDone.find((d) => d[0] === 'sso:save')[1]
+    assert.equal(ssoSaved.sessionName, 'corp')
+    assert.deepEqual(ssoSaved.selections, [{ accountId: '111111111111', roleName: 'Admin', profileName: 'prod-plm', region: 'us-west-2' }, { accountId: '222222222222', roleName: 'Admin', profileName: 'qa-plm', region: 'us-west-1' }], 'each profile keeps its own region')
+    assert.deepEqual(settings.accountMeta['prod-plm'], { label: 'Prod', color: 'rose' })
+    await ejs(`[...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Done').click()`)
+    await euntil(`!document.querySelector('[role="dialog"]')`)
+    // Import a setup exported on another Mac: what it brings, then the data folder it used.
+    await ejs(`document.querySelector('.welcome-import').click()`)
+    await euntil(`document.querySelector('.setup-import')?.textContent.includes('Old Mac')`)
+    assert.match(await ejs(`document.querySelector('.setup-import').textContent`), /prod-plm.*Will be added.*qa-plm.*A different one by this name stays/)
+    assert.match(await ejs(`document.querySelector('.setup-import').textContent`), /3 favorites · 2 host settings/)
+    assert.match(await ejs(`document.querySelector('.setup-import').textContent`), /old-keys.*access keys/)
+    await eshot('setup-import.png')
+    await ejs(`[...document.querySelectorAll('.setup-import button')].find((b) => b.textContent === 'Import').click()`)
+    await euntil(`document.querySelector('.setup-import')?.textContent.includes('Added 1 AWS profile (prod-plm)')`)
+    assert.deepEqual(setupDone.find((d) => d[0] === 'apply'), ['apply', 'imp-1'])
+    assert.ok(settings.favorites.includes('imported/us-east-1/i-imported'), 'the merged settings are saved')
+    await ejs(`[...document.querySelectorAll('.setup-import button')].find((b) => b.textContent === 'Use it on this Mac').click()`)
+    await euntil(`document.querySelector('.setup-import').textContent.includes('This Mac now syncs with it too')`)
+    await ejs(`[...document.querySelectorAll('.setup-import button')].find((b) => b.textContent === 'Done').click()`)
+    await euntil(`!document.querySelector('.setup-import')`)
+    // Settings → Data: Export setup.
+    await ejs(`document.querySelector('button[aria-label="Settings"]').click()`)
+    await euntil(`!!document.querySelector('.settings-nav [data-section="data"]')`)
+    await ejs(`document.querySelector('.settings-nav [data-section="data"]').click()`)
+    await euntil(`[...document.querySelectorAll('.settings-body button')].some((b) => b.textContent === 'Export…')`)
+    await ejs(`[...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Export…').click()`)
+    await euntil(`document.querySelector('.toasts')?.textContent.includes('Setup exported to /Users/fixture/Desktop')`)
+    await eshot('settings-data-setup.png')
+    companyFixture = null
     ewin.destroy()
     settings.theme = savedTheme
     emptyScenario = false
