@@ -1,6 +1,7 @@
 /**
- * Thin wrapper over the Tailscale CLI for "HTTPS via Tailscale" phone access: `tailscale serve` terminates TLS with
- * a Let's Encrypt certificate for this machine's tailnet name and forwards to the gateway on loopback.
+ * Thin wrapper over the Tailscale CLI for "HTTPS via Tailscale" phone access (`tailscale serve` terminates TLS with
+ * a Let's Encrypt certificate for this machine's tailnet name and forwards to the gateway on loopback) and for the
+ * tailnet's machines in the hosts list (./tailnet.ts).
  */
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -31,6 +32,12 @@ function run(cli: string, args: string[]): Promise<{ stdout: string; stderr: str
       else resolve({ stdout, stderr })
     })
   })
+}
+
+/** The raw `tailscale status --json` document (peers included). */
+export async function tailscaleStatus(cli: string): Promise<unknown> {
+  const { stdout } = await run(cli, ['status', '--json'])
+  return JSON.parse(stdout)
 }
 
 export async function tailscaleInfo(): Promise<TailscaleInfo | null> {

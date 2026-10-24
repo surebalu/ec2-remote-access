@@ -311,7 +311,7 @@ export function handleAppShortcut(e: KeyboardEvent, opts: { sections?: boolean }
   if (k === '/') return go(() => st.set({ shortcutsOpen: true }))
   if (k === ',') return go(() => st.set({ settingsOpen: true }))
   // A second RDP login as the same user would take over the first desktop, so RDP tabs are not duplicated.
-  if (k === 'd' && active && active.kind !== 'rdp' && isSession(active)) return go(() => st.duplicateTab(active.id, !e.shiftKey))
+  if (k === 'd' && active && active.kind !== 'rdp' && active.kind !== 'vnc' && isSession(active)) return go(() => st.duplicateTab(active.id, !e.shiftKey))
   if (k === 'i' && e.shiftKey && st.splitGroup.includes(st.activeTab)) return go(() => st.set({ broadcastInput: !st.broadcastInput }))
   if (k === 'f' && !e.shiftKey && active?.kind === 'ssh') return go(() => terminalAction(active.id, 'find'))
   if (k === '[' && !e.shiftKey && st.activeTab === 'hosts' && !st.gridView && st.hostPage) return go(() => st.hostBack())

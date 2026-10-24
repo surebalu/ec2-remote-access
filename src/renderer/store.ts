@@ -3,6 +3,7 @@ import type { SetupPreview } from '@shared/setup'
 import type { WebSpace } from '@shared/types'
 import type { AwsProfile, Instance, ProfileStatus, ScanProgress, ScanResult, ScanTarget, Settings, Tunnel, Route, SshOpenRequest, SftpOpenRequest, ManualHost, HostOverride, Theme, AccentColor, SsoSessionInfo, SsoDeviceFlow, PortForwardRequest, Workspace, WorkspaceTab, WorkspaceTool, WorkspaceTerminal, WorkspaceBrowser, HostShell, PaneNode } from '@shared/types'
 import { manualToInstance, manualKey } from '@shared/manual'
+import type { TailnetState } from '@shared/tailnet'
 import { clearHostFilters, matchesHost } from '@shared/hostSearch'
 import { captureHostFilters, upsertHostView, type HostView, type HostViewFilters } from '@shared/hostViews'
 import { captureBrowser, captureTerminal, workspaceLayout, workspaceSummary } from '@shared/workspaces'
@@ -14,6 +15,14 @@ import { applySectionZoom, type ZoomSection } from './sectionZoom'
 import { arrange, insertPane, paneIds, removePane, swapPanes, type Arrangement, type Direction } from './termLayout'
 import { askUrl, isWebApp, WEB_APPS, type WebAppKind } from './webApps'
 
+/** Screen sharing parameters; the VNC tab asks for whatever the computer wants that is not here. */
+export interface VncTabRequest {
+  user?: string
+  password?: string
+  port?: number
+  forceRoute?: 'direct' | 'ssm'
+}
+
 export interface RdpTabRequest {
   user: string
   password: string
@@ -24,7 +33,7 @@ export interface RdpTabRequest {
 
 export interface Tab {
   id: string
-  kind: 'ssh' | 'rdp' | 'sftp' | ToolKind
+  kind: 'ssh' | 'rdp' | 'sftp' | 'vnc' | ToolKind
   instanceKey: string
   title: string
   route?: Route
@@ -34,6 +43,8 @@ export interface Tab {
   request?: Omit<SshOpenRequest, 'cols' | 'rows'>
   /** RDP parameters; the RDP tab issues rdp:prepare and connects the embedded client. */
   rdpRequest?: RdpTabRequest
+  /** Screen sharing parameters; the VNC tab issues vnc:prepare and connects noVNC. */
+  vncRequest?: VncTabRequest
   /** SFTP parameters; the Files tab issues sftp:open on mount. */
   sftpRequest?: Omit<SftpOpenRequest, 'sessionId'>
   /** When the current connection came up; drives the tab's uptime tooltip. */
@@ -123,6 +134,9 @@ interface State {
   profiles: AwsProfile[]
   statuses: Record<string, ProfileStatus>
   instances: Instance[]
+  /** Machines on the Tailscale network of the computer running the engine (the Mac, or the gateway's machine). */
+  tailnet: TailnetState | null
+  refreshTailnet: (refresh?: boolean) => Promise<void>
   scanErrors: ScanResult['errors']
   scannedAt?: number
   scanning: boolean
@@ -376,6 +390,18 @@ export const useStore = create<State>((set, get) => ({
   sidebarCollapsed: readSidebarPref(),
   terminalPaneOpen: readPref(TERMINAL_PANE_KEY),
   instances: [],
+  tailnet: null,
+  refreshTailnet: async (refresh) => {
+    try {
+      const tailnet = await window.api.invoke('tailnet:list', refresh)
+      // Same machines in the same state: keep the old object, so the hosts list does not redraw every minute.
+      const prev = get().tailnet
+      if (prev && JSON.stringify(prev) === JSON.stringify(tailnet)) return
+      set({ tailnet })
+    } catch {
+      /* an older engine without tailnet:list */
+    }
+  },
   scanErrors: [],
   scanning: false,
   loggingIn: false,
@@ -571,11 +597,12 @@ export const useStore = create<State>((set, get) => ({
     const nid = `${tab.kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
     const base = { id: nid, kind: tab.kind, instanceKey: tab.instanceKey, title: tab.title, status: 'connecting' as const }
     // A connected SSH/SFTP tab lends its authenticated connection, as quickConnect does.
-    const reuse = tab.status === 'connected' && tab.kind !== 'rdp' ? tab.id : undefined
+    const reuse = tab.status === 'connected' && tab.kind !== 'rdp' && tab.kind !== 'vnc' ? tab.id : undefined
     // A duplicate starts a shell of its own rather than attaching to the one the original shows.
     if (tab.kind === 'ssh' && tab.request) st.addTab({ ...base, request: { ...tab.request, sessionId: nid, reuseSessionId: reuse, shellName: undefined, shellHistory: undefined, shellLabel: undefined } })
     else if (tab.kind === 'sftp' && tab.sftpRequest) st.addTab({ ...base, sftpRequest: { ...tab.sftpRequest, reuseSessionId: reuse } })
     else if (tab.kind === 'rdp' && tab.rdpRequest) st.addTab({ ...base, rdpRequest: tab.rdpRequest })
+    else if (tab.kind === 'vnc') st.addTab({ ...base, vncRequest: tab.vncRequest ?? {} })
     else return
     if (split) get().splitWith(id, nid)
   },
@@ -807,6 +834,10 @@ export const useStore = create<State>((set, get) => ({
       }
       set((s) => ({ statuses: { ...s.statuses, [st.profile]: st } }))
     })
+    void get().refreshTailnet()
+    // Machines come and go on a tailnet; a minute is soon enough, and coming back to the window asks at once.
+    setInterval(() => { if (document.visibilityState === 'visible') void get().refreshTailnet() }, 60_000)
+    window.addEventListener('focus', () => void get().refreshTailnet())
     await get().refreshProfiles()
     await get().checkAuth()
     await get().refreshSsoSessions()
@@ -1111,6 +1142,7 @@ export const useStore = create<State>((set, get) => ({
   saveSettings: async (patch) => {
     const settings = await window.api.invoke('settings:set', patch)
     set({ settings })
+    if (patch.tailscaleHosts) void get().refreshTailnet(true)
   },
 
   toast: (kind, text) => {
@@ -1137,6 +1169,7 @@ export const useStore = create<State>((set, get) => ({
   closeTab: async (id, opts) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (tab?.kind === 'rdp') await window.api.invoke('rdp:release', id).catch(() => undefined)
+    else if (tab?.kind === 'vnc') await window.api.invoke('vnc:release', id).catch(() => undefined)
     else if (tab?.kind === 'sftp') await window.api.invoke('sftp:close', id).catch(() => undefined)
     else if (tab?.kind === 'notes' || tab?.kind === 'browser' || tab?.kind === 'board' || tab?.kind === 'finder' || tab?.kind === 'storage' || tab?.kind === 'cad' || (tab && (PLAIN_TOOLS.includes(tab.kind as ToolKind) || isWebApp(tab.kind)))) { /* nothing in main to close: they save as they go */ }
     else await window.api.invoke('ssh:close', id, { endShell: !opts?.detach }).catch(() => undefined)
@@ -1171,7 +1204,7 @@ export const useStore = create<State>((set, get) => ({
 
 /** Remote sessions, as opposed to the built-in tools; used for host/session counts and grids. */
 export function isSession(t: Tab): boolean {
-  return t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp'
+  return t.kind === 'ssh' || t.kind === 'rdp' || t.kind === 'sftp' || t.kind === 'vnc'
 }
 
 /** The split fields for a layout tree: a tree of one pane (or none) is no split. */
@@ -1201,7 +1234,10 @@ async function openWorkspaceTab(t: WorkspaceTab, workspaceSource: string): Promi
   const base = { id, instanceKey: i.key, title, status: 'connecting' as const, workspaceSource }
   if (t.kind === 'ssh') s.addTab({ ...base, kind: 'ssh', request: { instanceKey: i.key, sessionId: id, ...params, initCommand: t.initCommand } })
   else if (t.kind === 'sftp') s.addTab({ ...base, kind: 'sftp', sftpRequest: { instanceKey: i.key, ...params } })
-  else {
+  else if (t.kind === 'vnc') {
+    const cred = await window.api.invoke('creds:get', vncCredKey(i.key)).catch(() => null)
+    s.addTab({ ...base, title: i.name, kind: 'vnc', vncRequest: { user: t.user ?? cred?.user, password: cred?.password, port: t.port, forceRoute: t.forceRoute } })
+  } else {
     const cred = await window.api.invoke('creds:get', i.key).catch(() => null)
     if (!cred) return null
     s.addTab({ ...base, kind: 'rdp', rdpRequest: { user: t.user ?? cred.user, password: cred.password, domain: cred.domain, port: t.port, forceRoute: t.forceRoute } })
@@ -1213,6 +1249,7 @@ async function openWorkspaceTab(t: WorkspaceTab, workspaceSource: string): Promi
 export function workspaceTabOf(t: Tab): WorkspaceTab {
   const r = t.kind === 'ssh' ? t.request : t.kind === 'sftp' ? t.sftpRequest : undefined
   if (t.kind === 'rdp') return { kind: 'rdp', instanceKey: t.instanceKey, user: t.rdpRequest?.user, port: t.rdpRequest?.port, forceRoute: t.rdpRequest?.forceRoute }
+  if (t.kind === 'vnc') return { kind: 'vnc', instanceKey: t.instanceKey, user: t.vncRequest?.user, port: t.vncRequest?.port, forceRoute: t.vncRequest?.forceRoute }
   return { kind: t.kind === 'sftp' ? 'sftp' : 'ssh', instanceKey: t.instanceKey, user: r?.user, port: r?.port, identityFile: r?.identityFile, useAgent: r?.useAgent, forceRoute: r?.forceRoute, initCommand: t.kind === 'ssh' ? t.request?.initCommand : undefined }
 }
 
@@ -1261,21 +1298,25 @@ export function isDarkMode(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
-/** AWS inventory plus hand-added servers, the list every view renders. */
-export function allInstances(s: { instances: Instance[]; settings?: Settings }): Instance[] {
+/** Where a computer's screen-sharing sign-in is kept: apart from its RDP one, since a Windows PC can have both. */
+export const vncCredKey = (key: string): string => `vnc:${key}`
+
+/** AWS inventory plus hand-added servers and Tailscale machines, the list every view renders. */
+export function allInstances(s: { instances: Instance[]; settings?: Settings; tailnet?: TailnetState | null }): Instance[] {
   const manual = (s.settings?.manualHosts ?? []).map(manualToInstance)
-  return manual.length ? [...s.instances, ...manual] : s.instances
+  const tailnet = s.settings?.tailscaleHosts === false ? [] : (s.tailnet?.devices ?? [])
+  return manual.length || tailnet.length ? [...s.instances, ...manual, ...tailnet] : s.instances
 }
 
 /** Instances shown in the table: everything except AWS accounts whose checkbox is off. Manual servers always show. */
-export function visibleInstances(s: { instances: Instance[]; settings?: Settings; profiles: AwsProfile[] }): Instance[] {
+export function visibleInstances(s: { instances: Instance[]; settings?: Settings; profiles: AwsProfile[]; tailnet?: TailnetState | null }): Instance[] {
   const disabled = new Set(s.profiles.filter((p) => !p.enabled).map((p) => p.name))
   if (!disabled.size) return allInstances(s)
   return allInstances(s).filter((i) => i.manual || !disabled.has(i.profile))
 }
 
 /** The hosts the current filter bar selects (search, account, OS, state, reachability, favorites), unsorted. */
-export function filteredInstances(s: Pick<State, 'instances' | 'settings' | 'profiles' | 'search' | 'favoritesOnly' | 'profileFilter' | 'osFilter' | 'stateFilter' | 'reachFilter'>): Instance[] {
+export function filteredInstances(s: Pick<State, 'instances' | 'settings' | 'profiles' | 'tailnet' | 'search' | 'favoritesOnly' | 'profileFilter' | 'osFilter' | 'stateFilter' | 'reachFilter'>): Instance[] {
   const q = s.search.trim().toLowerCase()
   const favs = new Set(s.settings?.favorites ?? [])
   return visibleInstances(s)
@@ -1296,6 +1337,7 @@ export function filteredInstances(s: Pick<State, 'instances' | 'settings' | 'pro
 }
 
 export function routeOf(i: Instance, settings?: Settings): { route: Route; reason: string } {
+  if (i.tailnet) return i.tailnet.online ? { route: 'direct', reason: 'Tailscale' } : { route: 'not-running', reason: 'Offline in Tailscale' }
   if (i.manual) return { route: 'direct', reason: 'Manually added server' }
   const force = settings?.overrides[i.key]?.forceRoute
   if (i.state !== 'running') return { route: 'not-running', reason: i.state }

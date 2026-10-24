@@ -22,6 +22,7 @@ import { flushDataFolder, updateDataFolder } from '../main/dataFolder'
 import { boxCallback } from '../main/box'
 import { flushBoxSync, linkFileLocal, updateBoxSync } from '../main/boxSync'
 import { releaseAllRdp } from '../main/rdp/sessions'
+import { releaseAllVnc } from '../main/vnc/sessions'
 import { ensureProxy, stopProxy } from '../main/rdp/cleanpath'
 import { createGatewayHost } from './host'
 import { initLog } from '../main/log'
@@ -86,7 +87,7 @@ async function main(): Promise<void> {
     closing = true
     log('[gateway] shutting down')
     closeAllLocal()
-    Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), closeAllTunnels(), closePlmHealth(), closeDbLocks(), flushDataFolder(), flushBoxSync()])
+    Promise.all([closeAllSsh(), closeAllSftp(), releaseAllRdp(), releaseAllVnc(), closeAllTunnels(), closePlmHealth(), closeDbLocks(), flushDataFolder(), flushBoxSync()])
       .then(() => stopProxy())
       .catch(() => undefined)
       .then(() => gateway.close())

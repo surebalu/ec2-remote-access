@@ -750,6 +750,9 @@ export default function SettingsDialog(): ReactElement | null {
         <Row label="Keep shells running" hint={<>Runs SSH shells in tmux on Linux hosts, so a dropped connection resumes where you were (same user after <span className="mono">sudo su</span>, same directory, jobs still running). Closing a tab ends its shell; Detach leaves it running.</>}>
           <Toggle label="Keep shells running" checked={draft.persistentShells ?? true} onChange={(v) => upd('persistentShells', v)} />
         </Row>
+        <Row label="Tailscale machines" hint="Lists the computers on this machine's Tailscale network with the hosts: a Mac opens its screen (Screen Sharing), Windows Remote Desktop, Linux SSH. Read from the Tailscale app here, so nothing to sign in to.">
+          <Toggle label="Tailscale machines" checked={draft.tailscaleHosts !== false} onChange={(v) => upd('tailscaleHosts', v)} />
+        </Row>
         <Row label="Per-host settings" hint="Users, keys and routes saved from the connect dialog.">
           <div className="flex items-center gap-2">
             <span className="muted">{Object.keys(draft.overrides).length} saved</span>

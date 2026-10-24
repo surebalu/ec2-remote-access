@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactElement } from 'react'
 import type { Instance } from '@shared/types'
 import { filteredInstances, routeOf, useStore, visibleInstances } from '../../store'
 import { groupKeyOf, metaFor } from '../../colors'
-import { openFilesFor, openInConsole, openRdpFor, openSshFor } from '../../quickConnect'
+import { openFilesFor, openInConsole, openRdpFor, openScreenFor, openSshFor } from '../../quickConnect'
+import { defaultSessionFor } from '@shared/tailnet'
 import { Icon } from '../icons'
 import Sheet, { SheetItem } from './Sheet'
 
@@ -34,10 +35,10 @@ export default function MobileHosts(): ReactElement {
     }
     return [...byKey].map(([key, list]) => ({ key, ...metaFor(key, s.settings), list }))
       .sort((a, b) => Number(a.key.startsWith('group:')) - Number(b.key.startsWith('group:')) || a.label.localeCompare(b.label))
-  }, [s.instances, s.profiles, s.search, s.profileFilter, s.favoritesOnly, s.osFilter, s.stateFilter, s.reachFilter, s.settings]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.instances, s.tailnet, s.profiles, s.search, s.profileFilter, s.favoritesOnly, s.osFilter, s.stateFilter, s.reachFilter, s.settings]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const accounts = useMemo(() => [...new Set(visibleInstances(s).map(groupKeyOf))].map((k) => ({ key: k, ...metaFor(k, s.settings) })).sort((a, b) => a.label.localeCompare(b.label)),
-    [s.instances, s.profiles, s.settings]) // eslint-disable-line react-hooks/exhaustive-deps
+    [s.instances, s.tailnet, s.profiles, s.settings]) // eslint-disable-line react-hooks/exhaustive-deps
   const shown = groups.reduce((n, g) => n + g.list.length, 0)
   const target = actionsFor ? visibleInstances(s).find((i) => i.key === actionsFor) : undefined
 
@@ -81,7 +82,7 @@ export default function MobileHosts(): ReactElement {
           <div className="m-card-list">
             {g.list.map((i) => (
               <button key={i.key} className="m-host" data-host-key={i.key} onClick={() => setActionsFor(i.key)}>
-                <span className={`m-host-os ${i.state === 'running' ? '' : 'off'}`}>{i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />}</span>
+                <span className={`m-host-os ${i.state === 'running' ? '' : 'off'}`}>{i.tailnet?.os === 'macOS' ? <Icon.laptop /> : i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />}</span>
                 <span className="min-w-0 flex-1 text-left">
                   <span className="m-host-name">{favs.has(i.key) && <Icon.star filled className="m-fav" />}{i.name}</span>
                   <span className="m-host-meta mono">{i.publicIp ?? i.privateIp ?? i.instanceId}{i.staleReason ? ' · cached' : ''}</span>
@@ -113,19 +114,21 @@ function HostActionsSheet({ i, onClose }: { i: Instance; onClose: () => void }):
   const open = s.tabs.filter((t) => t.instanceKey === i.key)
   return (
     <Sheet
-      title={<>{i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />} {i.name}</>}
+      title={<>{i.tailnet?.os === 'macOS' ? <Icon.laptop /> : i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />} {i.name}</>}
       subtitle={<span className="mono">{[i.instanceId, i.instanceType, i.region, i.publicIp ?? i.privateIp].filter(Boolean).join(' · ')}<br /><span className="not-mono">{r.reason}</span></span>}
       onClose={onClose}
     >
       {open.map((t) => (
-        <SheetItem key={t.id} icon={t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : <Icon.terminal />} hint="open" onClick={() => run(() => s.setActive(t.id))}>
-          Switch to {t.kind === 'rdp' ? 'desktop' : t.kind === 'sftp' ? 'files' : 'terminal'}
+        <SheetItem key={t.id} icon={t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'vnc' ? <Icon.screenShare /> : t.kind === 'sftp' ? <Icon.folder /> : <Icon.terminal />} hint="open" onClick={() => run(() => s.setActive(t.id))}>
+          Switch to {t.kind === 'rdp' ? 'desktop' : t.kind === 'vnc' ? 'screen' : t.kind === 'sftp' ? 'files' : 'terminal'}
         </SheetItem>
       ))}
+      {defaultSessionFor(i) === 'vnc' && <SheetItem icon={<Icon.screenShare />} disabled={!reachable} onClick={() => run(() => void openScreenFor(i.key))}>Share screen</SheetItem>}
       {i.platform === 'windows' && <SheetItem icon={<Icon.monitor />} disabled={!reachable} onClick={() => run(() => void openRdpFor(i.key))}>Remote desktop</SheetItem>}
       <SheetItem icon={<Icon.terminal />} disabled={!reachable} onClick={() => run(() => openSshFor(i.key))}>SSH terminal</SheetItem>
       <SheetItem icon={<Icon.folder />} disabled={!reachable} onClick={() => run(() => openFilesFor(i.key))}>Files (SFTP)</SheetItem>
-      <SheetItem icon={<Icon.activity />} onClick={() => run(() => s.openHostPage(i.key))}>Machine details (CPU, memory, disks, processes)</SheetItem>
+      {defaultSessionFor(i) !== 'vnc' && <SheetItem icon={<Icon.screenShare />} disabled={!reachable} onClick={() => run(() => void openScreenFor(i.key))}>Share screen (VNC)</SheetItem>}
+      {!i.tailnet && <SheetItem icon={<Icon.activity />} onClick={() => run(() => s.openHostPage(i.key))}>Machine details (CPU, memory, disks, processes)</SheetItem>}
       {!i.manual && <SheetItem icon={<Icon.globe />} onClick={() => run(() => openInConsole(i))}>AWS console (opens in Safari, signed in)</SheetItem>}
       {!i.manual && <SheetItem icon={<Icon.broadcast />} disabled={!i.ssmOnline || i.state !== 'running'} onClick={() => run(() => s.set({ runCommandFor: { keys: [i.key] } }))}>Run a command…</SheetItem>}
       <SheetItem icon={<Icon.settings />} onClick={() => run(() => s.set({ connectFor: { kind: i.platform === 'windows' ? 'rdp' : 'ssh', key: i.key } }))}>Connect with options…</SheetItem>

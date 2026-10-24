@@ -15,11 +15,12 @@ import type { HostHistory, HostSnapshot, ProcessDetail } from './hostInsight'
 import type {
   AwsProfile, ProfileStatus, ScanResult, ScanProgress, Settings, Instance,
   SshOpenRequest, SshSessionInfo, SshEvent, Tunnel, RdpOpenRequest, WindowsPasswordResult, RouteDecision,
-  RdpPrepareRequest, RdpPrepared, StoredCredential, Theme,
+  RdpPrepareRequest, RdpPrepared, VncPrepareRequest, VncPrepared, StoredCredential, Theme,
   SsoStartRequest, SsoDeviceFlow, SsoAccount, SsoSaveRequest, StaticProfileRequest, SsoSessionInfo,
   SftpOpenRequest, SftpSessionInfo, SftpEntry, SftpTransfer, SftpEvent, ScanTarget, PhoneAccessStatus,
   PortForwardRequest, HostHealth, HostShell, NotesInfo, NoteEntry, NoteFile, NoteHit, BrowserState, WebDownload, WebLogin, LocalTermOpen, LocalTermInfo, LocalTermEvent, TerminalState, Board, BoardSummary, AppAbout, AppCommand, DataStatus, RunCommandRequest, RunState, VoiceEvent, VoiceStatus } from './types'
 import type { GitStatus } from './gitStatus'
+import type { TailnetState } from './tailnet'
 import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
 import type { DownloadItem, NetworkInfo, ProcessInfo, SpeedRun } from './macTools'
 import type { MacCalendar, MacEvent } from './calendar'
@@ -152,6 +153,12 @@ export interface IpcApi {
   'rdp:prepare': (req: RdpPrepareRequest) => Promise<RdpPrepared>
   'rdp:release': (sessionId: string) => Promise<void>
   'rdp:lastError': (sessionId: string) => Promise<string | undefined>
+  /** Screen sharing (VNC): a one-time WebSocket to the host's RFB port (main/vnc). */
+  'vnc:prepare': (req: VncPrepareRequest) => Promise<VncPrepared>
+  'vnc:release': (sessionId: string) => Promise<void>
+  'vnc:lastError': (sessionId: string) => Promise<string | undefined>
+  /** The machines on this computer's Tailscale network, as hosts; `refresh` skips the 10 s memory. */
+  'tailnet:list': (refresh?: boolean) => Promise<TailnetState>
   'creds:get': (instanceKey: string) => Promise<StoredCredential | null>
   'creds:set': (instanceKey: string, cred: StoredCredential) => Promise<void>
   'creds:delete': (instanceKey: string) => Promise<void>

@@ -15,6 +15,7 @@ import { connect as tlsConnect, type TLSSocket, type DetailedPeerCertificate, ty
 import { der, decodeInteger, readAll, readTlv } from './der'
 import { afterProbe, CLOCK_JUMP_MS, probeRdp, shouldProbe } from './liveness'
 import { log } from '../log'
+import { relayVnc } from '../vnc/relay'
 
 /**
  * Last-resort backstop: the client has been sending input with zero bytes back for a full 3 minutes. Input alone is
@@ -77,7 +78,10 @@ export async function ensureProxy(): Promise<string> {
   })
   const addr = server.address()
   port = typeof addr === 'object' && addr ? addr.port : 0
-  server.on('connection', (ws) => {
+  server.on('connection', (ws, req) => {
+    // Screen sharing shares this localhost server: /vnc/<token> is a plain RFB relay (../vnc/relay.ts).
+    const vnc = /^\/vnc\/([A-Za-z0-9_-]{16,64})$/.exec(req.url ?? '')
+    if (vnc) { relayVnc(ws, vnc[1]); return }
     const ctx: { token?: string } = {}
     void handle(ws, ctx).catch((e) => {
       const msg = friendlyTls((e as Error).message)

@@ -685,7 +685,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
           {otherTabs.filter((t) => !splitGroup.includes(t.id)).length > 0 && <MenuLabel>Show beside</MenuLabel>}
           {otherTabs.filter((t) => !splitGroup.includes(t.id)).map((t) => (
             <MenuItem key={t.id} onClick={() => { setMenu(null); useStore.getState().splitWith(tab.id, t.id) }}>
-              {t.kind === 'sftp' ? 'Files: ' : t.kind === 'rdp' ? 'Desktop: ' : ''}{t.title}
+              {t.kind === 'sftp' ? 'Files: ' : t.kind === 'rdp' ? 'Desktop: ' : t.kind === 'vnc' ? 'Screen: ' : ''}{t.title}
             </MenuItem>
           ))}
           {inSplit && <><MenuSep /><MenuItem onClick={() => { setMenu(null); useStore.getState().unsplit(tab.id) }}>Move this pane to its own tab</MenuItem></>}

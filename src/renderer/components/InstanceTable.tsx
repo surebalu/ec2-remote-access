@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Instance } from '@shared/types'
 import { allInstances, filteredInstances, routeOf, useStore, visibleInstances } from '../store'
-import { openDefaultFor, openFilesFor, openInConsole, openRdpFor, openSshFor } from '../quickConnect'
+import { openDefaultFor, openFilesFor, openInConsole, openRdpFor, openScreenFor, openSshFor } from '../quickConnect'
+import { defaultSessionFor } from '@shared/tailnet'
 import { Icon } from './icons'
 import { groupKeyOf, metaFor } from '../colors'
 import type { GroupBy, Instance as Inst } from '@shared/types'
@@ -32,7 +33,7 @@ function RouteBadge({ i }: { i: Instance }): ReactElement {
 function OsBadge({ i }: { i: Instance }): ReactElement {
   return (
     <span className="inline-flex items-center gap-1.5" title={i.platformDetails}>
-      <span className="text-2">{i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />}</span>
+      <span className="text-2">{i.tailnet?.os === 'macOS' ? <Icon.laptop /> : i.platform === 'windows' ? <Icon.windows /> : <Icon.linux />}</span>
       {i.osHint}
     </span>
   )
@@ -71,7 +72,7 @@ export default function InstanceTable(): ReactElement {
         const bv = val(b)
         return av.localeCompare(bv, undefined, { numeric: true }) * sort.dir || a.name.localeCompare(b.name)
       })
-  }, [s.instances, s.profiles, s.search, s.profileFilter, s.favoritesOnly, s.osFilter, s.stateFilter, s.reachFilter, s.settings, sort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.instances, s.tailnet, s.profiles, s.search, s.profileFilter, s.favoritesOnly, s.osFilter, s.stateFilter, s.reachFilter, s.settings, sort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const groupBy: GroupBy = s.settings?.groupBy ?? 'account'
   const favs = new Set(s.settings?.favorites ?? [])
@@ -470,10 +471,11 @@ function ContextMenu({
       <div className="section-title px-3 py-1.5">{i.name}</div>
       {item('Host page', () => s.openHostPage(i.key))}
       {item('Host details', () => s.revealHost(i.key))}
+      {defaultSessionFor(i) === 'vnc' && item('Share screen', () => void openScreenFor(i.key), !reachable)}
       {i.platform === 'windows' && item('Remote desktop', () => void openRdpFor(i.key), !reachable)}
       {i.platform !== 'windows' && item('Open SSH', () => openSshFor(i.key), !reachable)}
       {/* Beside the tab that was in front before Hosts: a ticket in the Browser, another host's terminal. */}
-      {beside && item(`${i.platform === 'windows' ? 'Remote desktop' : 'SSH'} beside ${beside.kind === 'browser' ? 'the Browser' : beside.title}`, () => openDefaultFor(i.key, { tab: beside.id }), !reachable)}
+      {beside && item(`${{ vnc: 'Screen', rdp: 'Remote desktop', ssh: 'SSH' }[defaultSessionFor(i)]} beside ${beside.kind === 'browser' ? 'the Browser' : beside.title}`, () => openDefaultFor(i.key, { tab: beside.id }), !reachable)}
       {(i.platform !== 'windows' || i.manual) && item('SSH with options…', () => s.set({ connectFor: { kind: 'ssh', key: i.key } }), i.state !== 'running')}
       {(i.platform !== 'windows' || i.manual) &&
         item(`SSH in ${s.settings?.externalTerminal ?? 'Terminal'}`, async () => {
@@ -485,20 +487,21 @@ function ContextMenu({
         }, !reachable)}
       {item('RDP with options…', () => s.set({ connectFor: { kind: 'rdp', key: i.key } }), i.state !== 'running')}
       {item('Files (SFTP)…', () => s.set({ connectFor: { kind: 'sftp', key: i.key } }), i.state !== 'running')}
+      {defaultSessionFor(i) !== 'vnc' && item('Share screen (VNC)', () => void openScreenFor(i.key), !reachable)}
       {!i.manual && item('Forward a port…', () => s.set({ portForwardFor: { key: i.key } }), !i.ssmOnline || i.state !== 'running')}
       {!i.manual && item('Run a command…', () => s.set({ runCommandFor: { keys: [i.key] } }), !i.ssmOnline || i.state !== 'running')}
       {!i.manual && i.platform !== 'windows' && item('Services…', () => s.set({ servicesFor: { targets: [{ key: i.key }], title: i.name } }), !i.ssmOnline || i.state !== 'running')}
       {i.platform === 'windows' && !i.manual && item('Get Windows password', () => s.set({ passwordFor: i.key }))}
       {!i.manual && item('Open in AWS console', () => openInConsole(i))}
-      {i.manual && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}
-      {i.manual &&
+      {i.manual && !i.tailnet && item('Edit server…', () => s.set({ manualHostEditor: i.key.replace('manual/', '') }))}
+      {i.manual && !i.tailnet &&
         item('Remove server', async () => {
           if (window.confirm(`Remove "${i.name}" from your servers?`)) await s.deleteManualHost(i.key.replace('manual/', ''))
         })}
       <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
       {item(s.isFavorite(i.key) ? '★ Remove from favorites' : '☆ Add to favorites', () => void s.toggleFavorite(i.key))}
-      {item('Copy instance ID', () => void copy(i.instanceId, 'Instance ID'))}
-      {item('Copy public IP', () => void copy(i.publicIp, 'Public IP'), !i.publicIp)}
+      {i.tailnet ? item('Copy Tailscale name', () => void copy(i.instanceId, 'Tailscale name')) : item('Copy instance ID', () => void copy(i.instanceId, 'Instance ID'))}
+      {item(i.tailnet ? 'Copy Tailscale IP' : 'Copy public IP', () => void copy(i.publicIp, i.tailnet ? 'Tailscale IP' : 'Public IP'), !i.publicIp)}
       {item('Copy private IP', () => void copy(i.privateIp, 'Private IP'), !i.privateIp)}
       {!i.manual &&
         item('Copy SSM CLI command', () =>
