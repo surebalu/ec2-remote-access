@@ -41,7 +41,6 @@ export default function HomeDeck(): ReactElement {
     <header className="ws-header">
       <div><span className="ws-eyebrow">REMOTE ACCESS / WORKSPACE</span><h1>Your workspace</h1><p>{new Date(now).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} <span>·</span> Across every enabled account</p></div>
       <div className="ws-header-actions">
-        <button className="btn ws-find" onClick={() => s.openQuickSwitcher()}><Icon.search />Find anything <kbd>⌘K</kbd></button>
         <button className="btn btn-primary" onClick={() => s.set({ manualHostEditor: 'new' })}><Icon.plus />Add server</button>
         <button className="hd-fold" aria-expanded={!folded} aria-label={folded ? 'Show the home panel' : 'Fold the home panel'} title={folded ? 'Show workspace' : 'Focus on inventory'} onClick={fold}><Icon.caret /></button>
       </div>
