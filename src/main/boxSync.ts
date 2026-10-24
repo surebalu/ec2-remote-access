@@ -5,10 +5,12 @@ import { basename, dirname, join } from 'node:path'
 import { BOX_FOLDER, BOX_SIMPLE_UPLOAD_MAX, linkFileKey, syncDoc, type BoxStatus, type RemoteDoc } from '@shared/box'
 import { boardStep, mergeStamps } from '@shared/dataFolder'
 import type { LinkItem } from '@shared/links'
+import type { BoxSetup, SetupPreview } from '@shared/setup'
 import { itemsOf, puts, RECORD_KINDS, type RecordKind } from '@shared/records'
 import { boardsDir, deletedBoards, deletedBoardsFile, isBoardId, onBoardsChanged } from './boards'
 import { BoxHttpError, boxApp, boxSignedIn, boxSignOut, download, fileInfo, folderIn, listFolder, onBoxConnected, onBoxSignIn, removeFile, upload, uploadLarge, type BoxItem } from './box'
 import { linkFilesRoot } from './dataFolder'
+import { buildSetupFile, computerName, previewSetup } from './setup'
 import { host } from './host'
 import { log } from './log'
 import { adoptRecords, applyRecords, loadRecords, onRecordsApplied } from './records'
@@ -19,7 +21,7 @@ import { adoptRecords, applyRecords, loadRecords, onRecordsApplied } from './rec
  * Tasks, Calendar, Links and CAD reviews item by item (syncDoc, which writes only over the version it read), the
  * whiteboards board by board (the later save wins, deletions remembered), and Links' files uploaded once each so a
  * computer without them downloads them when one is opened (openLinkFile). In Box:
- *   Remote Access Tool/records/<kind>.json, boards/<id>.json, boards-deleted.json, Links Files/…
+ *   Remote Access Tool/records/<kind>.json, boards/<id>.json, boards-deleted.json, Links Files/…, setup/<computer>.json
  * box-state.json keeps the folder ids and what each file was at the last sync, so an unchanged minute costs three
  * listings and nothing is downloaded.
  */
@@ -235,6 +237,53 @@ export async function openLinkFile(id: string): Promise<void> {
   await host().openPath(dest)
 }
 
+// ----- each Mac's setup -----
+
+/** A computer's name as a file name in Box (Box refuses slashes, and leading or trailing dots and spaces). */
+const setupName = (computer: string): string => `${computer.replace(/[\\/]/g, '-').replace(/^[\s.]+|[\s.]+$/g, '') || 'Mac'}.json`
+
+/**
+ * This Mac's setup (what Export setup writes: settings and the Identity Center profiles, never secrets) kept in Box
+ * as setup/<computer>.json, rewritten only when it changes (compared without its time), so a new Mac signed in to
+ * Box can bring it over in one step. The gateway has no Mac setup to keep.
+ */
+async function syncSetup(): Promise<void> {
+  if (!process.versions.electron) return
+  const content = buildSetupFile(0)
+  const hash = sha1(Buffer.from(JSON.stringify(content)))
+  const name = setupName(content.from.computer)
+  const key = `setup/${name}`
+  if (st().seen[key]?.sha1 === hash) return
+  const setupId = await dir(['setup'])
+  const existing = named(await listFolder(setupId), name)
+  // No version check: each Mac is the only writer of its own file.
+  const r = await upload(setupId, name, Buffer.from(`${JSON.stringify({ ...content, exportedAt: Date.now() }, null, 2)}\n`), existing ? { id: existing.id } : undefined)
+  if (r !== 'conflict') st().seen[key] = { sha1: hash }
+}
+
+/** The setups in Box, newest first, this Mac's own marked. */
+export async function boxSetups(): Promise<BoxSetup[]> {
+  if (!boxSignedIn()) throw new Error('Sign in to Box first (Settings → Data).')
+  const mine = setupName(computerName()).toLowerCase()
+  const out: BoxSetup[] = []
+  for (const f of (await listFolder(await dir(['setup']))).filter((e) => e.type === 'file' && e.name.endsWith('.json'))) {
+    try {
+      const v = JSON.parse((await download(f.id)).toString('utf8')) as { kind?: string; exportedAt?: number; from?: { computer?: string } }
+      if (v.kind !== 'ec2ra-setup') continue
+      out.push({ id: f.id, computer: String(v.from?.computer ?? f.name.slice(0, -5)), exportedAt: Number(v.exportedAt) || 0, mine: f.name.toLowerCase() === mine })
+    } catch { /* not a setup file */ }
+  }
+  return out.sort((a, b) => b.exportedAt - a.exportedAt)
+}
+
+/** What importing one of them would do; applied by setup:apply like a file. */
+export async function previewBoxSetup(id: string): Promise<SetupPreview> {
+  if (!/^\d+$/.test(id)) throw new Error('Not a Box file.')
+  const text = (await download(id)).toString('utf8')
+  const computer = (() => { try { return String((JSON.parse(text) as { from?: { computer?: string } }).from?.computer ?? '') } catch { return '' } })()
+  return previewSetup(text, `Box: ${setupName(computer || 'Mac')}`)
+}
+
 // ----- running -----
 
 export async function boxSyncNow(): Promise<BoxStatus> {
@@ -249,6 +298,7 @@ export async function boxSyncNow(): Promise<BoxStatus> {
     const listing = await listFolder(recordsId)
     for (const kind of RECORD_KINDS) await syncRecords(kind, recordsId, listing)
     await syncBoards(rootItems)
+    await syncSetup()
     lastSync = Date.now()
     lastError = undefined
     saveState()

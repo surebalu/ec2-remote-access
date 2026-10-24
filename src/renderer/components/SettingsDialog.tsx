@@ -5,6 +5,7 @@ import { agoLabel } from '@shared/dataFolder'
 import { DEFAULT_SERVICES, isUnitName, type ServiceDef } from '@shared/services'
 import { checkCombo, checkGlobalCombo, comboOf, DEFAULT_SHORTCUTS, formatCombo, RAIL_SECTIONS, SECTION_NAMES, SHORTCUT_TARGETS, sectionKeys, TARGET_NAMES, type RailSection, type ShortcutTarget } from '@shared/keyCombos'
 import { CAN_DICTATE, voice } from '../voice'
+import BoxSetups from './BoxSetups'
 import { useBox } from '../box'
 import { useStore } from '../store'
 import Modal from './Modal'
@@ -268,6 +269,7 @@ function BoxSettings(): ReactElement | null {
 }
 
 function DataSettings(): ReactElement {
+  const { st: box } = useBox()
   const [st, setSt] = useState<DataStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -336,6 +338,11 @@ function DataSettings(): ReactElement {
           <Row label="Import setup" hint="A file exported on another Mac. Shows what it brings before anything changes; nothing on this Mac is removed.">
             <button className="btn" onClick={() => void useStore.getState().importSetup()}>Import…</button>
           </Row>
+          {box?.signedIn && (
+            <Row label="From Box" hint="Each Mac signed in to Box keeps its setup there, updated when it changes." stack>
+              <BoxSetups signedIn />
+            </Row>
+          )}
         </Group>
       )}
       <Group title="Where your data is">

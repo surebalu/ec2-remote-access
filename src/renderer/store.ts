@@ -278,6 +278,8 @@ interface State {
   /** A setup file being imported (Settings → Data, the welcome screen): what it would do, shown before anything is written. */
   setupImport: SetupPreview | null
   importSetup: () => Promise<void>
+  /** The same, for a setup another Mac keeps in Box (setup:boxList). */
+  importSetupFromBox: (id: string) => Promise<void>
   /** profile name being edited, or null */
   editAccount: string | null
   ssoSessions: SsoSessionInfo[]
@@ -734,6 +736,13 @@ export const useStore = create<State>((set, get) => ({
   folderEditor: null,
   addAccountOpen: false,
   setupImport: null,
+  importSetupFromBox: async (id) => {
+    try {
+      set({ setupImport: await window.api.invoke('setup:fromBox', id) })
+    } catch (e) {
+      get().toast('error', (e as Error).message)
+    }
+  },
   importSetup: async () => {
     try {
       const preview = await window.api.invoke('setup:pickImport')

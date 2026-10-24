@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
@@ -46,21 +47,40 @@ export function companySetup(): CompanySetup | null {
   return company
 }
 
-export async function exportSetup(): Promise<string | null> {
+let name: string | undefined
+/**
+ * This computer's name as a setup file gives it: the Mac's own name (System Settings → General → About), which the
+ * network hostname ("Surendras-MBP-2.localdomain") only approximates; elsewhere (the gateway) its hostname.
+ */
+export function computerName(): string {
+  if (name) return name
+  if (process.platform === 'darwin') {
+    try { name = execFileSync('/usr/sbin/scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim() } catch { /* the hostname below */ }
+  }
+  name ||= hostname().replace(/\.(local|localdomain|lan)$/i, '')
+  return name
+}
+
+/** This Mac's setup as a file: for Export setup, and the copy kept in Box (boxSync.ts). */
+export function buildSetupFile(exportedAt = Date.now()): SetupFile {
   // Only the credentials file's section names are used, to say which profiles were left out.
   const { aws, left } = awsSetupFrom(configSections(), listSectionHeaders(CREDENTIALS_FILE))
   const settings = getSettings()
-  const file: SetupFile = {
-    kind: 'ec2ra-setup', version: 1, exportedAt: Date.now(),
-    from: { computer: hostname().replace(/\.local$/, ''), home: homedir(), appVersion: APP_VERSION },
+  return {
+    kind: 'ec2ra-setup', version: 1, exportedAt,
+    from: { computer: computerName(), home: homedir(), appVersion: APP_VERSION },
     aws,
     settings: exportSettings(settings),
     left: { profiles: left, ...(settings.dataDir ? { dataDir: settings.dataDir } : {}) }
   }
+}
+
+export async function exportSetup(): Promise<string | null> {
+  const file = buildSetupFile()
   const path = await host().pickSavePath({ title: 'Export setup', defaultPath: join(homedir(), 'Desktop', `EC2 Remote Access setup ${ymd(new Date())}.json`), buttonLabel: 'Export' })
   if (!path) return null
   writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 })
-  log('setup', 'exported', { profiles: aws.profiles.length, left: left.length })
+  log('setup', 'exported', { profiles: file.aws.profiles.length, left: file.left.profiles.length })
   return path
 }
 
@@ -70,13 +90,18 @@ export async function pickImport(): Promise<SetupPreview | null> {
   const path = (await host().pickPaths({ title: 'Import setup', kind: 'file', extensions: ['json'] }))?.[0]
   if (!path) return null
   if (statSync(path).size > 5 * 1024 * 1024) throw new Error(`${basename(path)} is too large to be a setup file.`)
-  const file = parseSetupFile(readFileSync(path, 'utf8'))
+  return previewSetup(readFileSync(path, 'utf8'), basename(path))
+}
+
+/** What importing a setup file would do, kept until applyImport (or the next preview) so nothing is written yet. */
+export function previewSetup(text: string, fileName: string): SetupPreview {
+  const file = parseSetupFile(text)
   const { status } = planSections(file.aws, configSections())
   const id = randomUUID()
   pending.clear()
   pending.set(id, file)
   return {
-    id, fileName: basename(path), from: file.from, exportedAt: file.exportedAt,
+    id, fileName, from: file.from, exportedAt: file.exportedAt,
     sessions: file.aws.sessions.map((s) => ({ name: s.name, status: status[`sso-session ${s.name}`] })),
     profiles: file.aws.profiles.map((p) => ({ name: p.name, accountId: p.accountId, status: status[p.name === 'default' ? 'default' : `profile ${p.name}`] })),
     settings: settingsSummary(file.settings),

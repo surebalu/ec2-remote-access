@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { CompanySetup } from '@shared/setup'
 import { hasBrowser } from '../quickConnect'
 import { useStore } from '../store'
+import { useBox } from '../box'
+import BoxSetups from './BoxSetups'
 import { Icon } from './icons'
 
 type Paths = { sessionManagerPlugin: string | null; sessionManagerPluginBundled: boolean; awsCli: string | null; windowsApp: boolean }
@@ -15,6 +17,7 @@ const FEATURES: { icon: ReactNode; title: string; text: string }[] = [
 /** Shown instead of the hosts table until there is an AWS account or a server to show. */
 export default function Welcome(): ReactElement {
   const set = useStore((s) => s.set)
+  const box = useBox()
   const [paths, setPaths] = useState<Paths | null>(null)
   // The organization's sign-in when this build carries one (build/company.json): one button sets up its accounts.
   const [company, setCompany] = useState<CompanySetup | null>(null)
@@ -77,11 +80,14 @@ export default function Welcome(): ReactElement {
             <Icon.chevron />
           </button>
         </div>
-        {hasBrowser() && (
-          <button className="welcome-import" onClick={() => void useStore.getState().importSetup()}>
-            Moving from another Mac? <span>Import a setup file</span> exported there (Settings → Data).
-          </button>
-        )}
+        {hasBrowser() && (box.st?.signedIn ? (
+          <div className="welcome-box"><BoxSetups signedIn /></div>
+        ) : (
+          <p className="welcome-import">
+            Moving from another Mac? <button type="button" onClick={() => void useStore.getState().importSetup()}>Import a setup file</button> exported there
+            {box.st?.available && <>, or <button type="button" onClick={box.signIn}>{box.waiting ? 'waiting for Box…' : 'sign in to Box'}</button> to bring it from there</>}.
+          </p>
+        ))}
         <div className="welcome-reqs">
           <div className="welcome-reqs-title">Before you connect</div>
           {req(paths ? !!paths.sessionManagerPlugin : null, 'AWS Session Manager plugin', paths?.sessionManagerPluginBundled ? 'Included with the app' : paths?.sessionManagerPlugin ?? 'For private instances: brew install --cask session-manager-plugin', 'https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html')}

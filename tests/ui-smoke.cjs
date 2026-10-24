@@ -52,6 +52,12 @@ const companyDefaults = {
   accountMeta: { 'prod-plm': { label: 'Prod', color: 'rose' } }
 }
 const setupDone = []
+const importPreview = () => ({
+  id: 'imp-1', fileName: 'EC2 Remote Access setup 2026-10-24.json', from: { computer: 'Old Mac', home: '/Users/old' }, exportedAt: now - 3600000,
+  sessions: [{ name: 'corp', status: 'add' }], profiles: [{ name: 'prod-plm', accountId: '111111111111', status: 'add' }, { name: 'qa-plm', accountId: '222222222222', status: 'kept' }],
+  settings: ['3 favorites', '2 host settings', 'appearance, terminal, Notes and other preferences'],
+  left: { profiles: [{ name: 'old-keys', why: 'uses access keys, which are never exported' }], dataDir: '/Volumes/home/EC2 Remote Access' }
+})
 // Box sync (main/boxSync.ts) as the page sees it: signed out until box:signIn, then signed in and synced.
 const boxSignedOut = { available: true, signedIn: false, syncing: false }
 let boxFixture = boxSignedOut
@@ -348,12 +354,9 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'sso:wait': return [{ accountId: '111111111111', accountName: 'Corp Production', roles: ['ReadOnly', 'Admin'] }, { accountId: '222222222222', accountName: 'Corp QA', roles: ['Admin'] }, { accountId: '333333333333', accountName: 'Sandbox', roles: ['Admin'] }]
     case 'sso:save': setupDone.push(['sso:save', args[0]]); return args[0].selections.map((x) => x.profileName)
     case 'setup:export': setupDone.push(['export']); return '/Users/fixture/Desktop/EC2 Remote Access setup.json'
-    case 'setup:pickImport': return {
-      id: 'imp-1', fileName: 'EC2 Remote Access setup 2026-10-24.json', from: { computer: 'Old Mac', home: '/Users/old' }, exportedAt: now - 3600000,
-      sessions: [{ name: 'corp', status: 'add' }], profiles: [{ name: 'prod-plm', accountId: '111111111111', status: 'add' }, { name: 'qa-plm', accountId: '222222222222', status: 'kept' }],
-      settings: ['3 favorites', '2 host settings', 'appearance, terminal, Notes and other preferences'],
-      left: { profiles: [{ name: 'old-keys', why: 'uses access keys, which are never exported' }], dataDir: '/Volumes/home/EC2 Remote Access' }
-    }
+    case 'setup:boxList': return [{ id: '901', computer: 'Old Mac', exportedAt: now - 7200000, mine: false }, { id: '902', computer: 'This Mac', exportedAt: now, mine: true }]
+    case 'setup:fromBox': setupDone.push(['fromBox', args[0]]); return { ...importPreview(), fileName: 'Box: Old Mac.json' }
+    case 'setup:pickImport': return importPreview()
     case 'setup:apply': setupDone.push(['apply', args[0]]); return { settings: { ...settings, favorites: [...settings.favorites, 'imported/us-east-1/i-imported'] }, profiles: ['prod-plm'], dataDir: '/Volumes/home/EC2 Remote Access' }
     case 'app:about': return { version: '1.0.0', electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: 'darwin', arch: 'arm64', dataDir: '/fixture/data', logsDir: '/fixture/data/logs' }
     case 'app:reveal': return
@@ -4236,7 +4239,8 @@ app.whenReady().then(async () => {
     await ejs(`[...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Done').click()`)
     await euntil(`!document.querySelector('[role="dialog"]')`)
     // Import a setup exported on another Mac: what it brings, then the data folder it used.
-    await ejs(`document.querySelector('.welcome-import').click()`)
+    assert.match(await ejs(`document.querySelector('.welcome-import').textContent`), /sign in to Box to bring it from there/, 'with Box in the build, the welcome offers it')
+    await ejs(`document.querySelector('.welcome-import button').click()`)
     await euntil(`document.querySelector('.setup-import')?.textContent.includes('Old Mac')`)
     assert.match(await ejs(`document.querySelector('.setup-import').textContent`), /prod-plm.*Will be added.*qa-plm.*A different one by this name stays/)
     assert.match(await ejs(`document.querySelector('.setup-import').textContent`), /3 favorites · 2 host settings/)
@@ -4270,6 +4274,17 @@ app.whenReady().then(async () => {
     assert.ok(setupDone.some((d) => d[0] === 'box:sync'), 'Sync now')
     await ejs(`window.confirm = () => true; [...document.querySelectorAll('.settings-body button')].find((b) => b.textContent === 'Sign out').click()`)
     await euntil(`[...document.querySelectorAll('.settings-body button')].some((b) => b.textContent === 'Sign in to Box…')`)
+    // A new Mac signed in to Box: the setup another Mac keeps there (not its own), one click to the same preview.
+    boxFixture = { available: true, signedIn: true, syncing: false, user: { name: 'Fixture Person', login: 'person@example.com' }, folder: { id: '123', name: 'Remote Access Tool' }, lastSync: Date.now() }
+    await ewin.loadFile(resolve('out/renderer/index.html'))
+    await euntil(`[...document.querySelectorAll('.welcome-box button')].map((b) => b.textContent).join('|').startsWith('Bring the setup from Old Mac') && document.querySelectorAll('.welcome-box button').length === 1`)
+    await eshot('welcome-box-setup.png')
+    await ejs(`document.querySelector('.welcome-box button').click()`)
+    await euntil(`document.querySelector('.setup-import')?.textContent.includes('Box: Old Mac.json')`)
+    assert.deepEqual(setupDone.find((d) => d[0] === 'fromBox'), ['fromBox', '901'])
+    await ejs(`[...document.querySelectorAll('.setup-import button')].find((b) => b.textContent === 'Cancel').click()`)
+    await euntil(`!document.querySelector('.setup-import')`)
+    boxFixture = boxSignedOut
     companyFixture = null
     ewin.destroy()
     settings.theme = savedTheme
