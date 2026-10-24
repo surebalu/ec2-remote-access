@@ -90,6 +90,25 @@ export async function saveImage(name: string, dataUrl: string): Promise<string> 
 }
 
 /**
+ * A design review as a note (the CAD tool's Save to Notes): "EC2 Remote/Reviews/<name>.md" with its picture beside it,
+ * which the report embeds as ![[<name>.png]]. A second save the same day gets " 2", never overwriting the first.
+ * `markdown` names the picture as {image}, filled in with the name it was saved under.
+ */
+export async function saveReview(name: string, markdown: string, png?: string): Promise<string> {
+  const folder = 'EC2 Remote/Reviews'
+  const stem = name.replace(/[\\/:*?"<>|#^[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Review'
+  await mkdir(join(root(), folder), { recursive: true })
+  let base = stem
+  for (let n = 2; existsSync(join(root(), `${folder}/${base}.md`)) || existsSync(join(root(), `${folder}/${base}.png`)); n++) base = `${stem} ${n}`
+  const image = png ? /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(png) : null
+  if (png && !image) throw new Error('Not a PNG image.')
+  if (image) await writeFile(join(root(), `${folder}/${base}.png`), Buffer.from(image[1], 'base64'))
+  const rel = `${folder}/${base}.md`
+  await writeFile(join(root(), rel), markdown.split('{image}').join(`${base}.png`), { encoding: 'utf8', flag: 'wx' })
+  return rel
+}
+
+/**
  * Opens a note in Obsidian (obsidian://open with its full path, which Obsidian maps to the vault that holds it). Done
  * here rather than through shell:open, which only passes web addresses.
  */

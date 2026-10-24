@@ -611,6 +611,8 @@ export type AppCommand =
   | { kind: 'today' }
   /** Links, showing a view ('tag:aws', 'folder:<id>') or with an item selected (the Links search panel's ⌘↵). */
   | { kind: 'links'; view?: string; id?: string }
+  /** The CAD tool, with a model file. */
+  | { kind: 'cad'; path?: string }
   /** Storage, in one of its rooms ('monitor'). */
   | { kind: 'storage'; room?: string }
   /** Settings, at a section ('windows', 'keyboard'). */

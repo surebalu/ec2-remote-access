@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactElement, type ReactNode } from 'react'
+import { isCadFile } from '@shared/cad'
 import type { SftpEntry } from '@shared/types'
 import {
   favoritePatch, formatDate, formatSize, freeName, isBundle, kindOf, parentOf, pathSteps, sortEntries,
@@ -186,6 +187,8 @@ export default function FinderTab({ tab, active }: { tab: Tab; active: boolean }
 
   const open = (e: Entry): void => {
     if (e.type === 'dir' && !isBundle(e)) go(e.path)
+    // STEP, IGES and other models open in the app's CAD viewer; Open With still offers the Mac's apps.
+    else if (isCadFile(e.path)) useStore.getState().openCad(e.path)
     else void window.api.invoke('local:open', e.path).catch((err: Error) => toast('error', err.message))
   }
   const quickLook = (): void => { const e = selected[0]; if (e) void window.api.invoke('local:quickLook', e.path) }

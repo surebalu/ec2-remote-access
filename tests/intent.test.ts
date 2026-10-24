@@ -50,6 +50,8 @@ test('dictated addresses and where to open them', () => {
   assert.deepEqual(top('go to github.com/surebalu in personal')?.intent, { kind: 'url', url: 'https://github.com/surebalu', space: { id: 'personal', name: 'Personal' }, external: undefined })
   assert.equal((top('open google.com in safari')?.intent as { external?: boolean }).external, true)
   assert.equal(top('mainspringenergy.com')?.title, 'Open mainspringenergy.com', 'a bare address')
+  assert.equal(readIntent('bracket.step', ctx).length, 0, 'a file name is not an address')
+  assert.equal(readIntent('open notes.md', ctx).some((m) => m.intent.kind === 'url'), false)
   assert.equal(top('open gmail in personal')?.title, 'Switch to Inbox - Gmail')
   assert.equal(top('open jira')?.title, 'Switch to OTS Sprint Board - Jira')
 })

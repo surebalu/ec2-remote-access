@@ -13,6 +13,8 @@ export interface OpenDialogOptions {
   kind: 'file' | 'directory' | 'any'
   multiple?: boolean
   buttonLabel?: string
+  /** Only files with these extensions (no dot), for a picker of one kind of file. */
+  extensions?: string[]
 }
 
 export interface MessageBoxOptions {

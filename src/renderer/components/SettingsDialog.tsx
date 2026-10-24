@@ -178,7 +178,7 @@ function VoiceSettings({ draft, upd }: { draft: Settings; upd: <K extends keyof 
 }
 
 const SECTION_ICONS: Record<RailSection, (p: { className?: string }) => ReactElement> = {
-  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
+  devtools: Icon.code, tasks: Icon.tasks, calendar: Icon.calendar, links: Icon.bookmark, hosts: Icon.server, overview: Icon.grid, health: Icon.health, local: Icon.console, finder: Icon.finder, storage: Icon.storage, cad: Icon.cube, browser: Icon.globe, notes: Icon.note, board: Icon.board, claude: Icon.claude, chatgpt: Icon.chatgpt
 }
 const SECTION_HINTS: Record<RailSection, string> = {
   devtools: 'Local JSON, encoding, tokens, timestamps and hashes.',
@@ -186,6 +186,7 @@ const SECTION_HINTS: Record<RailSection, string> = {
   calendar: 'Month, week and day, with your tasks and subscribed calendars.',
   links: 'Bookmarks and notes in folders and tags, imported from Anybox.',
   storage: 'Disk space, large files, junk and Recently Removed, as in Strata.',
+  cad: 'STEP, IGES and mesh files in 3D, with design reviews.',
   hosts: 'Every account’s hosts. ⌘1 always shows them too (Hosts is the first tab).',
   overview: 'Every open session on one page.',
   health: 'The 3DEXPERIENCE platform at a glance.',

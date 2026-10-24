@@ -1,6 +1,7 @@
 // Runs the built renderer with synthetic data and no production main process or AWS access.
 const { app, BrowserWindow, ipcMain, session, webContents } = require('electron')
 const http = require('node:http')
+const { createHash } = require('node:crypto')
 const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
@@ -107,6 +108,14 @@ const finderFs = {
   '/Users/fixture/Downloads': [], '/Users/fixture/Projects': [fsEntry('/Users/fixture/Projects', 'main.go', 'file', 1200)]
 }
 const finderDone = []
+// The CAD viewer reads two real STEP files from occt-import-js's own tests (an assembly and a cube), as main would.
+const cadFiles = {
+  as1: resolve('node_modules/occt-import-js/test/testfiles/cax-if/as1_pe_203.stp'),
+  cube: resolve('node_modules/occt-import-js/test/testfiles/simple-basic-cube/cube.stp')
+}
+const cadPicks = []
+const cadCache = {}
+const cadSaved = []
 // The Storage tool's pretend scan of a Mac: folders and big files by path, the disk, and what went to the Trash.
 const stIds = new Map()
 const stId = (path) => { if (!stIds.has(path)) stIds.set(path, stIds.size); return stIds.get(path) }
@@ -461,6 +470,16 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'boards:delete': delete boardsSaved[args[0]]; return
     case 'notes:saveImage': noteImages.push(args[1]); return `EC2 Remote/Boards/${args[0]}.png`
     case 'local:home': return '/Users/fixture'
+    case 'cad:read': { const bytes = readFileSync(args[0]); return { name: args[0].split('/').pop(), path: args[0], size: bytes.length, mtime: 1000, sha256: createHash('sha256').update(bytes).digest('hex'), format: 'step', bytes } }
+    case 'cad:pick': return cadPicks.shift() ?? null
+    case 'cad:cacheGet': return cadCache[args[0]] ?? null
+    case 'cad:cachePut': cadCache[args[0]] = args[1]; return
+    case 'notes:saveReview': {
+      const path = `EC2 Remote/Reviews/${args[0]}.md`
+      cadSaved.push({ name: args[0], markdown: args[1], png: args[2] })
+      notes[path] = { text: args[1].replace('{image}', `${args[0]}.png`), mtime: Date.now() }
+      return path
+    }
     case 'storage:state': return stState
     case 'storage:fullDiskAccess': return false
     case 'storage:disk': return { name: 'Macintosh HD', total: 994e9, free: 452e9, freeNow: 416e9, history: Array.from({ length: 12 }, (_, i) => ({ day: new Date(now - (11 - i) * 86400000).toISOString().slice(0, 10), used: 530e9 + i * 1.2e9, total: 994e9 })) }
@@ -1022,7 +1041,7 @@ app.whenReady().then(async () => {
     await key('ArrowRight')
     await until(`document.getElementById('workspace-tab-tools').getAttribute('aria-selected') === 'true'`)
     assert.equal(await js(`document.activeElement.id`), 'workspace-tab-tools')
-    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 13)
+    assert.equal(await js(`document.querySelectorAll('.ws-tool').length`), 14)
     await screenshot('workspace-tools.png')
     await workspaceTab('saved-work')
     await until(`!!document.querySelector('[aria-label="Search saved work"]')`)
@@ -1316,7 +1335,7 @@ app.whenReady().then(async () => {
     const keyUp = () => js(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true, cancelable: true }))`)
     await js(`document.dispatchEvent(new PointerEvent('pointermove', { clientX: 760, clientY: 470, bubbles: true }))`)
     await radialKey()
-    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 19`)
+    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 20`)
     assert.ok(await js(`document.querySelector('.radial-item.here').dataset.radial === 'hosts' && document.querySelector('.radial-center strong').textContent === 'Hosts'`), 'it starts on the section in front')
     assert.equal(await js(`document.activeElement === document.querySelector('.radial')`), true, 'the ring takes the keyboard')
     await new Promise((r) => setTimeout(r, 400))
@@ -3702,6 +3721,141 @@ app.whenReady().then(async () => {
     await stNav('Recently Removed')
     await tuntil(`document.querySelector('.st-intro')?.textContent.includes('800 MB')`, 'recently removed shows the Trash')
     await tshot('storage-removed.png')
+
+    // CAD: the start screen, an assembly read with OpenCascade (its parts tree: select, hide, show all), then a cube:
+    // a pinned comment and a measurement clicked on the model, an issue, the checklist, Request changes asked in place,
+    // Approve, the report saved to Notes with its picture, and the assembly again from the cache.
+    const cadStage = async () => tjs(`(() => { const r = document.querySelector('.cad-canvas').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
+    const cadClick = async (x, y) => {
+      twin.webContents.focus()
+      twin.webContents.sendInputEvent({ type: 'mouseMove', x, y })
+      twin.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+      twin.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+    }
+    // Reading STEP compiles OpenCascade's WebAssembly first: a longer wait, and what the tab shows if it never opens.
+    const cadUntil = async (code, what) => {
+      for (let n = 0; n < 600; n++) { if (await tjs(code)) return; await new Promise((r) => setTimeout(r, 50)) }
+      console.error('[cad state]', await tjs(`JSON.stringify({ loading: document.querySelector('.cad-loading')?.textContent, error: document.querySelector('.cad-error')?.textContent, head: document.querySelector('.cad-head')?.textContent, nodes: document.querySelectorAll('.cad-node').length, toast: document.querySelector('.toast')?.textContent })`), calls.filter((c) => c.channel.startsWith('cad:')).map((c) => c.channel))
+      throw new Error(`Timed out (CAD): ${what}`)
+    }
+    const cadRecords = (type) => Object.values(recordDocs.reviews?.items ?? {}).filter((i) => i.type === type)
+    const cadSet = (selector, value) => tjs(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await tjs(`document.querySelector('button[aria-label="CAD"]').click()`)
+    await tuntil(`!!document.querySelector('.cad .cad-start .cad-drop')`, 'the CAD start screen')
+    assert.equal(await tjs(`document.querySelector('.sidebar')?.getClientRects().length ?? 0`), 0, 'the hosts sidebar steps aside for CAD')
+    await tshot('cad-start.png')
+    cadPicks.push(cadFiles.as1)
+    await tjs(`document.querySelector('.cad-head button[title^="Open a CAD file"]').click()`)
+    await cadUntil(`document.querySelector('.cad-head-file b')?.textContent === 'as1_pe_203.stp' && document.querySelectorAll('.cad-node').length > 3`, 'the assembly opens with its parts')
+    // OpenCascade gives this file as the plate, two bracket assemblies and the rod, each with its solids.
+    assert.equal(await tjs(`document.querySelector('.cad-panel-head b').textContent`), '4', 'the assembly has its parts')
+    assert.deepEqual(await tjs(`[...document.querySelectorAll('.cad-node-name')].map((n) => n.textContent)`), ['AS1_PE_ASM', 'PLATE', 'L_BRACKET_ASSEMBLY_ASM', 'L_BRACKET_ASSEMBLY_ASM', 'ROD_ASM'])
+    assert.match(await tjs(`document.querySelector('.cad-head-sub').textContent`), / mm · 4 parts$/)
+    await tuntil(`document.querySelector('.cad-verdict')?.dataset.verdict === 'open'`, 'a new review starts open')
+    assert.equal(cadRecords('cadfile').length, 1, 'opening the file starts its review')
+    assert.equal(cadRecords('cadfile')[0].checklist.length > 5, true, 'with the checklist')
+    for (let n = 0; n < 150 && !Object.keys(cadCache).length; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(Object.keys(cadCache).length, 1, 'what was read is cached as GLB')
+    const cadNode = (n) => `document.querySelectorAll('.cad-node')[${n}]`
+    await tjs(`${cadNode(1)}.querySelector('.cad-node-name').click()`)
+    await tuntil(`${cadNode(1)}.classList.contains('on')`, 'a part is selected from the tree')
+    await tjs(`${cadNode(1)}.querySelector('.cad-node-eye').click()`)
+    await tuntil(`${cadNode(1)}.classList.contains('hidden')`, 'and hidden')
+    await tshot('cad-assembly.png')
+    await tjs(`[...document.querySelectorAll('.cad-mini')].find((b) => b.textContent === 'Show all').click()`)
+    await tuntil(`!document.querySelector('.cad-node.hidden')`, 'show all')
+    cadPicks.push(cadFiles.cube)
+    await tjs(`document.querySelector('.cad-head button[title^="Open a CAD file"]').click()`)
+    await cadUntil(`document.querySelector('.cad-head-file b')?.textContent === 'cube.stp' && !document.querySelector('.cad-loading')`, 'the cube opens')
+    await tuntil(`document.querySelector('.cad-list-head')?.textContent === 'No comments yet'`, 'its own review')
+    // A comment pinned on the top face.
+    await tkey('c')
+    await tuntil(`document.querySelector('.cad-stage').classList.contains('tool-pin') && !!document.querySelector('.cad-tool-hint')`, 'the comment tool')
+    const mid = await cadStage()
+    await cadClick(mid.x, mid.y - 40)
+    await tuntil(`!!document.querySelector('.cad-composer textarea')`, 'the comment box opens where the model was clicked')
+    await cadSet('.cad-composer textarea', 'Chamfer this edge, 0.5 mm')
+    await tjs(`[...document.querySelectorAll('.cad-composer button')].find((b) => b.textContent === 'Pin').click()`)
+    await tuntil(`!!document.querySelector('.cad-pin[data-pin="1"]') && document.querySelector('.cad-note[data-note="1"]')?.textContent.includes('Chamfer this edge')`, 'pin 1 on the model and in the list')
+    assert.equal(cadRecords('cadnote').length, 1)
+    assert.equal(cadRecords('cadnote')[0].anchor.kind, 'point', 'the comment is anchored to a point')
+    assert.ok(cadRecords('cadnote')[0].view?.pos?.length === 3, 'with the view it was made in')
+    await tuntil(`/translate\\(\\d/.test(document.querySelector('.cad-pin').style.transform)`, 'the pin follows the model on screen')
+    // A measurement between two points on the cube.
+    await tkey('m')
+    await tuntil(`document.querySelector('.cad-stage').classList.contains('tool-measure')`, 'the ruler')
+    await cadClick(mid.x - 40, mid.y + 30)
+    await new Promise((r) => setTimeout(r, 80))
+    await cadClick(mid.x + 40, mid.y + 30)
+    await tuntil(`!!document.querySelector('.cad-len') && document.querySelector('.cad-tabs .on')?.textContent.startsWith('Measure')`, 'a length label and the Measure tab')
+    assert.ok(cadRecords('cadmeasure')[0].length > 0, 'the measurement has a length')
+    await tjs(`[...document.querySelectorAll('.cad-measure button')].find((b) => b.textContent === 'Name…').click()`)
+    await tuntil(`!!document.querySelector('input[aria-label="Measurement name"]')`, 'naming a measurement in place')
+    await cadSet('input[aria-label="Measurement name"]', 'Face span')
+    await tjs(`document.querySelector('input[aria-label="Measurement name"]').blur()`)
+    await tuntil(`document.querySelector('.cad-measure p')?.textContent.includes('Face span')`, 'the name is kept')
+    await tkey('Escape')
+    await tuntil(`document.querySelector('.cad-stage').classList.contains('tool-orbit')`, 'Esc goes back to turning')
+    await tshot('cad-review.png')
+    // An issue, two checks (one failing, with what fails), Request changes asked in place, then Approve.
+    await tjs(`[...document.querySelectorAll('.cad-tabs button')].find((b) => b.textContent.startsWith('Issues')).click()`)
+    await tuntil(`!!document.querySelector('input[aria-label="New issue"]')`, 'issues tab')
+    await cadSet('input[aria-label="New issue"]', 'Wall below 1.5 mm at the flange')
+    await tjs(`(() => { const s = document.querySelector('select[aria-label^="New issue"][aria-label$="severity"]'); s.value = 'high'; s.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await tjs(`[...document.querySelectorAll('.cad-compose button')].find((b) => b.textContent === 'Add issue').click()`)
+    await tuntil(`document.querySelector('.cad-issue')?.dataset.severity === 'high'`, 'the issue is listed')
+    await tjs(`[...document.querySelectorAll('.cad-tabs button')].find((b) => b.textContent.startsWith('Checklist')).click()`)
+    await tuntil(`document.querySelectorAll('.cad-checkrow').length > 5`, 'the checklist')
+    await tjs(`document.querySelectorAll('.cad-checkrow')[0].querySelector('[data-s="pass"]').click()`)
+    await tjs(`document.querySelectorAll('.cad-checkrow')[1].querySelector('[data-s="fail"]').click()`)
+    await tuntil(`document.querySelectorAll('.cad-checkrow')[0].classList.contains('pass') && !!document.querySelectorAll('.cad-checkrow')[1].querySelector('.cad-check-note')`, 'a check passes; a failing one asks what fails')
+    await tjs(`document.querySelector('.cad-check-note').focus()`)
+    await cadSet('.cad-check-note', 'Draft is 0.5°')
+    await tjs(`document.querySelector('.cad-check-note').blur()`)
+    for (let n = 0; n < 60 && !cadRecords('cadfile').some((f) => f.checklist.some((c) => c.note === 'Draft is 0.5°')); n++) await new Promise((r) => setTimeout(r, 30))
+    assert.ok(cadRecords('cadfile').some((f) => f.checklist.some((c) => c.status === 'fail' && c.note === 'Draft is 0.5°')), 'the failing check keeps its note')
+    await tjs(`[...document.querySelectorAll('.cad-verdict button')].find((b) => b.textContent === 'Request changes').click()`)
+    await tuntil(`!!document.querySelector('.cad-ask textarea')`, 'what needs to change is asked in place')
+    await cadSet('.cad-ask textarea', 'Thicken the flange')
+    await tjs(`document.querySelector('.cad-ask button[type="submit"]').click()`)
+    await tuntil(`document.querySelector('.cad-verdict')?.dataset.verdict === 'changes' && document.querySelector('.cad-verdict-sub').textContent.includes('Thicken the flange')`, 'changes requested, with the note')
+    await tjs(`[...document.querySelectorAll('.cad-verdict button')].find((b) => b.textContent === 'Reopen').click()`)
+    await tuntil(`document.querySelector('.cad-verdict')?.dataset.verdict === 'open'`, 'reopened')
+    await tjs(`window.__cadConfirm = []; window.confirm = (m) => { window.__cadConfirm.push(m); return true }; 0`)
+    await tjs(`[...document.querySelectorAll('.cad-verdict button')].find((b) => b.textContent === 'Approve').click()`)
+    await tuntil(`document.querySelector('.cad-verdict')?.dataset.verdict === 'approved' && document.querySelector('.cad-chip.verdict')?.dataset.verdict === 'approved'`, 'approved')
+    assert.match(await tjs(`window.__cadConfirm[0] ?? ''`), /Approve anyway\?/, 'approving with an open issue asks first')
+    // The report goes to Notes with a picture of the pinned model, and the note opens beside the model.
+    await tjs(`[...document.querySelectorAll('.cad-head .btn')].find((b) => b.textContent.includes('Report')).click()`)
+    await tuntil(`!!document.querySelector('.cad-menu [role="menuitem"]')`, 'the report menu')
+    await tjs(`[...document.querySelectorAll('.cad-menu [role="menuitem"]')].find((b) => b.textContent.startsWith('Save to Notes')).click()`)
+    for (let n = 0; n < 100 && !cadSaved.length; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(cadSaved.length, 1, 'the review is saved to Notes')
+    assert.match(cadSaved[0].name, /^cube review \d{4}-\d{2}-\d{2}$/)
+    assert.match(cadSaved[0].markdown, /Chamfer this edge, 0\.5 mm/)
+    assert.match(cadSaved[0].markdown, /Wall below 1\.5 mm at the flange/)
+    assert.match(cadSaved[0].markdown, /Face span/)
+    assert.match(cadSaved[0].markdown, /\{image\}/, 'the picture goes where the report says')
+    assert.ok(cadSaved[0].png?.startsWith('data:image/png;base64,') && cadSaved[0].png.length > 5000, 'with a picture')
+    await tuntil(`document.querySelector('.notes-title')?.textContent.startsWith('cube review')`, 'the note opens beside the model')
+    // Beside the note there is room for one side panel, the one opened last; the model keeps its room.
+    await tuntil(`document.querySelector('.cad').classList.contains('narrow') && !document.querySelector('.cad-tree') && !!document.querySelector('.cad-review')`, 'one side panel beside a note')
+    assert.ok(await tjs(`document.querySelector('.cad-stage').getBoundingClientRect().width`) > 300, 'the model keeps its room')
+    await tshot('cad-report.png')
+    await tjs(`document.querySelector('.cad-head .cad-icon-btn[title="Parts"]').click()`)
+    await tuntil(`!!document.querySelector('.cad-tree') && !document.querySelector('.cad-review')`, 'Parts takes the side')
+    await tjs(`document.querySelector('.cad-head .cad-icon-btn[title="Review"]').click()`)
+    await tuntil(`!document.querySelector('.cad-tree') && !!document.querySelector('.cad-review')`, 'and Review takes it back')
+    // Back to the assembly from the Reviews list: it comes from the cache, its review still open, the cube approved.
+    assert.ok(await tjs(`!!document.querySelector('.cad-canvas')?.getClientRects().length`), 'the model stays beside the note')
+    const cadCalls = calls.filter((c) => c.channel === 'cad:cacheGet').length
+    cadPicks.push(cadFiles.as1)
+    await tjs(`document.querySelector('.cad-head button[title^="Open a CAD file"]').click()`)
+    await cadUntil(`document.querySelector('.cad-head-file b')?.textContent === 'as1_pe_203.stp' && !document.querySelector('.cad-loading') && / mm · 4 parts$/.test(document.querySelector('.cad-head-sub')?.textContent)`, 'the assembly again, its parts kept by the cache')
+    assert.equal(calls.filter((c) => c.channel === 'cad:cacheGet').length, cadCalls + 1)
+    await tjs(`[...document.querySelectorAll('.cad-tabs button')].find((b) => b.textContent.startsWith('Info')).click()`)
+    await tuntil(`document.querySelector('.cad-info')?.textContent.includes('from the cache')`, 'read from the cache the second time')
+    assert.deepEqual(cadRecords('cadfile').map((f) => [f.name, f.verdict]).sort(), [['as1_pe_203.stp', 'open'], ['cube.stp', 'approved']])
 
     // Run Command on the hosts listed: a confirmation for production, then each host's result and output; retry the failed.
     await tjs(`document.querySelector('button[aria-label="Hosts"]').click()`)

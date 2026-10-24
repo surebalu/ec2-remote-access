@@ -21,6 +21,7 @@ import type { GitStatus } from './gitStatus'
 import type { LauncherApp, LauncherPreview, LauncherUsage, SystemAction } from './launcher'
 import type { DownloadItem, NetworkInfo, ProcessInfo, SpeedRun } from './macTools'
 import type { MacCalendar, MacEvent } from './calendar'
+import type { CadFormat } from './cad'
 
 /** Request/response channels (ipcRenderer.invoke) */
 export interface IpcApi {
@@ -227,6 +228,13 @@ export interface IpcApi {
   'linksPanel:automation': () => Promise<void>
   /** Both keys, and whether macOS gave each one to the app (Anybox may still hold them). */
   'linksPanel:status': () => Promise<Record<LinksPanelMode, { key: string; registered: boolean }>>
+  /** A CAD file's bytes with its SHA-256 (the review's key), for the CAD tool (Mac app only). */
+  'cad:read': (path: string) => Promise<{ name: string; path: string; size: number; mtime: number; sha256: string; format: CadFormat; bytes: Uint8Array }>
+  /** The Open dialog, showing CAD files only; null when cancelled. */
+  'cad:pick': () => Promise<string | null>
+  /** The meshes the tool built from a file before, as a GLB (by the file's SHA-256), or null. */
+  'cad:cacheGet': (sha256: string) => Promise<Uint8Array | null>
+  'cad:cachePut': (sha256: string, glb: Uint8Array) => Promise<void>
   /** An iCal subscription's .ics text (webcal:// works too). */
   'calendar:feed': (url: string) => Promise<string>
   /**
@@ -245,6 +253,8 @@ export interface IpcApi {
   'notes:capture': (text: string, task: boolean) => Promise<string>
   /** Saves a PNG (data: URL) into the notes folder (EC2 Remote/Boards) and returns its path there, for ![[embeds]]. */
   'notes:saveImage': (name: string, dataUrl: string) => Promise<string>
+  /** A CAD design review as a note in EC2 Remote/Reviews, with its picture (a PNG data URL) beside it; the note's path. */
+  'notes:saveReview': (name: string, markdown: string, png?: string) => Promise<string>
   /** Opens a note in the Obsidian app. */
   'notes:openInObsidian': (path: string) => Promise<void>
   'notes:append': (path: string, text: string) => Promise<void>

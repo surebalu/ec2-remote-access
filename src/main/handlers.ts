@@ -14,7 +14,7 @@ import { opLogins, opSecrets } from './onepassword'
 import { closeLocal, loadTerminalState, openLocal, resizeLocal, saveTerminalState, shellHistory, writeLocal } from './localterm'
 import { localGitStatus } from './localgit'
 import { loginMatches } from '@shared/browser'
-import { appendNote, captureToday, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
+import { appendNote, captureToday, saveReview, createFolder, createNote, dailyNote, deleteEntry, hostNote, listNotes, notesInfo, openInObsidian, pickNotesFolder, readNote, renameEntry, saveImage, searchNotes, statNote, writeNote } from './notes'
 import { deleteBoard, listBoards, loadBoard, saveBoard } from './boards'
 import { checkDataFolder, copyLinkFiles, dataStatus, syncNow, updateDataFolder } from './dataFolder'
 import { openSsh, writeSsh, resizeSsh, closeSsh, endDetachedShell, listShells, switchShell, renameShell, openExternalSsh } from './ssh/session'
@@ -40,6 +40,7 @@ import { jvmGc, kernelHealth, kernelMemoryHistory, memoryHistory, plmHealth } fr
 import { finderDuplicate, finderOpenWith, finderOpenWithApps, finderPaste, finderPlaces, finderRecents, finderSearch } from './finder'
 import { fileDetails, launcherFiles, launcherUsage, listApps, noteUse } from './apps'
 import { runSystemAction } from './system'
+import { cadCacheGet, cadCachePut, cadPick, cadRead } from './cad'
 import { downloads, killProcess, networkInfo, pasteText, processes, quitAllApps, quitApp, speedStatus, startSpeedTest } from './macTools'
 import { control, controlPath, controlStatus, NO_HELPER } from './macControl'
 import type { MacCalendar, MacEvent } from '@shared/calendar'
@@ -124,6 +125,10 @@ export const handlers: Handlers = {
   'links:anybox': () => readAnybox(),
   'links:preview': (url) => linkPreview(url),
   'calendar:feed': (url) => calendarFeed(url),
+  'cad:read': (path) => cadRead(path),
+  'cad:pick': () => cadPick(),
+  'cad:cacheGet': (sha) => cadCacheGet(sha),
+  'cad:cachePut': (sha, glb) => cadCachePut(sha, glb),
   'maccal:status': async () => {
     if (!host().mac) return { available: false, status: 'unknown', message: 'Calendars on a Mac are read by the Mac app: open the Calendar there, or reach the app through the Mac’s Phone access.' }
     if (!controlPath()) return { available: false, status: 'unknown', message: NO_HELPER }
@@ -248,6 +253,7 @@ export const handlers: Handlers = {
   'notes:hostNote': (key) => hostNote(key),
   'notes:daily': () => dailyNote(),
   'notes:append': (path, text) => appendNote(path, text),
+  'notes:saveReview': (name, markdown, png) => saveReview(String(name ?? ''), String(markdown ?? ''), typeof png === 'string' ? png : undefined),
   'notes:search': (query) => searchNotes(query),
   'notes:pickFolder': () => pickNotesFolder(),
   'notes:mkdir': (path) => createFolder(path),

@@ -13,7 +13,7 @@ const CROWDED_AT = 3
 const OVERFLOW_W = 44
 
 const dotFor = (st: string): string => (st === 'connected' ? 'var(--ok)' : st === 'connecting' ? 'var(--warn)' : st === 'error' ? 'var(--err)' : 'var(--muted)')
-const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'tasks' ? <Icon.tasks /> : t.kind === 'calendar' ? <Icon.calendar /> : t.kind === 'links' ? <Icon.bookmark /> : t.kind === 'health' ? <Icon.health /> : t.kind === 'finder' ? <Icon.finder /> : t.kind === 'storage' ? <Icon.storage /> : t.kind === 'claude' ? <Icon.claude /> : t.kind === 'chatgpt' ? <Icon.chatgpt /> : <Icon.terminal />)
+const iconFor = (t: Tab): ReactElement => (t.kind === 'rdp' ? <Icon.monitor /> : t.kind === 'sftp' ? <Icon.folder /> : t.kind === 'notes' ? <Icon.note /> : t.kind === 'browser' ? <Icon.globe /> : t.kind === 'local' ? <Icon.console /> : t.kind === 'board' ? <Icon.board /> : t.kind === 'devtools' ? <Icon.code /> : t.kind === 'tasks' ? <Icon.tasks /> : t.kind === 'calendar' ? <Icon.calendar /> : t.kind === 'links' ? <Icon.bookmark /> : t.kind === 'health' ? <Icon.health /> : t.kind === 'finder' ? <Icon.finder /> : t.kind === 'storage' ? <Icon.storage /> : t.kind === 'cad' ? <Icon.cube /> : t.kind === 'claude' ? <Icon.claude /> : t.kind === 'chatgpt' ? <Icon.chatgpt /> : <Icon.terminal />)
 
 function useWindowWidth(): number {
   const [w, setW] = useState(() => window.innerWidth)

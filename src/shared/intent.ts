@@ -178,7 +178,11 @@ const where = (h: IntentHost): string => [h.account, h.region, h.privateIp ?? h.
 
 // ----- other things a sentence can name -----
 
+/** Ends like a file, not a site ("bracket.step", "notes.md"): never read as an address. */
+const FILE_ENDING = /\.(step|stp|iges|igs|brep|stl|glb|gltf|obj|3mf|sldprt|sldasm|slddrw|pdf|docx?|xlsx?|pptx?|txt|md|csv|json|ya?ml|png|jpe?g|gif|zip|tar|gz|dmg|pkg|log|sh|py|ts|js)$/i
+
 export function looksLikeUrl(s: string): boolean {
+  if (FILE_ENDING.test(s)) return false
   return /^(https?:\/\/)?(localhost|(\d{1,3}\.){3}\d{1,3}|([a-z0-9-]+\.)+[a-z]{2,})(:\d+)?(\/\S*)?$/i.test(s)
 }
 

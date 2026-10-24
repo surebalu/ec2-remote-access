@@ -1,15 +1,15 @@
 /**
- * The planning tools' data (Tasks, Calendar, Links): one document per tool, kept by main in <userData>/records and
+ * The planning tools' data (Tasks, Calendar, Links) and the CAD tool's design reviews: one document per tool, kept by main in <userData>/records and
  * served by the gateway too, so a phone or iPad edits the same lists. A document is a flat map of items by id; every
  * change is a list of operations (put an item whole, or delete one), so two devices editing different items never
  * overwrite each other, and the last write of one item wins. A deleted item leaves a small marker (type 'deleted'), so
  * when two copies are merged (this Mac's and the one in a data folder on a NAS, main/dataFolder.ts) the deletion wins
  * over the older item instead of the item coming back. The item shapes belong to each tool (src/shared/tasks.ts,
- * calendar.ts, links.ts); this is only the container. Pure: tests/tasks.test.ts covers it.
+ * calendar.ts, links.ts, cad.ts); this is only the container. Pure: tests/tasks.test.ts covers it.
  */
 
-export type RecordKind = 'tasks' | 'calendar' | 'links'
-export const RECORD_KINDS: readonly RecordKind[] = ['tasks', 'calendar', 'links']
+export type RecordKind = 'tasks' | 'calendar' | 'links' | 'reviews'
+export const RECORD_KINDS: readonly RecordKind[] = ['tasks', 'calendar', 'links', 'reviews']
 
 export interface RecordItem {
   id: string

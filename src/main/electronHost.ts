@@ -138,7 +138,8 @@ export const electronHost: Host = {
     if (opts.kind !== 'directory') properties.push('openFile')
     if (opts.kind !== 'file') properties.push('openDirectory', 'createDirectory')
     if (opts.multiple) properties.push('multiSelections')
-    const r = await dialog.showOpenDialog({ title: opts.title, properties, buttonLabel: opts.buttonLabel })
+    const filters = opts.extensions?.length ? [{ name: opts.title, extensions: opts.extensions }] : undefined
+    const r = await dialog.showOpenDialog({ title: opts.title, properties, buttonLabel: opts.buttonLabel, filters })
     return r.canceled ? null : r.filePaths
   },
   async pickSavePath(opts) {
