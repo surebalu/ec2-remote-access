@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chooseDisplays, layoutFromSizes, parseSizes, readingOrder, resolveDisplays, sizesText, viewScale, type DisplayFrame } from '../src/shared/displays.ts'
+import { chooseDisplays, soleDisplay, layoutFromSizes, parseSizes, readingOrder, resolveDisplays, sizesText, viewScale, type DisplayFrame } from '../src/shared/displays.ts'
 
 // The user's desk: a 1800×1169 laptop screen left of a 5120×1440 monitor, centred vertically (as the picture showed).
 const desk: DisplayFrame[] = [
@@ -73,4 +73,12 @@ test('zoom to fit a display, fill the pane with it, or show it pixel for pixel',
   assert.equal(viewScale('actual', k, layer, display), 1 / k > 16 ? 16 : 1 / k)
   assert.equal(viewScale('fit', k, layer, { width: 6920, height: 1440 }), 1, 'the whole picture is the unzoomed view')
   assert.equal(viewScale('fit', 0, layer, display), 1)
+})
+
+test('a picture of one display alone says so, instead of asking for a layout', () => {
+  assert.equal(soleDisplay(desk, { width: 3600, height: 2338 })?.label, 'Built-in Display', 'the Retina built-in display at 2×')
+  assert.equal(soleDisplay(desk, { width: 5120, height: 1440 })?.label, 'Ultrawide')
+  assert.equal(soleDisplay(desk, { width: 6920, height: 1440 }), null)
+  assert.equal(soleDisplay([desk[0]], { width: 5120, height: 1440 }), null, 'one display is not a choice')
+  assert.match(chooseDisplays({ auto: desk, saved: null }, { width: 3600, height: 2338 }).problem!, /sending only Built-in Display \(3600×2338\)/)
 })

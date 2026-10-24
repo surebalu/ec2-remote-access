@@ -241,7 +241,7 @@ module.exports = async function screensScenario({ output, errors, fixture }) {
     assert.deepEqual(saved.args[1], { sizes: [{ width: 200, height: 400 }, { width: 440, height: 300 }], direction: 'row', align: 'center' })
     await js(`document.querySelector('.vt-bar [aria-label="Settings"]').click()`)
     await settingsItem('Displays')
-    await until(`[...document.querySelectorAll('.vt-sub .vt-item')].map((b) => b.textContent.replace('✓', '').trim()).join('|').startsWith('All displays|Display 1 · 200 × 400|Display 2 · 440 × 300|')`, 'the displays are listed')
+    await until(`[...document.querySelectorAll('.vt-sub .vt-item')].map((b) => b.textContent.replace('✓', '').trim()).join('|').startsWith('All displays · ${W} × ${H}|Display 1 · 200 × 400|Display 2 · 440 × 300|')`, 'the displays are listed')
     await subItem('Display 2')
     await until(`document.querySelector('.vnc-screen canvas').style.clipPath.includes('inset(12.5% 0% 12.5% 31.25%')`, 'cropped to the second display')
     assert.notEqual(await js(`document.querySelector('.vnc-screen').style.transform`), '', 'the view is zoomed to the display')

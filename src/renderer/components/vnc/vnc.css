@@ -49,3 +49,5 @@
 
 .vt-setup-pair > div { flex: 1 1 100%; }
 .vt-setup .m-segment button { white-space: nowrap; }
+/* A note in a menu (why displays are not listed). */
+.vt-note { margin: 0; padding: 8px 20px 10px 46px; color: rgba(242, 242, 245, .72); font-size: 13px; line-height: 1.45; }

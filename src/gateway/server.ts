@@ -220,6 +220,12 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     let rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '')
     if (rel === '/' || rel === '\\') rel = '/index.html'
     const file = join(opts.staticDir, rel)
+    // A build's files are named by their content, so one asked for and not here belongs to an older build (a page
+    // left open across an update). Not found is the honest answer; the app shell in its place would fail as a script.
+    if (rel.startsWith('/assets/') && (!file.startsWith(opts.staticDir) || !existsSync(file) || !statSync(file).isFile())) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }).end('Not found: this file belongs to an older version of the app. Reload the page.')
+      return
+    }
     if (!file.startsWith(opts.staticDir) || !existsSync(file) || !statSync(file).isFile()) {
       // Unknown paths fall back to the app shell so a bookmarked route still loads.
       const index = join(opts.staticDir, 'index.html')
@@ -230,6 +236,23 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'cache-control': rel.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache' })
     if (req.method === 'HEAD') return void res.end()
     createReadStream(file).pipe(res)
+  }
+
+  /**
+   * The build being served, named by its entry script (`assets/index-<hash>.js`), so a page can tell it is older than
+   * the gateway after an update (renderer/wsApi.ts). Read again when index.html changes; '' without a renderer.
+   */
+  let build = { mtime: 0, name: '' }
+  function currentBuild(): string {
+    if (!opts.staticDir) return ''
+    const index = join(opts.staticDir, 'index.html')
+    try {
+      const mtime = statSync(index).mtimeMs
+      if (mtime !== build.mtime) build = { mtime, name: /assets\/(index-[\w-]+\.js)/.exec(readFileSync(index, 'utf8'))?.[1] ?? '' }
+    } catch {
+      return ''
+    }
+    return build.name
   }
 
   function sendIndex(res: ServerResponse, file: string): void {
@@ -255,7 +278,7 @@ export function createGatewayServer(opts: GatewayOptions): Gateway {
     const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '')
     const secure = forwardedProto === 'https' || forwardedProto === 'wss' || 'encrypted' in req.socket
     const publicWsBase = `${secure ? 'wss' : 'ws'}://${publicHost(req)}`
-    ws.send(JSON.stringify({ t: 'hello', protocol: 1 }))
+    ws.send(JSON.stringify({ t: 'hello', protocol: 1, build: currentBuild() }))
 
     ws.on('message', (raw: RawData) => {
       let msg: { t?: string; id?: number; channel?: string; args?: unknown[] }

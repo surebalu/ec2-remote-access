@@ -497,6 +497,7 @@ ipcMain.handle('fixture:invoke', async (_e, channel, ...args) => {
     case 'vnc:prepare': return { sessionId: args[0].sessionId, url: vncUrl, destination: '100.64.0.10:5900', route: 'direct', title: 'Fixture Mac' }
     case 'vnc:release': return
     case 'vnc:lastError': return undefined
+    case 'vnc:note': return
     case 'computers:displays': return { auto: null, saved: displayLayouts[args[0]] ?? null }
     case 'computers:saveDisplays': if (args[1]) displayLayouts[args[0]] = args[1]; else delete displayLayouts[args[0]]; return
     case 'computers:thumbs': return computerThumbs

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -189,6 +189,34 @@ test('serves the UI with a browser-friendly CSP and falls back to the app shell'
   assert.equal(health.ok, true)
   assert.equal((await fetch(`http://127.0.0.1:${port}/auth?token=secret`)).status, 204)
   assert.equal((await fetch(`http://127.0.0.1:${port}/auth?token=nope`)).status, 401)
+  await gw.close()
+  await rm(dir, { recursive: true, force: true })
+})
+
+test('a page can tell it is older than the gateway: the hello names the build, and an old build’s files are not found', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ec2ra-build-'))
+  await mkdir(join(dir, 'assets'))
+  await writeFile(join(dir, 'assets', 'index-NEW123.js'), 'console.log(1)')
+  await writeFile(join(dir, 'index.html'), `<script type="module" crossorigin src="./assets/index-NEW123.js"></script><div id=root></div>`)
+  const { gw, port } = await start({}, dir)
+  const c = await client(port, 'secret')
+  const hello = await c.next()
+  assert.deepEqual(hello, { t: 'hello', protocol: 1, build: 'index-NEW123.js' })
+  c.ws.close()
+  const current = await fetch(`http://127.0.0.1:${port}/assets/index-NEW123.js`)
+  assert.equal(current.status, 200)
+  assert.match(current.headers.get('content-type') ?? '', /javascript/)
+  const old = await fetch(`http://127.0.0.1:${port}/assets/VncTab-OLD456.js`)
+  assert.equal(old.status, 404, 'a file of an older build is not answered with the app page')
+  assert.match(await old.text(), /older version/)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/assets/../index.html`)).status, 200, 'paths are normalised before the check')
+  assert.equal((await fetch(`http://127.0.0.1:${port}/some/route`)).status, 200, 'other unknown paths still get the app')
+  // A new build replaces index.html: the next hello names it.
+  await new Promise((r) => setTimeout(r, 20))
+  await writeFile(join(dir, 'index.html'), `<script type="module" crossorigin src="./assets/index-NEWER789.js"></script>`)
+  const c2 = await client(port, 'secret')
+  assert.equal(((await c2.next()) as { build?: string }).build, 'index-NEWER789.js')
+  c2.ws.close()
   await gw.close()
   await rm(dir, { recursive: true, force: true })
 })

@@ -16,6 +16,7 @@ import SetupImportDialog from './components/SetupImportDialog'
 import EditAccountDialog from './components/EditAccountDialog'
 import Welcome from './components/Welcome'
 import AuthBanner from './components/AuthBanner'
+import UpdateBanner from './components/UpdateBanner'
 import SsoWaitDialog from './components/SsoWaitDialog'
 import HostDetails from './components/HostDetails'
 import HostPage from './components/hostpage/HostPage'
@@ -263,6 +264,7 @@ export default function App(): ReactElement {
         <AppRail />
         <div className={browserInFront ? 'hidden' : 'contents'}><Sidebar /></div>
         <main className="flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
+          <UpdateBanner />
           <AuthBanner />
           <div data-zoom-section="hosts" className={`hosts-workspace relative min-h-0 flex-1 ${activeTab === 'hosts' && !gridView ? 'flex' : 'hidden'}`}>{showWelcome ? <Welcome /> : <>
             {/* The list stays mounted under a host page, so its scroll and selection are there on the way back. */}
