@@ -12,6 +12,7 @@ import Toasts from './components/Toasts'
 import ManualHostDialog from './components/ManualHostDialog'
 import FolderDialog from './components/FolderDialog'
 import AddAccountDialog from './components/AddAccountDialog'
+import SetupImportDialog from './components/SetupImportDialog'
 import EditAccountDialog from './components/EditAccountDialog'
 import Welcome from './components/Welcome'
 import AuthBanner from './components/AuthBanner'
@@ -63,6 +64,7 @@ export default function App(): ReactElement {
   const manualHostEditor = useStore((s) => s.manualHostEditor)
   const folderEditor = useStore((s) => s.folderEditor)
   const addAccountOpen = useStore((s) => s.addAccountOpen)
+  const setupImport = useStore((s) => s.setupImport)
   const editAccount = useStore((s) => s.editAccount)
   const quickSwitcherOpen = useStore((s) => s.quickSwitcherOpen)
   const portForwardFor = useStore((s) => s.portForwardFor)
@@ -223,6 +225,7 @@ export default function App(): ReactElement {
       {manualHostEditor && <ManualHostDialog />}
       {folderEditor && <FolderDialog key={folderEditor} />}
       {addAccountOpen && <AddAccountDialog />}
+      {setupImport && <SetupImportDialog />}
       {editAccount && <EditAccountDialog key={editAccount} />}
       <SsoWaitDialog />
       {quickSwitcherOpen && <QuickSwitcher />}

@@ -282,6 +282,16 @@ function DataSettings(): ReactElement {
         )}
         {error && <div className="set-row"><span className="set-key-error">{error}</span></div>}
       </Group>
+      {IN_ELECTRON && (
+        <Group title="Move to another Mac">
+          <Row label="Export setup" hint="Your settings (favorites, host settings, servers, workspaces, labels, shortcuts, appearance) and your IAM Identity Center profiles, in one file. Never passwords or access keys.">
+            <button className="btn" onClick={() => void window.api.invoke('setup:export').then((path) => { if (path) useStore.getState().toast('success', `Setup exported to ${path}`) }, (e: Error) => useStore.getState().toast('error', e.message))}>Export…</button>
+          </Row>
+          <Row label="Import setup" hint="A file exported on another Mac. Shows what it brings before anything changes; nothing on this Mac is removed.">
+            <button className="btn" onClick={() => void useStore.getState().importSetup()}>Import…</button>
+          </Row>
+        </Group>
+      )}
       <Group title="Where your data is">
         {(st?.places ?? []).map((p) => (
           <Row key={p.id} label={p.label} hint={<><span className="mono">{p.path}</span>{p.note && <><br />{p.note}</>}</>}>
@@ -296,7 +306,7 @@ function DataSettings(): ReactElement {
             <li><Icon.check /><span>Lists merge item by item: a change made on another Mac and one made here both survive; for the same item, the later change wins (deleting counts as a change).</span></li>
             <li><Icon.check /><span>Whiteboards are copied whole; the later save wins.</span></li>
             <li><Icon.check /><span>Notes are Markdown files in their own folder: to keep them on the NAS, point Settings → Notes (or your Obsidian vault) at a folder there.</span></li>
-            <li><Icon.check /><span>Settings, sign-ins and saved passwords stay on this Mac.</span></li>
+            <li><Icon.check /><span>Settings, sign-ins and saved passwords stay on this Mac; Export setup above carries the settings and sign-in details to another Mac.</span></li>
           </ul>
         </div>
       </Group>
@@ -494,7 +504,7 @@ function KeyboardSettings({ draft, onChange, onGlobal }: { draft: Settings; onCh
 export default function SettingsDialog(): ReactElement | null {
   const s = useStore()
   const [draft, setDraft] = useState<Settings | undefined>(s.settings)
-  const [paths, setPaths] = useState<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean } | null>(null)
+  const [paths, setPaths] = useState<{ sessionManagerPlugin: string | null; sessionManagerPluginBundled: boolean; awsCli: string | null; windowsApp: boolean } | null>(null)
   const [notesInfo, setNotesInfo] = useState<NotesInfo | null>(null)
   const [about, setAbout] = useState<AppAbout | null>(null)
   const [section, setSection] = useState<SectionId>(() => {
@@ -793,7 +803,7 @@ export default function SettingsDialog(): ReactElement | null {
     <>
       <Group>
         <Row label="AWS Session Manager plugin" hint="Needed for hosts without a reachable address (most private instances).">
-          {status(paths ? !!paths.sessionManagerPlugin : null, 'Installed', 'Not found')}
+          {status(paths ? !!paths.sessionManagerPlugin : null, paths?.sessionManagerPluginBundled ? 'Included with the app' : 'Installed', 'Not found')}
         </Row>
         <Row label="Location" stack>{text('sessionManagerPluginPath', paths?.sessionManagerPlugin ?? 'brew install --cask session-manager-plugin', true)}</Row>
       </Group>

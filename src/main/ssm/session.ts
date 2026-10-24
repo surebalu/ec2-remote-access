@@ -1,5 +1,7 @@
 import { SSMClient, StartSessionCommand, TerminateSessionCommand } from '@aws-sdk/client-ssm'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { Duplex } from 'node:stream'
 import type { Instance } from '@shared/types'
 import { credentialsFor } from '../aws/credentials'
@@ -40,8 +42,22 @@ export interface SsmHandle {
   terminate: () => Promise<void>
 }
 
+/**
+ * The plugin to run: the path set in Settings, else one installed on this computer (Homebrew, AWS's installer), else
+ * the copy shipped inside the Mac app (Contents/Resources/ssm, from scripts/fetch-ssm-plugin.sh) so a new Mac connects
+ * without installing anything. An installed one goes first so an update of the app never swaps a working plugin.
+ * The gateway has no resourcesPath and uses its machine's plugin (deploy-pi.sh installs it).
+ */
+export function findPlugin(): { path: string; bundled: boolean } | null {
+  const chosen = getSettings().sessionManagerPluginPath || findBinary('session-manager-plugin')
+  if (chosen) return { path: chosen, bundled: false }
+  const resources = (process as { resourcesPath?: string }).resourcesPath
+  const shipped = resources ? join(resources, 'ssm', 'session-manager-plugin') : ''
+  return shipped && existsSync(shipped) ? { path: shipped, bundled: true } : null
+}
+
 export function pluginPath(): string {
-  const p = getSettings().sessionManagerPluginPath || findBinary('session-manager-plugin')
+  const p = findPlugin()?.path
   if (!p) {
     throw new Error(
       'session-manager-plugin not found. Install: brew install --cask session-manager-plugin, or set the path in Settings.'

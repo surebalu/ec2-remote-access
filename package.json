@@ -18,8 +18,9 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:ui": "electron tests/ui-smoke.cjs",
     "build:native": "bash scripts/build-native.sh",
-    "dist": "bash scripts/build-native.sh && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --publish never",
-    "dist:arm64": "bash scripts/build-native.sh && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
+    "fetch:ssm": "bash scripts/fetch-ssm-plugin.sh",
+    "dist": "bash scripts/build-native.sh && bash scripts/fetch-ssm-plugin.sh && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --publish never",
+    "dist:arm64": "bash scripts/build-native.sh && bash scripts/fetch-ssm-plugin.sh && electron-vite build && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {

@@ -1,3 +1,4 @@
+import type { CompanySetup, SetupPreview } from './setup'
 import type { ExtensionInfo } from './extensions'
 import type { AnyboxLibrary } from './links'
 import type { FrontPage, LinksPanelMode } from './linksPanel'
@@ -374,7 +375,16 @@ export interface IpcApi {
   'clipboard:write': (text: string) => Promise<void>
   'theme:set': (theme: Theme) => Promise<void>
   'dialog:pickFile': (title: string) => Promise<string | null>
-  'app:paths': () => Promise<{ sessionManagerPlugin: string | null; awsCli: string | null; windowsApp: boolean }>
+  /** The organization's sign-in baked into this build (Resources/company.json), or null in a generic build. */
+  'app:company': () => Promise<CompanySetup | null>
+  /** Settings → Data: this Mac's settings and Identity Center profiles to a file (never credentials); the path, or null if cancelled. */
+  'setup:export': () => Promise<string | null>
+  /** Picks a setup file and says what importing it would do; nothing is written yet. */
+  'setup:pickImport': () => Promise<SetupPreview | null>
+  /** Writes the previewed import's AWS profiles and returns the merged settings for the page to save. */
+  'setup:apply': (id: string) => Promise<{ settings: Settings; profiles: string[]; dataDir?: string }>
+  /** `sessionManagerPluginBundled`: the copy inside the Mac app is the one in use (none is installed). */
+  'app:paths': () => Promise<{ sessionManagerPlugin: string | null; sessionManagerPluginBundled: boolean; awsCli: string | null; windowsApp: boolean }>
   /** Sends a command to many hosts with SSM Run Command; poll run:status for results (pushed events can be missed). */
   'run:start': (req: RunCommandRequest) => Promise<RunState>
   'run:status': (id: string) => Promise<RunState | null>

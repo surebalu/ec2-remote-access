@@ -12,6 +12,13 @@ const dictationHelper = 'build/native/ec2ra-dictate'
 const controlHelper = 'build/native/ec2ra-control'
 if (!existsSync(dictationHelper)) console.warn(`  • ${dictationHelper} is missing: packaging without voice dictation (run scripts/build-native.sh)`)
 if (!existsSync(controlHelper)) console.warn(`  • ${controlHelper} is missing: packaging without window layouts or Mac calendars (run scripts/build-native.sh)`)
+// AWS's Session Manager plugin per architecture (scripts/fetch-ssm-plugin.sh), used when none is installed.
+const ssmPlugin = ['arm64', 'x64'].every((a) => existsSync(`build/native/ssm-${a}/session-manager-plugin`))
+if (!ssmPlugin) console.warn('  • build/native/ssm-<arch> is missing: packaging without the Session Manager plugin (run scripts/fetch-ssm-plugin.sh)')
+// The organization's AWS sign-in (start URL, session and profile names), made by scripts/make-company-config.mjs and
+// never committed; with it the first run offers to sign in and set up the accounts. Without it the build is generic.
+const company = 'build/company.json'
+if (existsSync(company)) console.log(`  • including ${company} (first-run AWS sign-in)`)
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -29,7 +36,9 @@ module.exports = {
     { from: 'resources/trayTemplate.png', to: 'trayTemplate.png' },
     { from: 'resources/trayTemplate@2x.png', to: 'trayTemplate@2x.png' },
     ...(existsSync(dictationHelper) ? [{ from: dictationHelper, to: 'dictation/ec2ra-dictate' }] : []),
-    ...(existsSync(controlHelper) ? [{ from: controlHelper, to: 'control/ec2ra-control' }] : [])
+    ...(existsSync(controlHelper) ? [{ from: controlHelper, to: 'control/ec2ra-control' }] : []),
+    ...(ssmPlugin ? [{ from: 'build/native/ssm-${arch}', to: 'ssm' }] : []),
+    ...(existsSync(company) ? [{ from: company, to: 'company.json' }] : [])
   ],
   afterPack: 'build/afterPack.cjs',
   afterSign: 'build/afterSign.cjs',

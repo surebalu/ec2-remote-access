@@ -9,3 +9,5 @@ build/native/
 
 # Claude Code agent worktrees
 .claude/worktrees/
+# The organization’s AWS sign-in baked into a build (scripts/make-company-config.mjs).
+build/company.json

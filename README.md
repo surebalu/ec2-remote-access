@@ -79,7 +79,7 @@ The login stores a refresh token, so the SDK silently renews the access token fo
 ## Requirements
 
 - macOS on Apple Silicon.
-- [session-manager-plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) (`brew install --cask session-manager-plugin`).
+- [session-manager-plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html): included in the Mac app; `pnpm dev` and the gateway use an installed one (`brew install --cask session-manager-plugin`).
 - AWS CLI v2 is optional (only used as a fallback for legacy SSO profiles without an `sso-session`).
 - [Windows App](https://apps.apple.com/app/windows-app/id1295203466) for RDP.
 - For private instances: the instance needs the SSM agent running and an instance profile with `AmazonSSMManagedInstanceCore`. Instances without this show as **Unreachable**.
@@ -108,8 +108,9 @@ The UI smoke test uses synthetic hosts, temporary app data, and blocked network 
    - open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**, or
    - run once in Terminal: `xattr -dr com.apple.quarantine "/Applications/EC2 Remote Access.app"`
    A notarized build opens without either step.
-4. Install the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) (`brew install --cask session-manager-plugin`) for private instances. The welcome screen checks for it.
-5. Click **Add AWS account** → **IAM Identity Center** and sign in with the company start URL. Done.
+4. The [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) comes with the app (AWS's own build, version-pinned and signature-checked); one already installed with Homebrew is used instead. The welcome screen says which.
+5. Click **Sign in to Mainspring AWS** on the welcome screen (a build made with `build/company.json`) and approve in the browser: the accounts are set up with the same names and labels as on every other Mac. Otherwise **Add AWS account** → **IAM Identity Center** with the company start URL.
+6. Moving from another Mac? On the old one, **Settings → Data → Export setup…**; on the new one, **Import a setup file** on the welcome screen (or Settings → Data). It brings your settings (favorites, host settings, servers, workspaces, labels, shortcuts, appearance) and your Identity Center profiles, never passwords or access keys, and shows what it will change first. Tasks, Calendar, Links, CAD reviews and whiteboards follow through the data folder (Settings → Data) if both Macs use the same one.
 
 ## Release / distribution
 
@@ -119,6 +120,8 @@ scripts/release.sh --bump patch    # bump version, typecheck, build
 ```
 
 Both build the native helpers first (`scripts/build-native.sh`: universal Swift binaries, the dictation helper shipped in `Contents/Resources/dictation` and the window and calendar helper in `Contents/Resources/control`); without the Swift compiler they warn and package the app without dictation, window layouts or Mac calendars.
+
+They also fetch AWS's Session Manager plugin for each architecture (`scripts/fetch-ssm-plugin.sh`: a pinned version, each download's SHA-256, and Amazon's code signature are checked; shipped in `Contents/Resources/ssm` with its Apache-2.0 license files). For a company build, make the first-run sign-in once with `node --experimental-strip-types scripts/make-company-config.mjs --name Mainspring`: it writes `build/company.json` (gitignored) from your `~/.aws/config` sign-in and profile names, never credentials, and every build after includes it. Delete the file for a generic build.
 
 **Signing & notarization** switch on automatically when the standard electron-builder variables are present:
 

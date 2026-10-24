@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import type { SsoAccount, SsoDeviceFlow, AccentColor } from '@shared/types'
+import { companyPicks, type CompanySetup } from '@shared/setup'
 import { ACCENTS } from '../colors'
 import { useStore } from '../store'
 import Modal from './Modal'
@@ -9,10 +10,16 @@ type Step = 'choose' | 'sso-form' | 'sso-wait' | 'sso-pick' | 'keys' | 'done'
 
 const REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2', 'eu-west-1', 'eu-west-2', 'eu-central-1', 'ap-south-1', 'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1', 'ca-central-1', 'sa-east-1']
 
-/** Onboarding for AWS accounts: Identity Center (SSO) device login with account/role discovery, or access keys. */
+/**
+ * Onboarding for AWS accounts: Identity Center (SSO) device login with account/role discovery, or access keys. A build
+ * carrying the organization's sign-in (app:company) fills the form with it, and its profiles come back named, labelled
+ * and coloured as the file has them; opened from the welcome screen's company button, the sign-in starts at once.
+ */
 export default function AddAccountDialog(): ReactElement {
   const s = useStore()
-  const [step, setStep] = useState<Step>('choose')
+  const companyMode = useStore((st) => st.addAccountOpen === 'company')
+  const [company, setCompany] = useState<CompanySetup | null>(null)
+  const [step, setStep] = useState<Step>(companyMode ? 'sso-form' : 'choose')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [sessions, setSessions] = useState<{ name: string; startUrl?: string; region?: string }[]>([])
@@ -23,7 +30,7 @@ export default function AddAccountDialog(): ReactElement {
   const [sessionName, setSessionName] = useState('')
   const [flow, setFlow] = useState<SsoDeviceFlow | null>(null)
   const [accounts, setAccounts] = useState<SsoAccount[]>([])
-  const [picks, setPicks] = useState<Record<string, { on: boolean; role: string; profile: string; label: string; color: AccentColor }>>({})
+  const [picks, setPicks] = useState<Record<string, { on: boolean; role: string; profile: string; label: string; color: AccentColor; region?: string }>>({})
   const [defaultRegion, setDefaultRegion] = useState('us-west-1')
   const [written, setWritten] = useState<string[]>([])
 
@@ -35,40 +42,54 @@ export default function AddAccountDialog(): ReactElement {
   const [kRegion, setKRegion] = useState('us-west-1')
 
   useEffect(() => {
-    void window.api.invoke('sso:sessions').then((list) => {
+    void Promise.all([window.api.invoke('sso:sessions'), window.api.invoke('app:company').catch(() => null)]).then(([list, co]) => {
       setSessions(list)
+      setCompany(co)
       const first = list[0]
-      if (first?.startUrl) {
+      const theirs = co?.aws.sessions[0]
+      if (theirs && (companyMode || !first?.startUrl)) {
+        setStartUrl(theirs.startUrl)
+        setSsoRegion(theirs.region)
+        setSessionName(theirs.name)
+        if (companyMode) void startSso(theirs.startUrl, theirs.region, co)
+      } else if (first?.startUrl) {
         setStartUrl(first.startUrl)
         setSsoRegion(first.region ?? 'us-west-1')
         setSessionName(first.name)
       }
     })
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const close = (): void => {
     if (flow && step === 'sso-wait') void window.api.invoke('sso:cancel', flow.flowId)
     s.set({ addAccountOpen: false })
   }
 
-  const startSso = async (): Promise<void> => {
+  // The company's values are passed in when the sign-in starts with the dialog, before the form's state has them.
+  const startSso = async (url = startUrl, region = ssoRegion, co = company): Promise<void> => {
     setErr(null)
-    if (!/^https:\/\/.+/.test(startUrl.trim())) {
+    if (!/^https:\/\/.+/.test(url.trim())) {
       setErr('Enter the Identity Center start URL, e.g. https://your-org.awsapps.com/start')
       return
     }
     setBusy(true)
     try {
-      const f = await window.api.invoke('sso:start', { startUrl: startUrl.trim(), region: ssoRegion })
+      const f = await window.api.invoke('sso:start', { startUrl: url.trim(), region })
       setFlow(f)
       setStep('sso-wait')
       const found = await window.api.invoke('sso:wait', f.flowId)
       setAccounts(found)
       const initial: typeof picks = {}
+      // Signed in with the company's start URL: its profiles as the company file names them; other accounts unticked.
+      const named = co && co.aws.sessions[0]?.startUrl === url.trim() ? companyPicks(co, found, s.profiles) : null
       for (const a of found) {
         const guess = a.accountName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
         const already = s.profiles.some((p) => p.accountId === a.accountId)
-        initial[a.accountId] = { on: !already, role: a.roles[0] ?? '', profile: guess || a.accountId, label: a.accountName, color: ACCENTS[Object.keys(initial).length % (ACCENTS.length - 1)] }
+        const color = ACCENTS[Object.keys(initial).length % (ACCENTS.length - 1)]
+        const pick = named?.[a.accountId]
+        initial[a.accountId] = pick
+          ? { ...pick, color: pick.color ?? color }
+          : { on: !already && !named, role: a.roles[0] ?? '', profile: guess || a.accountId, label: a.accountName, color }
       }
       setPicks(initial)
       setStep('sso-pick')
@@ -87,7 +108,7 @@ export default function AddAccountDialog(): ReactElement {
     try {
       const selections = accounts
         .filter((a) => picks[a.accountId]?.on && picks[a.accountId]?.role)
-        .map((a) => ({ accountId: a.accountId, roleName: picks[a.accountId].role, profileName: picks[a.accountId].profile, region: defaultRegion }))
+        .map((a) => ({ accountId: a.accountId, roleName: picks[a.accountId].role, profileName: picks[a.accountId].profile, region: picks[a.accountId].region ?? defaultRegion }))
       if (!selections.length) throw new Error('Pick at least one account')
       const names = new Set(selections.map((x) => x.profileName))
       if (names.size !== selections.length) throw new Error('Profile names must be unique')
