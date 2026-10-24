@@ -175,12 +175,7 @@ export default function App(): ReactElement {
       if (c.room && (STORAGE_ROOMS as readonly string[]).includes(c.room)) setRoom(c.room as RoomId)
       st.openTool('storage')
     }
-    else if (c.kind === 'settings') {
-      // The dialog opens on the section it last showed (SettingsDialog reads this as it mounts).
-      try { if (c.section) localStorage.setItem('ui.settingsSection', c.section) } catch { /* storage off */ }
-      st.set({ settingsOpen: false })
-      setTimeout(() => useStore.getState().set({ settingsOpen: true }), 0)
-    }
+    else if (c.kind === 'settings') st.openSettings(c.section)
   }), [])
 
   // ⌘B shows or hides the hosts sidebar. Here rather than in the sidebar, which unmounts while hidden; on document so

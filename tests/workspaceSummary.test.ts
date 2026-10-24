@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { healthIsStale, workspaceSummary } from '../src/shared/workspaceSummary.ts'
+import { boxIssue, healthIsStale, workspaceSummary } from '../src/shared/workspaceSummary.ts'
 import type { AwsProfile, Instance } from '../src/shared/types.ts'
 
 const host = (key: string, extra: Partial<Instance> = {}): Instance => ({ key, name: key, profile: 'prod', region: 'us-east-1', instanceId: 'i-same', platform: 'linux', platformDetails: 'Linux', osHint: 'Linux', state: 'running', instanceType: 't3.small', ssmOnline: true, tags: {}, ...extra })
@@ -62,4 +62,18 @@ test('failed health refresh and aging data cannot retain a current healthy verdi
   assert.equal(healthIsStale(now - 180_001, null, now), true)
   assert.equal(healthIsStale(now, 'Refresh failed', now), true)
   assert.equal(healthIsStale(undefined, null, now), true)
+})
+
+test('Box sync problems are named, with their fix; a healthy or signed-out-by-choice Box is not a problem', () => {
+  const now = 10_000_000
+  const ok = { available: true, signedIn: true, syncing: false, user: { name: 'P', login: 'p@x' }, lastSync: now - 60_000 }
+  assert.equal(boxIssue(ok, now), null)
+  assert.equal(boxIssue({ ...ok, available: false }, now), null, 'a build without Box')
+  assert.equal(boxIssue({ available: true, signedIn: false, syncing: false }, now), null, 'never signed in, or signed out on purpose')
+  assert.deepEqual(boxIssue({ ...ok, signedIn: false }, now), { id: 'box', kind: 'box', target: 'signin', title: 'Box signed this computer out', detail: 'Tasks, Calendar, Links and whiteboards are not syncing. Sign in to Box again.' })
+  assert.equal(boxIssue({ ...ok, lastError: 'Box is having trouble; the next sync tries again.' }, now)?.title, 'Box sync is failing')
+  assert.equal(boxIssue({ ...ok, lastSync: now - 20 * 60_000 }, now)?.detail, 'Last synced 20 minutes ago.')
+  assert.equal(boxIssue({ ...ok, lastSync: now - 20 * 60_000, syncing: true }, now), null, 'a long sync in progress is not late')
+  const s = workspaceSummary({ hosts: [], profiles: [], statuses: {}, errors: [], sessions: [], route: () => 'ssm', box: { ...ok, lastError: 'x' }, now })
+  assert.deepEqual(s.issues.map((i) => i.kind), ['box'])
 })

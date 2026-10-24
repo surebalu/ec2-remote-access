@@ -1,3 +1,4 @@
+import type { BoxStatus } from './box'
 import type { AwsProfile, Instance, ProfileStatus, Route, ScanResult } from './types'
 
 export interface WorkspaceSession {
@@ -10,10 +11,22 @@ export interface WorkspaceSession {
 
 export type AttentionItem = {
   id: string
-  kind: 'account' | 'scan' | 'cached' | 'route' | 'session'
+  kind: 'account' | 'scan' | 'cached' | 'route' | 'session' | 'box'
   title: string
   detail: string
   target?: string
+}
+
+/** Box sync stops quietly when it stops (signed out after 60 days unused, a failing sync): a problem worth saying. */
+const BOX_LATE_MS = 15 * 60_000
+
+export function boxIssue(box: BoxStatus | null | undefined, now: number): AttentionItem | null {
+  if (!box?.available) return null
+  // Still knows the account but holds no sign-in: Box ended it (a refresh token unused for 60 days, or revoked).
+  if (!box.signedIn) return box.user ? { id: 'box', kind: 'box', target: 'signin', title: 'Box signed this computer out', detail: 'Tasks, Calendar, Links and whiteboards are not syncing. Sign in to Box again.' } : null
+  if (box.lastError) return { id: 'box', kind: 'box', target: 'sync', title: 'Box sync is failing', detail: box.lastError }
+  if (!box.syncing && box.lastSync && now - box.lastSync > BOX_LATE_MS) return { id: 'box', kind: 'box', target: 'sync', title: 'Box has not synced for a while', detail: `Last synced ${Math.round((now - box.lastSync) / 60_000)} minutes ago.` }
+  return null
 }
 
 /** Derives a workspace from known facts only: a route is not a successful connection or a health check. */
@@ -24,6 +37,8 @@ export function workspaceSummary(input: {
   errors: ScanResult['errors']
   sessions: WorkspaceSession[]
   route: (host: Instance) => Route
+  box?: BoxStatus | null
+  now?: number
 }) {
   const profiles = input.profiles.filter((p) => p.enabled)
   const disabled = new Set(input.profiles.filter((p) => !p.enabled).map((p) => p.name))
@@ -50,6 +65,8 @@ export function workspaceSummary(input: {
   // A stale or stopped host cannot support a current reachability claim.
   const noRoute = hosts.filter((h) => !h.staleReason && h.state === 'running' && input.route(h) === 'unreachable')
   if (noRoute.length) issues.push({ id: 'route', kind: 'route', title: `${noRoute.length} running ${noRoute.length === 1 ? 'host has' : 'hosts have'} no automatic route`, detail: 'Check SSM status, or choose a direct address in connection options.' })
+  const box = boxIssue(input.box, input.now ?? Date.now())
+  if (box) issues.push(box)
   const verified = profiles.filter((p) => input.statuses[p.name]?.state === 'ok').length
   const accountState = !profiles.length ? 'none' : issues.some((i) => i.kind === 'account') ? 'attention' : verified === profiles.length ? 'verified' : 'unverified'
   return {

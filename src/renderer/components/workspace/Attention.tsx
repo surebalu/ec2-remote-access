@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import { clearHostFilters } from '@shared/hostSearch'
 import type { AttentionItem } from '@shared/workspaceSummary'
 import { useStore } from '../../store'
+import { hasBrowser } from '../../quickConnect'
 import { Icon } from '../icons'
 
 export default function Attention({ items }: { items: AttentionItem[] }): ReactElement {
@@ -16,8 +17,11 @@ export default function Attention({ items }: { items: AttentionItem[] }): ReactE
       else void s.checkAuth(item.target).catch((e: Error) => s.toast('error', e.message))
     }
     else if (item.kind === 'route') s.applyHostView({ ...clearHostFilters, stateFilter: 'running', reachFilter: 'unreachable' })
+    // The Mac app signs in to Box itself; a page on the gateway signs in from Settings → Data (its link needs the tap).
+    else if (item.kind === 'box' && item.target === 'signin') { if (hasBrowser()) void window.api.invoke('box:signIn').catch((e: Error) => s.toast('error', e.message)); else s.openSettings('data') }
+    else if (item.kind === 'box') void window.api.invoke('box:sync').catch((e: Error) => s.toast('error', e.message))
   }
-  const actionLabel = (item: AttentionItem): string => item.kind === 'scan' ? 'Retry scans' : item.kind === 'cached' ? 'Refresh' : item.kind === 'account' ? s.statuses[item.target ?? '']?.state === 'login-required' ? 'Sign in' : 'Check access' : item.kind === 'session' ? 'Open session' : 'Show hosts'
+  const actionLabel = (item: AttentionItem): string => item.kind === 'box' ? item.target === 'signin' ? 'Sign in to Box' : 'Sync now' : item.kind === 'scan' ? 'Retry scans' : item.kind === 'cached' ? 'Refresh' : item.kind === 'account' ? s.statuses[item.target ?? '']?.state === 'login-required' ? 'Sign in' : 'Check access' : item.kind === 'session' ? 'Open session' : 'Show hosts'
   return <section className="hd-card ws-attention" aria-label="Needs attention">
     <div className="hd-card-head"><span><Icon.alert />Needs attention <b className="ws-count">{items.length}</b></span>
       {items.length > 2 && <button className="ws-text-action" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show all'}</button>}

@@ -4,6 +4,7 @@ import { clearHostFilters } from '@shared/hostSearch'
 import { ago } from '@shared/plmHealth'
 import { workspaceSummary } from '@shared/workspaceSummary'
 import { routeOf, useStore, visibleInstances } from '../store'
+import { useBox } from '../box'
 import { Icon } from './icons'
 import ContinueWorking from './workspace/ContinueWorking'
 import Attention from './workspace/Attention'
@@ -25,7 +26,8 @@ export default function HomeDeck(): ReactElement {
   const [now, setNow] = useState(Date.now())
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer) }, [])
   const fold = (): void => { setFolded(!folded); try { localStorage.setItem(FOLD_KEY, folded ? '0' : '1') } catch { /* storage unavailable */ } }
-  const summary = workspaceSummary({ hosts: visibleInstances(s), profiles: s.profiles, statuses: s.statuses, errors: s.scanErrors, sessions: s.tabs, route: (host) => routeOf(host, s.settings).route })
+  const box = useBox().st
+  const summary = workspaceSummary({ hosts: visibleInstances(s), profiles: s.profiles, statuses: s.statuses, errors: s.scanErrors, sessions: s.tabs, route: (host) => routeOf(host, s.settings).route, box, now })
   const auth = s.authState()
   const accountLabel = auth.kind !== 'ok' ? auth.kind === 'expired' ? 'Sign in to AWS' : `Sign-in ends in ${auth.minutesLeft} min`
     : summary.accountState === 'none' ? 'No AWS accounts' : summary.accountState === 'attention' ? 'Review AWS access'

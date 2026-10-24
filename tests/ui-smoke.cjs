@@ -4201,6 +4201,45 @@ app.whenReady().then(async () => {
     await vuntil(`document.querySelector('.settings-body').textContent.includes('Dictation listens only while')`)
     vwin.destroy()
 
+    // Box problems in the workspace's Needs attention, with their fix, and ⌘K's Sync with Box now.
+    const boxwin = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
+    boxwin.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
+    const bxjs = (code) => boxwin.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
+    const bxuntil = async (code) => { for (let n = 0; n < 150; n++) { if (await bxjs(code)) return; await new Promise((r) => setTimeout(r, 30)) } throw new Error(`Timed out (Box attention): ${code}`) }
+    const signedInBox = { available: true, signedIn: true, syncing: false, user: { name: 'Fixture Person', login: 'person@example.com' }, folder: { id: '123', name: 'Remote Access Tool' }, lastSync: Date.now() }
+    const attentionRow = (title) => `[...document.querySelectorAll('.ws-attention-row')].find((r) => r.textContent.includes(${JSON.stringify(title)}))`
+    boxFixture = { ...signedInBox, lastError: 'Box is having trouble; the next sync tries again.' }
+    await boxwin.loadFile(resolve('out/renderer/index.html'))
+    await bxuntil(`!!document.querySelector('.ws-attention-list')`)
+    await bxjs(`document.querySelector('.ws-attention .ws-text-action')?.click()`)
+    await bxuntil(`!!${attentionRow('Box sync is failing')}`)
+    assert.equal(await bxjs(`${attentionRow('Box sync is failing')}.querySelector('button').textContent`), 'Sync now')
+    const syncsBefore = setupDone.filter((d) => d[0] === 'box:sync').length
+    await bxjs(`${attentionRow('Box sync is failing')}.querySelector('button').click()`)
+    for (let n = 0; n < 50 && setupDone.filter((d) => d[0] === 'box:sync').length === syncsBefore; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(setupDone.filter((d) => d[0] === 'box:sync').length, syncsBefore + 1, 'Sync now from Needs attention')
+    boxFixture = { ...signedInBox, signedIn: false }
+    await boxwin.loadFile(resolve('out/renderer/index.html'))
+    await bxuntil(`!!document.querySelector('.ws-attention-list')`)
+    await bxjs(`document.querySelector('.ws-attention .ws-text-action')?.click()`)
+    await bxuntil(`${attentionRow('Box signed this computer out')}?.querySelector('button').textContent === 'Sign in to Box'`)
+    const signInsBefore = setupDone.filter((d) => d[0] === 'box:signIn').length
+    await bxjs(`${attentionRow('Box signed this computer out')}.querySelector('button').click()`)
+    for (let n = 0; n < 50 && setupDone.filter((d) => d[0] === 'box:signIn').length === signInsBefore; n++) await new Promise((r) => setTimeout(r, 30))
+    assert.equal(setupDone.filter((d) => d[0] === 'box:signIn').length, signInsBefore + 1, 'Sign in to Box from Needs attention')
+    // ⌘K: Sync with Box now.
+    boxFixture = signedInBox
+    await bxjs(`document.querySelector('.search-pill').click()`)
+    await bxuntil(`!!document.querySelector('[role="combobox"]')`)
+    await bxjs(`(() => { const i = document.querySelector('[role="combobox"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'sync with box'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await bxuntil(`[...document.querySelectorAll('[role="option"]')].some((o) => o.textContent.includes('Sync with Box now'))`)
+    const syncsBeforeK = setupDone.filter((d) => d[0] === 'box:sync').length
+    await bxjs(`[...document.querySelectorAll('[role="option"]')].find((o) => o.textContent.includes('Sync with Box now')).click()`)
+    await bxuntil(`document.querySelector('.toasts')?.textContent.includes('In step with Box')`)
+    assert.equal(setupDone.filter((d) => d[0] === 'box:sync').length, syncsBeforeK + 1)
+    boxwin.destroy()
+    boxFixture = boxSignedOut
+
     // First run: the welcome screen, in both appearances, and its main action opens Add account.
     emptyScenario = true
     const savedTheme = settings.theme
