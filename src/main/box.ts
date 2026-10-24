@@ -1,8 +1,9 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { join } from 'node:path'
-import { authorizeUrl, BOX_LOOPBACK, BOX_LOOPBACK_PORT, boxError, needsRefresh, parseBoxApp, redirectFor, tokensFrom, type BoxApp, type BoxTokens } from '@shared/box'
+import { authorizeUrl, BOX_LOOPBACK, BOX_LOOPBACK_PORT, boxError, needsRefresh, parseBoxApp, partRanges, redirectFor, tokensFrom, type BoxApp, type BoxTokens } from '@shared/box'
 import { host } from './host'
 import { log } from './log'
 
@@ -173,6 +174,61 @@ export async function upload(parentId: string, name: string, bytes: Buffer, exis
   const body = (await res.json().catch(() => ({}))) as { entries?: BoxItem[] }
   if (!res.ok || !body.entries?.[0]) throw new BoxHttpError(res.status, boxError(res.status, body), body)
   return body.entries[0]
+}
+
+interface UploadSession { id: string; part_size: number; session_endpoints: { upload_part: string; commit: string; abort: string } }
+interface UploadedPart { part_id: string; offset: number; size: number; sha1: string }
+
+/**
+ * A new file over the simple upload's 50 MB, sent in parts through an upload session: each part with its SHA-1, read
+ * from disk one part at a time (never the whole file in memory), then committed with the whole file's SHA-1. A failed
+ * part ends the session (abort) so Box keeps nothing half-made. 'conflict' when a file by that name is already there;
+ * 'too-large' when the person's Box plan does not take a file that size.
+ */
+export async function uploadLarge(parentId: string, name: string, path: string, size: number): Promise<BoxItem | 'conflict' | 'too-large'> {
+  const res = await boxFetch('https://upload.box.com/api/2.0/files/upload_sessions', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folder_id: parentId, file_size: size, file_name: name })
+  })
+  const body = (await res.json().catch(() => ({}))) as UploadSession & { code?: string }
+  if (res.status === 409) return 'conflict'
+  if (res.status === 413 || body.code === 'file_size_limit_exceeded' || body.code === 'storage_limit_exceeded') return 'too-large'
+  if (!res.ok) throw new BoxHttpError(res.status, boxError(res.status, body), body)
+  const whole = createHash('sha1')
+  const parts: UploadedPart[] = []
+  const file = await open(path, 'r')
+  try {
+    for (const [start, end] of partRanges(size, body.part_size)) {
+      const buf = Buffer.alloc(end - start + 1)
+      await file.read(buf, 0, buf.length, start)
+      whole.update(buf)
+      const digest = `sha=${createHash('sha1').update(buf).digest('base64')}`
+      // A part Box fails to take (5xx) is sent again, up to three times, before the whole upload is given up.
+      for (let attempt = 1; ; attempt++) {
+        const r = await boxFetch(body.session_endpoints.upload_part, {
+          method: 'PUT', headers: { 'content-type': 'application/octet-stream', 'content-range': `bytes ${start}-${end}/${size}`, digest }, body: buf
+        })
+        const part = (await r.json().catch(() => ({}))) as { part?: UploadedPart }
+        if (r.ok && part.part) { parts.push(part.part); break }
+        if (r.status < 500 || attempt >= 3) throw new BoxHttpError(r.status, boxError(r.status, part), part)
+        await new Promise((res) => setTimeout(res, attempt * 1000))
+      }
+    }
+  } catch (e) {
+    await boxFetch(body.session_endpoints.abort, { method: 'DELETE' }).catch(() => undefined)
+    throw e
+  } finally {
+    await file.close()
+  }
+  const digest = `sha=${whole.digest('base64')}`
+  // Box may still be putting the parts together: 202 with Retry-After, then the same commit again.
+  for (let n = 0; n < 30; n++) {
+    const c = await boxFetch(body.session_endpoints.commit, { method: 'POST', headers: { 'content-type': 'application/json', digest }, body: JSON.stringify({ parts }) })
+    if (c.status === 202) { await new Promise((r) => setTimeout(r, Math.min(10, Number(c.headers.get('retry-after')) || 2) * 1000)); continue }
+    const done = (await c.json().catch(() => ({}))) as { entries?: BoxItem[] }
+    if (!c.ok || !done.entries?.[0]) throw new BoxHttpError(c.status, boxError(c.status, done), done)
+    return done.entries[0]
+  }
+  throw new Error(`Box did not finish putting ${name} together; the next sync tries again.`)
 }
 
 export async function removeFile(id: string): Promise<void> {

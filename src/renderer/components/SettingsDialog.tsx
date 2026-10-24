@@ -261,7 +261,7 @@ function BoxSettings(): ReactElement | null {
       {st.files && (
         <Row label="Links files" hint={st.files.done < st.files.total
           ? `Sending to Box: ${st.files.done} of ${st.files.total}…`
-          : `Sent ${st.files.total - st.files.tooLarge} to Box; other computers download one when it is opened.${st.files.tooLarge ? ` ${st.files.tooLarge} larger than 50 MB stay on this Mac.` : ''}`} />
+          : `Sent ${st.files.total - st.files.tooLarge} to Box; other computers download one when it is opened.${st.files.tooLarge ? ` ${st.files.tooLarge} larger than your Box plan takes stay on this Mac.` : ''}`} />
       )}
     </Group>
   )

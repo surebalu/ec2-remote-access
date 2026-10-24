@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { authorizeUrl, BOX_LOOPBACK, boxError, linkFileKey, needsRefresh, parseBoxApp, redirectFor, syncDoc, tokensFrom, type RemoteDoc } from '../src/shared/box.ts'
+import { authorizeUrl, BOX_LOOPBACK, boxError, linkFileKey, needsRefresh, parseBoxApp, partRanges, redirectFor, syncDoc, tokensFrom, type RemoteDoc } from '../src/shared/box.ts'
 import { mergeDocs, type RecordDoc } from '../src/shared/records.ts'
 
 const app = { clientId: 'a'.repeat(32), clientSecret: 'b'.repeat(32) }
@@ -105,4 +105,14 @@ test('a records file Box cannot parse is left alone', async () => {
   const a = local(doc(1, item('t1', 10)))
   await assert.rejects(syncDoc(box, a.mine, a.adopt), /could not be read/)
   assert.equal(box.text, 'not json')
+})
+
+test('a large file goes up in Box\'s part size, the last part shorter', () => {
+  assert.deepEqual(partRanges(20, 8), [[0, 7], [8, 15], [16, 19]])
+  assert.deepEqual(partRanges(16, 8), [[0, 7], [8, 15]])
+  assert.deepEqual(partRanges(0, 8), [])
+  const big = partRanges(94_371_840, 8_388_608)
+  assert.equal(big.length, 12)
+  assert.equal(big.at(-1)![1], 94_371_839)
+  assert.ok(big.every(([a, b], i) => i === 0 || a === big[i - 1][1] + 1), 'no gaps, no overlaps')
 })
