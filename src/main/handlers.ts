@@ -24,7 +24,7 @@ import { localHome, localList, localRealpath, localMkdir, localRename, localTras
 import { prepareRdp, releaseRdp, rdpLastError } from './rdp/sessions'
 import { prepareVnc, releaseVnc, vncLastError } from './vnc/sessions'
 import { tailnetHosts } from './tailnet'
-import { computerThumbs, probeComputers, saveComputerThumb } from './computers'
+import { computerThumbs, displaysFor, probeComputers, saveComputerThumb, saveDisplays } from './computers'
 import { getCredential, setCredential, deleteCredential, credentialKeys } from './creds'
 import { listTunnels, closeTunnel } from './tunnels'
 import { openPortForward } from './portForward'
@@ -242,6 +242,8 @@ export const handlers: Handlers = {
   'computers:thumbs': async () => computerThumbs(),
   'computers:saveThumb': (key, image) => saveComputerThumb(key, image),
   'computers:probe': (keys) => probeComputers(Array.isArray(keys) ? keys : []),
+  'computers:displays': async (key) => displaysFor(key),
+  'computers:saveDisplays': (key, layout) => saveDisplays(key, layout),
   'creds:get': async (key) => getCredential(key),
   'creds:set': async (key, cred) => setCredential(key, cred),
   'creds:delete': async (key) => deleteCredential(key),

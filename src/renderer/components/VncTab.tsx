@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react'
 import RFB from '@novnc/novnc'
 import { allInstances, useStore, vncCredKey, type Tab } from '../store'
 import HostActions, { openHostNote } from './HostActions'
@@ -6,7 +6,9 @@ import { Icon } from './icons'
 import { isMobile, pasteFromClipboard, useKeyboardOpen } from '../mobile'
 import { PasteSheet } from './mobile/ClipboardSheets'
 import ScreenToolbar, { type MenuNode, type StickyMod, type ToolbarRow } from './vnc/ScreenToolbar'
-import { attachScreenTouch, presetView, type PointerMode, type View } from './vnc/screenTouch'
+import { attachScreenTouch, type PointerMode, type Region, type View } from './vnc/screenTouch'
+import DisplaySetup from './vnc/DisplaySetup'
+import { chooseDisplays, viewScale, type DisplayInfo, type DisplayLayout, type ScaleKind } from '@shared/displays'
 import { editCombos, shortcutGroups, type Combo } from '@shared/vncShortcuts'
 import './vnc/vnc.css'
 import { charKeysym, forAppleServer, modifierKeysym, NAMED_KEYSYMS, type VncModifier } from '@shared/vncKeys'
@@ -109,10 +111,18 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const [, setView] = useState<View>({ scale: 1, x: 0, y: 0 })
   const touchRef = useRef<HTMLDivElement>(null)
+  const regionRef = useRef<Region | null>(null)
   const touchCtl = useRef<ReturnType<typeof attachScreenTouch> | null>(null)
   /** The last text the remote computer put on its clipboard (standard VNC cut text), for Copy. */
   const [lastClip, setLastClip] = useState<string | null>(null)
   const [pasteBox, setPasteBox] = useState<string | null>(null)
+  // Display selection (touch layout): where this computer's displays are, which one is shown, and the setup sheet.
+  const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null)
+  const [picture, setPicture] = useState<{ width: number; height: number } | null>(null)
+  const [selected, setSelectedState] = useState<number | null>(() => {
+    try { const v = localStorage.getItem(`ui.vncDisplay.${tab.instanceKey}`); return v === null ? null : Number(v) } catch { return null }
+  })
+  const [displaySetup, setDisplaySetup] = useState(false)
   /** Text the remote computer copied, waiting for a tap to reach the phone's clipboard (WebKit writes only from a tap). */
   const [remoteClip, setRemoteClip] = useState<string | null>(null)
   const kbRef = useRef<HTMLTextAreaElement>(null)
@@ -365,6 +375,7 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     const handle = attachScreenTouch(touchRef.current, {
       screen: screenRef.current,
       canvas: () => screenRef.current?.querySelector('canvas') ?? null,
+      region: () => regionRef.current,
       mode: () => pointerRef.current,
       speed: () => speedRef.current,
       zoomable: () => !zoomOffRef.current,
@@ -375,16 +386,56 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     touchCtl.current = handle
     return () => { handle.detach(); touchCtl.current = null }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  /** Scaling choices for the touch view: fit the screen, fill the pane, or one remote pixel per point. */
-  const scaleTo = (kind: 'fit' | 'fill' | 'actual'): void => {
+  /** Scaling choices for the touch view, for the whole picture or the display being shown. */
+  const scaleTo = (kind: ScaleKind): void => {
     const canvas = screenRef.current?.querySelector('canvas')
     const layer = touchRef.current?.getBoundingClientRect()
-    if (!canvas || !layer || !touchCtl.current) return
-    const r = canvas.getBoundingClientRect()
-    const now = screenRef.current?.style.transform.match(/scale\(([\d.]+)\)/)?.[1]
-    const k = now ? Number(now) : 1
-    touchCtl.current.setView(presetView(kind, { width: r.width / k, height: r.height / k }, layer, { width: canvas.width, height: canvas.height }))
+    const ctl = touchCtl.current
+    if (!canvas || !layer || !ctl) return
+    const size = regionRef.current ?? { width: canvas.width, height: canvas.height }
+    ctl.setView({ scale: viewScale(kind, 1 / ctl.picturePerPixel(), { width: layer.width, height: layer.height }, size), x: 0, y: 0 })
   }
+
+  // Which displays this computer has, as far as can be told, and the one being shown.
+  const resolved = useMemo(() => (picture ? chooseDisplays(displayInfo, picture) : { displays: [] }), [displayInfo, picture?.width, picture?.height]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shownDisplay = selected !== null ? resolved.displays.find((x) => x.id === selected) ?? null : null
+  regionRef.current = shownDisplay ? { x: shownDisplay.x, y: shownDisplay.y, width: shownDisplay.width, height: shownDisplay.height } : null
+  const chooseDisplay = (id: number | null): void => {
+    setSelectedState(id)
+    try { if (id === null) localStorage.removeItem(`ui.vncDisplay.${tab.instanceKey}`); else localStorage.setItem(`ui.vncDisplay.${tab.instanceKey}`, String(id)) } catch { /* storage unavailable */ }
+  }
+  const saveDisplayLayout = (layout: DisplayLayout | null): void => {
+    setDisplaySetup(false)
+    void window.api.invoke('computers:saveDisplays', tab.instanceKey, layout).then(
+      () => window.api.invoke('computers:displays', tab.instanceKey).then(setDisplayInfo),
+      (e: Error) => toast('error', e.message)
+    )
+    if (!layout) chooseDisplay(null)
+  }
+  // Ask once connected, then watch the picture's size: a display plugged in or out changes it.
+  useEffect(() => {
+    if (!mobile || phase !== 'connected') return
+    void window.api.invoke('computers:displays', tab.instanceKey).then(setDisplayInfo, () => undefined)
+    const read = (): void => {
+      const c = screenRef.current?.querySelector('canvas')
+      if (c && c.width && c.height) setPicture((p) => (p && p.width === c.width && p.height === c.height ? p : { width: c.width, height: c.height }))
+    }
+    read()
+    const timer = setInterval(read, 1500)
+    return () => clearInterval(timer)
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Showing one display: the picture is cut to it (the rest stays hidden), the view fits it, the pointer stays inside.
+  useEffect(() => {
+    if (!mobile) return
+    const canvas = screenRef.current?.querySelector('canvas')
+    const g = regionRef.current
+    if (canvas) {
+      canvas.style.clipPath = g && canvas.width && canvas.height
+        ? `inset(${(g.y / canvas.height) * 100}% ${((canvas.width - g.x - g.width) / canvas.width) * 100}% ${((canvas.height - g.y - g.height) / canvas.height) * 100}% ${(g.x / canvas.width) * 100}%)`
+        : ''
+    }
+    touchCtl.current?.showRegion()
+  }, [shownDisplay?.id, shownDisplay?.x, shownDisplay?.y, shownDisplay?.width, shownDisplay?.height, phase]) // eslint-disable-line react-hooks/exhaustive-deps
   const typeText = (text: string): void => {
     for (const ch of text.replace(/\r\n?/g, '\n')) press(charKeysym(ch), SHIFTED.test(ch) ? ['shift'] : [])
   }
@@ -597,6 +648,11 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
         { id: 'fill', label: 'Size to fill', run: () => scaleTo('fill') },
         { id: 'fit', label: 'Size to fit', run: () => scaleTo('fit') }
       ] },
+      ...(displayInfo?.auto?.length === 1 ? [] : [{ id: 'displays', label: 'Displays', icon: <Icon.monitor />, children: [
+        { id: 'all', label: 'All displays', checked: shownDisplay === null, run: () => chooseDisplay(null) },
+        ...resolved.displays.map((x): MenuNode => ({ id: `d${x.id}`, label: `${x.name} · ${x.points.width} × ${x.points.height}`, checked: shownDisplay?.id === x.id, run: () => chooseDisplay(x.id) })),
+        { id: 'setup', label: resolved.displays.length ? 'Change the layout…' : 'Set up displays…', disabled: !picture, run: () => setDisplaySetup(true) }
+      ] } as MenuNode]),
       { id: 'quality', label: 'Image quality', icon: <Icon.gauge />, children: choose((Object.keys(QUALITY) as Quality[]).map((q) => ({ value: q, label: QUALITY[q].label })), quality, changeQuality) },
       { id: 'sep2', label: '' },
       { id: 'pointer', label: 'Pointer', icon: <Icon.move />, children: choose<PointerMode>([{ value: 'trackpad', label: 'Trackpad' }, { value: 'touch', label: 'Touch' }], pointer, (v) => { setPointerState(v); writePref('ui.vncPointer', v); if (v === 'trackpad') touchCtl.current?.center() }) },
@@ -628,6 +684,7 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
           />
         )}
         {pasteBox !== null && <PasteSheet initial={pasteBox} action="Type" onSend={(t) => { setPasteBox(null); typeText(t) }} onClose={() => setPasteBox(null)} />}
+        {displaySetup && picture && <DisplaySetup hostName={hostName} picture={picture} initial={displayInfo?.saved ?? null} problem={resolved.problem} onSave={saveDisplayLayout} onClose={() => setDisplaySetup(false)} />}
       </div>
     )
   }

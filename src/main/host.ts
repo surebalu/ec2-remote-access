@@ -3,6 +3,7 @@
  * gateway. Modules under src/main call `host()` instead of importing 'electron', so the same SSH/SFTP/RDP/AWS
  * code runs inside the desktop app and inside `src/gateway` (a Node server reached from a phone's browser).
  */
+import type { DisplayFrame } from '@shared/displays'
 import type { ExtensionInfo } from '@shared/extensions'
 import type { FrontPage, LinksPanelMode } from '@shared/linksPanel'
 import type { AppCommand, Theme, VoiceEvent, VoicePermission } from '@shared/types'
@@ -56,6 +57,11 @@ export interface Host {
    * cannot tell while the pointer is over a web page or a remote desktop, which keep its moves to themselves.
    */
   pointer?(): { x: number; y: number } | null
+  /**
+   * This machine's displays in points, top-left origin, as the desktop arranges them. Absent where there is no
+   * desktop (the gateway). Used when this machine is the one being screen-shared, to place each display on the picture.
+   */
+  displays?(): DisplayFrame[]
   /** Quick Look for a file (macOS). Absent where there is none. */
   quickLook?(path: string): void
   /** Puts files on the clipboard as Finder's Copy does, so Finder and other apps paste the files themselves (macOS). */

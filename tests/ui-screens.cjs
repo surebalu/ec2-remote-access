@@ -212,6 +212,54 @@ module.exports = async function screensScenario({ output, errors, fixture }) {
     await shot('screen-phone-shortcuts.png')
     await js(`document.querySelector('.vt-menu-layer').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
     await until(`!document.querySelector('.vt-menu')`, 'menu closed')
+
+    // Display selection: this Mac's displays are not known, so describe them once (a 200×400 and a 440×300 display side by
+    // side, centred, which scale to the 64×40 picture), then show the second one alone.
+    const settingsItem = async (label) => {
+      await until(`[...document.querySelectorAll('.vt-menu:not(.vt-sub) .vt-item')].some((b) => b.textContent === ${JSON.stringify(label)})`, `settings item ${label}`)
+      await js(`[...document.querySelectorAll('.vt-menu:not(.vt-sub) .vt-item')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`)
+    }
+    const subItem = async (label) => {
+      await until(`[...document.querySelectorAll('.vt-sub .vt-item')].some((b) => b.textContent.includes(${JSON.stringify(label)}))`, `choice ${label}`)
+      await js(`[...document.querySelectorAll('.vt-sub .vt-item')].find((b) => b.textContent.includes(${JSON.stringify(label)})).click()`)
+    }
+    await js(`document.querySelector('.vt-bar [aria-label="Settings"]').click()`)
+    await settingsItem('Displays')
+    await subItem('Set up displays')
+    await until(`!!document.querySelector('.vt-setup')`, 'display setup sheet')
+    await js(`(() => { const el = document.querySelector('.vt-setup input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '200x400, 440x300'); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until(`document.querySelector('.vt-setup-note.ok')?.textContent.includes('Matches the screen picture (${W}×${H})')`, 'layout accepted')
+    await shot('screen-phone-displays-setup.png')
+    // A layout that does not add up is not accepted.
+    await js(`(() => { const el = document.querySelector('.vt-setup input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '200x400, 540x300'); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until(`document.querySelector('.vt-setup-note.bad')?.textContent.includes('add up to') && [...document.querySelectorAll('.vt-setup .btn-primary')].every((b) => b.disabled)`, 'mismatch refused')
+    await js(`(() => { const el = document.querySelector('.vt-setup input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '200x400, 440x300'); el.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await until(`!document.querySelector('.vt-setup .btn-primary').disabled`, 'save enabled')
+    await js(`document.querySelector('.vt-setup .btn-primary').click()`)
+    await until(`!document.querySelector('.vt-setup')`, 'setup saved')
+    const saved = fixture.calls().filter((c) => c.channel === 'computers:saveDisplays').pop()
+    assert.deepEqual(saved.args[1], { sizes: [{ width: 200, height: 400 }, { width: 440, height: 300 }], direction: 'row', align: 'center' })
+    await js(`document.querySelector('.vt-bar [aria-label="Settings"]').click()`)
+    await settingsItem('Displays')
+    await until(`[...document.querySelectorAll('.vt-sub .vt-item')].map((b) => b.textContent.replace('✓', '').trim()).join('|').startsWith('All displays|Display 1 · 200 × 400|Display 2 · 440 × 300|')`, 'the displays are listed')
+    await subItem('Display 2')
+    await until(`document.querySelector('.vnc-screen canvas').style.clipPath.includes('inset(12.5% 0% 12.5% 31.25%')`, 'cropped to the second display')
+    assert.notEqual(await js(`document.querySelector('.vnc-screen').style.transform`), '', 'the view is zoomed to the display')
+    await shot('screen-phone-display2.png')
+    // Whatever is tapped, the click lands inside that display (x 20–63, y 5–34 of the picture).
+    vnc.pointers.length = 0
+    await tap(0.02, 0.02)
+    await tap(0.98, 0.98)
+    await settle(6)
+    const inside = vnc.pointers.filter((p) => p.mask === 1)
+    assert.equal(inside.length, 2)
+    for (const p of inside) assert.ok(p.x >= 20 && p.x <= 63 && p.y >= 5 && p.y <= 34, `a click at ${p.x},${p.y} stays inside Display 2`)
+    // The choice is remembered for this computer; All displays shows everything again.
+    assert.equal(await js(`localStorage.getItem('ui.vncDisplay.tailnet/nMAC')`), '1')
+    await js(`document.querySelector('.vt-bar [aria-label="Settings"]').click()`)
+    await settingsItem('Displays')
+    await subItem('All displays')
+    await until(`document.querySelector('.vnc-screen canvas').style.clipPath === '' && document.querySelector('.vnc-screen').style.transform === ''`, 'all displays again')
     await shot('screen-phone.png')
     // Computers on the phone: its own button in the tab bar.
     await js(`[...document.querySelectorAll('.m-tabbar button')].find((b) => b.textContent.includes('Computers')).click()`)
