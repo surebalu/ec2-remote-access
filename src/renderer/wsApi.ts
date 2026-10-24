@@ -9,6 +9,7 @@
  * token produces a prompt instead of a silent reconnect loop.
  */
 import type { IpcApi, IpcEvents } from '@shared/ipc'
+import { noteServerBuild } from './updates'
 import { hmacSha256Hex } from '@shared/sha256'
 
 type Api = Window['api']
@@ -79,6 +80,10 @@ async function local(channel: string, args: unknown[]): Promise<{ handled: boole
   }
 }
 
+/** Whether reloading this page would drop something open (set by main.tsx once the store exists). */
+let hasSessions = (): boolean => true
+export function setSessionCheck(check: () => boolean): void { hasSessions = check }
+
 export function createWsApi(): Api {
   let url = ''
   let ws: WebSocket | null = null
@@ -98,7 +103,10 @@ export function createWsApi(): Api {
     }
     ws.onmessage = (ev) => {
       const msg = JSON.parse(String(ev.data)) as { t: string; id?: number; result?: unknown; message?: string; channel?: string; payload?: unknown }
-      if (msg.t === 'result' || msg.t === 'error') {
+      if (msg.t === 'hello') {
+        // A gateway updated since this page loaded: see updates.ts.
+        noteServerBuild((msg as { build?: string }).build, hasSessions)
+      } else if (msg.t === 'result' || msg.t === 'error') {
         const p = pending.get(msg.id!)
         if (!p) return
         pending.delete(msg.id!)

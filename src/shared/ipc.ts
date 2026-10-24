@@ -158,6 +158,8 @@ export interface IpcApi {
   'vnc:prepare': (req: VncPrepareRequest) => Promise<VncPrepared>
   'vnc:release': (sessionId: string) => Promise<void>
   'vnc:lastError': (sessionId: string) => Promise<string | undefined>
+  /** A line for the app log about a screen session (what the picture is and how its displays were matched). */
+  'vnc:note': (sessionId: string, note: string) => Promise<void>
   /** The machines on this computer's Tailscale network, as hosts; `refresh` skips the 10 s memory. */
   'tailnet:list': (refresh?: boolean) => Promise<TailnetState>
   /** The Computers library: last screen pictures (data: JPEG) by host key, saving one, and which computers answer now. */

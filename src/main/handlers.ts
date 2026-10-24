@@ -39,7 +39,7 @@ import { boxSignIn } from './box'
 import { boxSetups, boxStatus, boxSyncNow, openLinkFile, previewBoxSetup, signOutOfBox } from './boxSync'
 import { applyImport, companySetup, exportSetup, pickImport } from './setup'
 import { phoneStatus, configurePhoneAccess, rotatePhoneToken, setPhoneTerminals } from './phoneAccess'
-import { recentLog } from './log'
+import { log, recentLog } from './log'
 import { applyRecords, loadRecords } from './records'
 import { readAnybox } from './anybox'
 import { calendarFeed, linkPreview } from './webFetch'
@@ -238,6 +238,7 @@ export const handlers: Handlers = {
   'vnc:prepare': (req) => prepareVnc(req),
   'vnc:release': (id) => releaseVnc(id),
   'vnc:lastError': async (id) => vncLastError(id),
+  'vnc:note': async (id, note) => { log('vnc', String(note).slice(0, 600), { sessionId: String(id).slice(0, 80) }) },
   'tailnet:list': (refresh) => tailnetHosts(refresh === true),
   'computers:thumbs': async () => computerThumbs(),
   'computers:saveThumb': (key, image) => saveComputerThumb(key, image),

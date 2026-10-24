@@ -122,6 +122,16 @@ export function resolveDisplays(frames: DisplayFrame[] | null | undefined, pictu
   return { displays }
 }
 
+/** The display (of several) that alone makes up the picture, at a whole or Retina scale: the Mac shares only it. */
+export function soleDisplay(frames: DisplayFrame[] | null | undefined, picture: { width: number; height: number }): DisplayFrame | null {
+  if (!frames || frames.length < 2 || !picture.width || !picture.height) return null
+  return frames.find((f) => {
+    const sx = picture.width / f.width
+    const sy = picture.height / f.height
+    return Math.abs(sx - sy) <= TOLERANCE * Math.max(sx, sy) && Math.abs(sx - Math.round(sx)) < 0.02 && Math.round(sx) >= 1
+  }) ?? null
+}
+
 /** The layout to use: this machine's displays when they fit the picture, else what the user described. */
 export function chooseDisplays(info: DisplayInfo | null, picture: { width: number; height: number }): Resolved {
   if (!info) return { displays: [] }
@@ -129,6 +139,8 @@ export function chooseDisplays(info: DisplayInfo | null, picture: { width: numbe
   if (auto.displays.length > 1) return auto
   const saved = info.saved ? resolveDisplays(layoutFromSizes(info.saved), picture) : { displays: [] }
   if (saved.displays.length) return saved
+  const only = soleDisplay(info.auto, picture)
+  if (only) return { displays: [], problem: `This Mac is sending only ${only.label ?? 'one display'} (${picture.width}×${picture.height}), not all of its displays.` }
   return { displays: [], problem: saved.problem ?? auto.problem }
 }
 

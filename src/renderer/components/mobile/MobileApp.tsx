@@ -8,6 +8,7 @@ import { useBox } from '../../box'
 import { agoLabel } from '@shared/dataFolder'
 import { SessionPanes } from '../TerminalTabs'
 import AuthBanner from '../AuthBanner'
+import UpdateBanner from '../UpdateBanner'
 import { Icon } from '../icons'
 import { APP_THEMES } from '../../appThemes'
 import MobileHosts from './MobileHosts'
@@ -85,6 +86,7 @@ export default function MobileApp(): ReactElement {
             </button>
           )}
         </header>
+        <UpdateBanner />
         <AuthBanner />
         <div className="m-scroll">
           {view === 'hosts' && <MobileHosts />}

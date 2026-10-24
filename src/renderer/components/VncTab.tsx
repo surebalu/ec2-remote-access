@@ -424,6 +424,13 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
     const timer = setInterval(read, 1500)
     return () => clearInterval(timer)
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  // One line in the app log per picture size: what was sent and how the displays matched it, for troubleshooting.
+  useEffect(() => {
+    if (!mobile || !picture || !displayInfo) return
+    const auto = displayInfo.auto?.map((f) => `${f.label ?? '?'} ${f.width}x${f.height}@${f.x},${f.y}`).join('; ') ?? 'none'
+    void window.api.invoke('vnc:note', tab.id, `picture ${picture.width}x${picture.height}; this machine's displays: ${auto}; saved: ${displayInfo.saved ? 'yes' : 'no'}; matched ${resolved.displays.length}${resolved.problem ? ` (${resolved.problem})` : ''}`).catch(() => undefined)
+  }, [picture?.width, picture?.height, displayInfo]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Showing one display: the picture is cut to it (the rest stays hidden), the view fits it, the pointer stays inside.
   useEffect(() => {
     if (!mobile) return
@@ -649,9 +656,11 @@ export default function VncTab({ tab, active, tiled = false }: { tab: Tab; activ
         { id: 'fit', label: 'Size to fit', run: () => scaleTo('fit') }
       ] },
       ...(displayInfo?.auto?.length === 1 ? [] : [{ id: 'displays', label: 'Displays', icon: <Icon.monitor />, children: [
-        { id: 'all', label: 'All displays', checked: shownDisplay === null, run: () => chooseDisplay(null) },
+        { id: 'all', label: picture ? `All displays · ${picture.width} × ${picture.height}` : 'All displays', checked: shownDisplay === null, run: () => chooseDisplay(null) },
         ...resolved.displays.map((x): MenuNode => ({ id: `d${x.id}`, label: `${x.name} · ${x.points.width} × ${x.points.height}`, checked: shownDisplay?.id === x.id, run: () => chooseDisplay(x.id) })),
-        { id: 'setup', label: resolved.displays.length ? 'Change the layout…' : 'Set up displays…', disabled: !picture, run: () => setDisplaySetup(true) }
+        ...(!resolved.displays.length && resolved.problem ? [{ id: 'why', label: resolved.problem, note: true }] : []),
+        // This Mac's own list (the app runs on it) needs no setup; a layout is only for computers it cannot see.
+        ...(displayInfo?.auto?.length ? [] : [{ id: 'setup', label: resolved.displays.length ? 'Change the layout…' : 'Set up displays…', disabled: !picture, run: () => setDisplaySetup(true) }])
       ] } as MenuNode]),
       { id: 'quality', label: 'Image quality', icon: <Icon.gauge />, children: choose((Object.keys(QUALITY) as Quality[]).map((q) => ({ value: q, label: QUALITY[q].label })), quality, changeQuality) },
       { id: 'sep2', label: '' },

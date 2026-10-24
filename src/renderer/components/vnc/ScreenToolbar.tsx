@@ -15,6 +15,8 @@ export interface MenuNode {
   checked?: boolean
   disabled?: boolean
   danger?: boolean
+  /** Text to read rather than a choice (why something is not offered). */
+  note?: boolean
   run?: () => void
   children?: MenuNode[]
 }
@@ -42,7 +44,7 @@ function Btn({ label, on, onPress, children, className = '' }: { label: string; 
 /** A floating menu; a node with children opens them in a card over the list, with its name as a header to go back. */
 export function FloatingMenu({ items, onClose, align = 'right' }: { items: MenuNode[]; onClose: () => void; align?: 'left' | 'right' }): ReactElement {
   const [open, setOpen] = useState<MenuNode | null>(null)
-  const item = (n: MenuNode, inner: boolean): ReactElement => (
+  const item = (n: MenuNode, inner: boolean): ReactElement => n.note ? <p key={n.id} className="vt-note">{n.label}</p> : (
     <button
       key={n.id}
       type="button"

@@ -4,12 +4,18 @@ import App from './App'
 import Launcher from './launcher/Launcher'
 import LinksPanel from './linksPanel/LinksPanel'
 import ToolWindow from './ToolWindow'
-import { toolWindowKind } from './store'
-import { createWsApi } from './wsApi'
+import { isSession, toolWindowKind, useStore } from './store'
+import { createWsApi, setSessionCheck } from './wsApi'
+import { watchChunkFailures } from './updates'
 import './styles.css'
 
-// Served by the gateway (no Electron preload): talk to it over WebSocket instead of ipcRenderer.
-if (!window.api) window.api = createWsApi()
+// Served by the gateway (no Electron preload): talk to it over WebSocket instead of ipcRenderer. Such a page can
+// outlive an update of the gateway; updates.ts reloads it (or offers to) when its build is behind.
+if (!window.api) {
+  setSessionCheck(() => useStore.getState().tabs.some(isSession))
+  window.api = createWsApi()
+  watchChunkFailures()
+}
 
 // The launcher's floating window (main/launcherWindow.ts) loads this same page with ?launcher.
 const launcher = new URLSearchParams(location.search).has('launcher')
