@@ -42,6 +42,8 @@ let failSsh = false
 let tailnetFixture = null
 let vncUrl = null
 let wsAllowed = null
+// Every window shares the default session, whose one request filter blocks the network, bar that one origin.
+const blockNetwork = (details, callback) => callback({ cancel: !(wsAllowed && details.url.startsWith(wsAllowed)) })
 const vncCreds = {}
 let failWorkspaceHealth = false
 let workspaceHealthAge = 0
@@ -808,7 +810,7 @@ app.whenReady().then(async () => {
   await new Promise((r) => webServer.listen(0, '127.0.0.1', r))
   webPort = webServer.address().port
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
-  win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, callback) => callback({ cancel: !(wsAllowed && details.url.startsWith(wsAllowed)) }))
+  win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, blockNetwork)
   win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
   // Names the script when it throws; Electron's own error says only that "a script" failed.
   const js = (code) => win.webContents.executeJavaScript(code).catch((e) => { throw new Error(`${e.message}\n  in: ${code.slice(0, 300)}`) })
@@ -2177,7 +2179,7 @@ app.whenReady().then(async () => {
 
     // Phone layout (what the gateway serves to an iPhone): host list, action sheet, terminal key bar, back to lists.
     const phone = new BrowserWindow({ show: false, width: 430, height: 932, webPreferences: { preload: join(__dirname, 'ui-preload.cjs'), contextIsolation: true, backgroundThrottling: false } })
-    phone.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }))
+    phone.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, blockNetwork)
     phone.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message) })
     const pjs = (code) => phone.webContents.executeJavaScript(code)
     const puntil = async (code) => {
