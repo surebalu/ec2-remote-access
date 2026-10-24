@@ -96,6 +96,14 @@ function commands(): Command[] {
     { id: 'ws-save', title: 'Save open tabs as a workspace…', keywords: 'workspace session layout', icon: Icon.grid, run: () => s.set({ workspaceSaveOpen: true }), when: s.tabs.length > 0 },
     { id: 'add-host', title: 'Add a server outside AWS…', keywords: 'manual host', icon: Icon.server, run: () => s.set({ manualHostEditor: 'new' }) },
     { id: 'add-account', title: 'Add AWS account…', keywords: 'sso profile', icon: Icon.cloud, run: () => s.set({ addAccountOpen: true }) },
+    {
+      id: 'box-sync', title: 'Sync with Box now', keywords: 'box cloud sync upload tasks links calendar whiteboards', icon: Icon.cloud,
+      run: () => void window.api.invoke('box:sync').then((b) => {
+        if (!b.available) s.toast('info', 'This build has no Box app (Settings → Data).')
+        else if (!b.signedIn) s.openSettings('data')
+        else s.toast(b.lastError ? 'error' : 'success', b.lastError ? `Box: ${b.lastError}` : b.syncing ? 'Syncing with Box…' : 'In step with Box')
+      }, (e: Error) => s.toast('error', e.message))
+    },
     { id: 'shortcuts', title: 'Keyboard shortcuts', hint: '⌘/', icon: Icon.keyboard, run: () => s.set({ shortcutsOpen: true }) },
     { id: 'radial', title: 'Open the radial menu', keywords: 'wheel circle ring pie switch sections', hint: keyOf('radial'), icon: Icon.radial, run: () => openRadial(), when: !isMobile() },
     { id: 'launcher', title: 'Open the launcher', keywords: 'raycast spotlight alfred search apps files anywhere', hint: s.settings?.launcherKey ? formatCombo(s.settings.launcherKey) : undefined, icon: Icon.launcher, run: () => void window.api.invoke('launcher:show'), when: hasBrowser() },

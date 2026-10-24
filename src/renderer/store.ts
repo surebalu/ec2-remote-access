@@ -267,6 +267,8 @@ interface State {
   connectFor: { kind: 'ssh' | 'rdp' | 'sftp'; key: string; beside?: Beside } | null
   passwordFor: string | null
   settingsOpen: boolean
+  /** Opens Settings on a section ('data', 'about'…), as the app:command does. */
+  openSettings: (section?: string) => void
   /** null = closed; 'new' = add; otherwise the ManualHost id being edited */
   manualHostEditor: string | null
   /** preselected folder when adding a server from a folder's "+" */
@@ -731,6 +733,12 @@ export const useStore = create<State>((set, get) => ({
   connectFor: null,
   passwordFor: null,
   settingsOpen: false,
+  openSettings: (section) => {
+    // The dialog opens on the section it last showed (SettingsDialog reads this as it mounts).
+    try { if (section) localStorage.setItem('ui.settingsSection', section) } catch { /* storage off */ }
+    set({ settingsOpen: false })
+    setTimeout(() => set({ settingsOpen: true }), 0)
+  },
   manualHostEditor: null,
   manualHostFolder: null,
   folderEditor: null,
