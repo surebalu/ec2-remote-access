@@ -1405,7 +1405,7 @@ app.whenReady().then(async () => {
     const keyUp = () => js(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true, cancelable: true }))`)
     await js(`document.dispatchEvent(new PointerEvent('pointermove', { clientX: 760, clientY: 470, bubbles: true }))`)
     await radialKey()
-    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 20`)
+    await until(`!!document.querySelector('.radial') && document.querySelectorAll('.radial-item').length === 21`)
     assert.ok(await js(`document.querySelector('.radial-item.here').dataset.radial === 'hosts' && document.querySelector('.radial-center strong').textContent === 'Hosts'`), 'it starts on the section in front')
     assert.equal(await js(`document.activeElement === document.querySelector('.radial')`), true, 'the ring takes the keyboard')
     await new Promise((r) => setTimeout(r, 400))
@@ -1415,12 +1415,15 @@ app.whenReady().then(async () => {
     await js(`document.documentElement.setAttribute('data-theme', 'dark')`)
     await radialKey()
     await radialKey()
-    // Overview is skipped while no session is open; two steps from Hosts land on Health.
-    assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'local')
+    // Overview is skipped while no session is open; two steps from Hosts pass Computers and land on Health.
+    assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'health')
     await radialKey()
-    await js(`(() => { const e = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true, metaKey: true, shiftKey: true }); document.activeElement.dispatchEvent(e) })()`)
+    const arrow = (k) => js(`(() => { const e = new KeyboardEvent('keydown', { key: '${k}', bubbles: true, cancelable: true, metaKey: true, shiftKey: true }); document.activeElement.dispatchEvent(e) })()`)
     assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'local')
-    await js(`(() => { const e = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true, metaKey: true, shiftKey: true }); document.activeElement.dispatchEvent(e) })()`)
+    await arrow('ArrowLeft')
+    await arrow('ArrowLeft')
+    assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'computers')
+    await arrow('ArrowRight')
     assert.equal(await js(`document.querySelector('.radial-item.on').dataset.radial`), 'health')
     await keyUp()
     await until(`!document.querySelector('.radial') && !!document.querySelector('.hl')`)
@@ -2447,7 +2450,7 @@ app.whenReady().then(async () => {
     ssoScenario = true
     phone.setContentSize(430, 932)
     await phone.loadFile(resolve('out/renderer/index.html'), { query: { layout: 'mobile' } })
-    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 4`)
+    await puntil(`!!document.querySelector('.m-app') && document.querySelectorAll('.m-tabbar button').length === 5`)
     await puntil(`document.body.textContent.includes('corp-prod')`) // profiles loaded and checked: the sign-in banner names the account
     await ptap('More')
     await ptap('Sign in to AWS')
